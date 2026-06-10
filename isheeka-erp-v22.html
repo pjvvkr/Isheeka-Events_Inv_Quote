@@ -1825,7 +1825,7 @@ const MAX_PRICE = 9999999; // 99,99,999 — ~1 crore per item
 const sanitizeNum = (val, max) => {
   const n = parseFloat(String(val).replace(/[^0-9.]/g,''));
   if(isNaN(n)||n<0) return 0;
-  if(n>max){ alert('Value '+n.toLocaleString('en-IN')+' seems too high — please check. Maximum allowed is '+max.toLocaleString('en-IN')+'.'); return max; }
+  if(n>max){ setTimeout(()=>alert('Value '+n.toLocaleString('en-IN')+' seems too high — please check. Maximum allowed is '+max.toLocaleString('en-IN')+'.'),0); return max; }
   return n;
 };
 const FastItemQty = React.forwardRef(({value, onChange, onTab, onPaste}, ref) => {
