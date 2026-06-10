@@ -1691,7 +1691,6 @@ function ClientsModule() {
   return (
     <div>
       {saveSuccess&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:16,border:'1px solid rgba(15,110,86,0.2)'}}>✅ {saveSuccess}</div>}
-      {showRefModal&&<LeadReferenceModal onSelect={handleSelectReference} onCancel={()=>setShowRefModal(false)}/>}
 
       {/* Metrics */}
       <div className="metrics-grid" style={{marginBottom:20}}>
@@ -3834,7 +3833,6 @@ function EventsModule({initialEventId, onConsumed}) {
   return (
     <div>
       {saveSuccess&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:16,border:'1px solid rgba(15,110,86,0.2)'}}>✅ {saveSuccess}</div>}
-      {showRefModal&&<LeadReferenceModal onSelect={handleSelectReference} onCancel={()=>setShowRefModal(false)}/>}
 
       {/* Metrics */}
       <div className="metrics-grid" style={{marginBottom:20}}>
