@@ -5140,8 +5140,10 @@ function buildQuotationPDF(quot, lineItems, opts={}){
 
   // ── Simple border (all pages) ──────────────────────────────────────────────
   const drawSimpleBorder=()=>{
-    doc.setDrawColor(PINK[0],PINK[1],PINK[2]); doc.setLineWidth(2);
-    doc.rect(8,8,W-16,H-16,'S');
+    doc.setDrawColor(232,24,90);
+    doc.setLineWidth(2.5);
+    doc.rect(10,10,W-20,H-20,'S');
+    doc.setLineWidth(0.5);
   };
 
   // ── Pink divider line ──────────────────────────────────────────────────────
@@ -5154,19 +5156,19 @@ function buildQuotationPDF(quot, lineItems, opts={}){
 
   // ── Page header (pages 2+) ─────────────────────────────────────────────────
   const drawPageHeader=(ref,date,valid)=>{
-    try{ doc.addImage(LOGO,'PNG',M,10,60,42); }catch(e){}
+    try{ doc.addImage(LOGO,'PNG',M,8,72,50); }catch(e){}
     doc.setFillColor(248,240,244);
-    doc.roundedRect(W-M-130,10,130,20,3,3,'F');
+    doc.roundedRect(W-M-135,10,135,22,3,3,'F');
     doc.setDrawColor(SPINK[0],SPINK[1],SPINK[2]); doc.setLineWidth(0.5);
-    doc.roundedRect(W-M-130,10,130,20,3,3,'S');
+    doc.roundedRect(W-M-135,10,135,22,3,3,'S');
     doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
-    doc.text('QUOTATION',W-M-65,22,{align:'center'});
+    doc.text('QUOTATION',W-M-67,22,{align:'center'});
     doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
-    doc.text('Ref: '+(ref||''),W-M,40,{align:'right'});
+    doc.text('Ref: '+(ref||''),W-M,42,{align:'right'});
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
-    doc.text('Date: '+fmt(date),W-M,50,{align:'right'});
-    doc.text('Valid until: '+fmt(valid),W-M,59,{align:'right'});
-    drawDivider(67);
+    doc.text('Date: '+fmt(date),W-M,51,{align:'right'});
+    doc.text('Valid until: '+fmt(valid),W-M,60,{align:'right'});
+    drawDivider(68);
   };
 
   // ── Footer — two line format matching approved mockup ──────────────────────
@@ -5202,14 +5204,14 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
     doc.text(pill,W/2,y+14,{align:'center'}); y+=36;
 
-    // PREPARED FOR — with proper gap before name
-    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
-    doc.setCharSpace(2.5); doc.text('PREPARED FOR',W/2,y,{align:'center'}); doc.setCharSpace(0);
-    y+=18; // clear gap
+    // PREPARED FOR label — on its own line, clear gap before name
+    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.setCharSpace(3); doc.text('PREPARED FOR',W/2,y,{align:'center'}); doc.setCharSpace(0);
+    y+=22; // substantial gap before client name
 
-    // Client name
-    doc.setFont('helvetica','bold'); doc.setFontSize(26); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
-    doc.text(quot.client_name||'',W/2,y,{align:'center'}); y+=22;
+    // Client name — large, bold, dark
+    doc.setFont('helvetica','bold'); doc.setFontSize(28); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+    doc.text(quot.client_name||'',W/2,y,{align:'center'}); y+=26;
 
     // Event type — times italic (closest to EB Garamond)
     if(quot.event_name){
@@ -5232,8 +5234,8 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     const iLines=doc.splitTextToSize(intro,W-2*M-20);
     doc.text(iLines,W/2,y,{align:'center'}); y+=iLines.length*14+20;
 
-    // Sign-off — pushed toward bottom with minimum spacing
-    const signY=Math.max(y+10, H*0.78);
+    // Sign-off — reasonable gap after intro, not pushed to page bottom
+    const signY=y+24;
     doc.setFont('times','bolditalic'); doc.setFontSize(11); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
     doc.text('\u2014 Swathi N, Founder & CEO',W-M,signY,{align:'right'});
 
@@ -5755,7 +5757,8 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
     const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();
-    buildQuotationPDF(createdQuot,pdfItems,{action,displayOpts,settings:s||{}});
+    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||''};
+    buildQuotationPDF(enrichedQuot,pdfItems,{action,displayOpts,settings:s||{}});
   };
 
   const steps=['Client','Line items','Quote details','Share'];
