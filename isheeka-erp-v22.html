@@ -3205,7 +3205,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
 
       // 3. Create the event from lead + approved quotation
       const {data:event,error:ee} = await supabase.from('events').insert({
-        name:(approvedQuot&&approvedQuot.event_name)||(lead.first_name+' '+lead.last_name+' '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event')),
+        name:(approvedQuot&&approvedQuot.event_name)||(lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event'),
         type:lead.event_type||null,status:'planning',
         main_date:lead.tentative_date||null,
         location:lead.location||null,
@@ -5140,47 +5140,47 @@ function buildQuotationPDF(quot, lineItems, opts={}){
 
   // ── Simple border (all pages) ──────────────────────────────────────────────
   const drawSimpleBorder=()=>{
+    doc.saveGraphicsState();
     doc.setDrawColor(232,24,90);
     doc.setLineWidth(2.5);
     doc.rect(10,10,W-20,H-20,'S');
-    doc.setLineWidth(0.5);
+    doc.restoreGraphicsState();
   };
 
   // ── Pink divider line ──────────────────────────────────────────────────────
   const drawDivider=(y)=>{
-    doc.setDrawColor(SPINK[0],SPINK[1],SPINK[2]); doc.setLineWidth(0.8);
+    doc.setDrawColor(244,114,182); doc.setLineWidth(0.8);
     doc.line(M,y,W-M,y);
-    doc.setDrawColor(PINK[0],PINK[1],PINK[2]); doc.setLineWidth(1.8);
+    doc.setDrawColor(232,24,90); doc.setLineWidth(1.8);
     doc.line(W/2-60,y,W/2+60,y);
   };
 
-  // ── Page header (pages 2+) ─────────────────────────────────────────────────
-  const drawPageHeader=(ref,date,valid)=>{
-    try{ doc.addImage(LOGO,'PNG',M,8,72,50); }catch(e){}
-    doc.setFillColor(248,240,244);
-    doc.roundedRect(W-M-135,10,135,22,3,3,'F');
-    doc.setDrawColor(SPINK[0],SPINK[1],SPINK[2]); doc.setLineWidth(0.5);
-    doc.roundedRect(W-M-135,10,135,22,3,3,'S');
-    doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
-    doc.text('QUOTATION',W-M-67,22,{align:'center'});
-    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
-    doc.text('Ref: '+(ref||''),W-M,42,{align:'right'});
-    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
-    doc.text('Date: '+fmt(date),W-M,51,{align:'right'});
-    doc.text('Valid until: '+fmt(valid),W-M,60,{align:'right'});
-    drawDivider(68);
+  // ── Page numbers ───────────────────────────────────────────────────────────
+  const addPageNumbers=()=>{
+    const total=doc.internal.getNumberOfPages();
+    for(let i=1;i<=total;i++){
+      doc.setPage(i);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+      doc.text('Page '+i+' of '+total, W-M, H-14, {align:'right'});
+    }
   };
 
-  // ── Footer — two line format matching approved mockup ──────────────────────
+  // ── Page header (pages 2+) ─────────────────────────────────────────────────
+  const drawPageHeader=(ref,date,valid,docType)=>{
+    const headerTop = 22;
+    const label = docType==='invoice' ? 'Invoice' : 'Quotation';
+    try{ doc.addImage(LOGO,'PNG',M,headerTop,80,55); }catch(e){}
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+    doc.text(label+': '+(ref||''),W-M,headerTop+14,{align:'right'});
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.text('Date: '+fmt(date),W-M,headerTop+25,{align:'right'});
+    doc.text('Valid until: '+fmt(valid),W-M,headerTop+35,{align:'right'});
+    drawDivider(headerTop+48);
+  };
+
+  // ── Footer — divider line only, page number added separately ─────────────
   const drawFooter=(contd)=>{
-    drawDivider(H-34);
-    // Line 1: ISHEEKA EVENTS bold
-    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
-    doc.text('ISHEEKA EVENTS',M,H-22);
-    // Line 2: tagline + phone in italic
-    doc.setFont('times','italic'); doc.setFontSize(9); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
-    doc.text('Making Every Event Memorable  +91 78423 95867',M,H-11);
-    if(contd){ doc.setFont('times','italic'); doc.setFontSize(8.5); doc.text('Contd...',W-M,H-16,{align:'right'}); }
+    drawDivider(H-26);
   };
 
   // ══════════════════════════════════════════════════════════════════
@@ -5193,51 +5193,47 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     const lh=170, lw=240;
     try{ doc.addImage(LOGO,'PNG',(W-lw)/2, 50, lw, lh); }catch(e){}
 
-    let y=240;
-    drawDivider(y); y+=24;
+    let y=260;
+    drawDivider(y); y+=28;
 
-    // Quotation pill
+    // Quotation pill — 4-5 lines space after
     const pill='QUOTATION  \u00b7  '+(quot.ref_number||'');
     const pillW=200;
     doc.setDrawColor(PINK[0],PINK[1],PINK[2]); doc.setLineWidth(1.3);
     doc.roundedRect((W-pillW)/2,y,pillW,22,11,11,'S');
     doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
-    doc.text(pill,W/2,y+14,{align:'center'}); y+=36;
+    doc.text(pill,W/2,y+14,{align:'center'}); y+=22+55; // 4-5 lines gap
 
-    // PREPARED FOR label — on its own line, clear gap before name
+    // PREPARED FOR label
     doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
-    doc.setCharSpace(3); doc.text('PREPARED FOR',W/2,y,{align:'center'}); doc.setCharSpace(0);
-    y+=22; // substantial gap before client name
+    doc.setCharSpace(3);
+    doc.text('PREPARED FOR',W/2,y,{align:'center'});
+    doc.setCharSpace(0);
+    y+=28; // 2 lines space after PREPARED FOR
 
-    // Client name — large, bold, dark
+    // Event name — "Jignesh Soni's Birthday" format (no separate client name line)
     doc.setFont('helvetica','bold'); doc.setFontSize(28); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
-    doc.text(quot.client_name||'',W/2,y,{align:'center'}); y+=26;
-
-    // Event type — times italic (closest to EB Garamond)
-    if(quot.event_name){
-      doc.setFont('times','italic'); doc.setFontSize(14); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
-      doc.text(quot.event_name,W/2,y,{align:'center'}); y+=18;
-    }
+    doc.text(quot.event_name||'',W/2,y,{align:'center'}); y+=34;
 
     // Date
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
-    doc.text(fmt(quot.doc_date),W/2,y,{align:'center'}); y+=20;
+    doc.text(fmt(quot.doc_date),W/2,y,{align:'center'}); y+=22;
 
     // Three dots
     doc.setFillColor(PINK[0],PINK[1],PINK[2]);
-    doc.circle(W/2-14,y,3,'F'); doc.circle(W/2,y,2,'F'); doc.circle(W/2+14,y,3,'F'); y+=18;
+    doc.circle(W/2-14,y,3,'F'); doc.circle(W/2,y,2,'F'); doc.circle(W/2+14,y,3,'F');
+    y+=32; // 2-3 lines space after dots
 
-    // Intro paragraph — times italic, pink — use ONLY the hardcoded default, ignore Settings old text
+    // Intro paragraph
     const defaultIntro='Every great event is a unique story waiting to be told through beautiful design and flawless execution. We bring a fresh, creative mindset to ensure your gathering is not just any other event, but a grand success filled with moments your guests will talk about for years. Let us transform your vision into a vibrant, stress-free reality where you can simply enjoy being the host.';
-    const intro=(settings.cover_intro&&settings.cover_intro.length>20&&!settings.cover_intro.includes("pleasure"))?settings.cover_intro:defaultIntro;
+    const intro=(settings.cover_intro&&settings.cover_intro.length>20&&!settings.cover_intro.includes('pleasure'))?settings.cover_intro:defaultIntro;
     doc.setFont('times','italic'); doc.setFontSize(11); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
     const iLines=doc.splitTextToSize(intro,W-2*M-20);
-    doc.text(iLines,W/2,y,{align:'center'}); y+=iLines.length*14+20;
+    doc.text(iLines,W/2,y,{align:'center'}); y+=iLines.length*14+24;
 
-    // Sign-off — reasonable gap after intro, not pushed to page bottom
-    const signY=y+24;
+    // Sign-off
     doc.setFont('times','bolditalic'); doc.setFontSize(11); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
-    doc.text('\u2014 Swathi N, Founder & CEO',W-M,signY,{align:'right'});
+    doc.text('\u2014 Swathi N, Founder & CEO',W-M,y,{align:'right'});
 
     drawFooter(true);
     doc.addPage();
@@ -5247,8 +5243,8 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   // PAGE 2 — QUOTATION
   // ══════════════════════════════════════════════════════════════════
   drawSimpleBorder();
-  drawPageHeader(quot.ref_number,quot.doc_date,quot.valid_until);
-  let y=78;
+  drawPageHeader(quot.ref_number,quot.doc_date,quot.valid_until,'quotation');
+  let y=88; // gap after header divider (headerTop 22 + logo height 55 + small gap)
 
   // Event name
   doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
@@ -5350,9 +5346,9 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   const sigY=Math.max(y+30,H*0.72);
   doc.setFont('times','bolditalic'); doc.setFontSize(30); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
   doc.text('Swathi',W-M-80,sigY,{align:'center'});
-  doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+  doc.setFont('times','bolditalic'); doc.setFontSize(10); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
   doc.text('Swathi N',W-M-80,sigY+16,{align:'center'});
-  doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+  doc.setFont('times','italic'); doc.setFontSize(8.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
   doc.text('Founder & CEO',W-M-80,sigY+28,{align:'center'});
   y=sigY+48;
 
@@ -5369,7 +5365,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     drawFooter(false);
     doc.addPage();
     drawSimpleBorder();
-    drawPageHeader(quot.ref_number,quot.doc_date,quot.valid_until);
+    drawPageHeader(quot.ref_number,quot.doc_date,quot.valid_until,'quotation');
     y=78;
   } else {
     drawDivider(y+6); y+=22;
@@ -5406,6 +5402,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   }
 
   drawFooter(false);
+  addPageNumbers();
   const fname='Quotation_'+String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf';
   if(opts.action==='print'){ try{doc.autoPrint();}catch(e){} window.open(doc.output('bloburl'),'_blank'); }
   else{ doc.save(fname); }
@@ -5691,7 +5688,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
         ref_number:refNum,status:'draft',
         client_id:clientId,client_name:clientName,
         lead_id:lead.lead_id,
-        event_name:lead.first_name+' '+lead.last_name+' '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event'),
+        event_name:(lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event'),
         doc_date:quotDetails.doc_date,valid_until:quotDetails.valid_until,
         subtotal,discount_pct:parseFloat(quotDetails.discount_pct)||0,
         discount_amount:discountAmt,grand_total:grandTotal,
