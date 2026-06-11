@@ -1670,7 +1670,23 @@ function ClientsModule() {
 
   const handleSaveNew = async (form) => {
     const ref_number = await getNextClientRef();
-    const {data,error} = await supabase.from('clients').insert({...form,ref_number,client_since:new Date().toISOString().split('T')[0],created_at:new Date().toISOString(),updated_at:new Date().toISOString()}).select().single();
+    const payload = {
+      ...form,
+      ref_number,
+      // Strip empty strings on constrained optional fields so they go in as null
+      preferred_contact: form.preferred_contact||null,
+      source: form.source||null,
+      phone_2: form.phone_2||null,
+      phone_3: form.phone_3||null,
+      email_2: form.email_2||null,
+      email_3: form.email_3||null,
+      gst_number: form.gst_number||null,
+      notes: form.notes||null,
+      client_since: new Date().toISOString().split('T')[0],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    const {data,error} = await supabase.from('clients').insert(payload).select().single();
     if(error) throw error;
     setView('list');
     setSaveSuccess(`Client ${form.first_name} ${form.last_name} added successfully!`);
