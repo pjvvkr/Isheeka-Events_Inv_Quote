@@ -856,18 +856,28 @@ function SettingsModule() {
             <div className="form-grid one">
               <SettingsField
                 field="default_terms"
-                label="Terms & conditions"
+                label="Default additional terms & conditions"
                 required
                 type="textarea"
-                rows={8}
-                placeholder="Enter your payment terms and conditions..."
+                rows={5}
+                placeholder="e.g. Any item/service not listed above is not in scope of services."
+                form={form} errors={errors} handleChange={handleChange}
+              />
+            </div>
+            <div className="form-grid one">
+              <SettingsField
+                field="cover_intro"
+                label="Cover page intro paragraph (shown on PDF cover)"
+                type="textarea"
+                rows={5}
+                placeholder="Enter the intro paragraph shown on the PDF cover page..."
                 form={form} errors={errors} handleChange={handleChange}
               />
             </div>
             <hr className="divider"/>
             <div style={{fontSize:13,fontWeight:500,color:'var(--grey-600)',marginBottom:12}}>Preview</div>
             <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'14px 16px',border:'1px solid var(--grey-100)'}}>
-              <div style={{fontSize:11,fontWeight:700,color:'var(--pink)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}}>Payment, General Terms & Conditions</div>
+              <div style={{fontSize:11,fontWeight:700,color:'var(--pink)',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:8}}>Additional Terms & Conditions</div>
               <div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-line',lineHeight:1.8}}>{form.default_terms||'No terms set yet.'}</div>
             </div>
           </>
@@ -1682,6 +1692,10 @@ function ClientsModule() {
       email_3: form.email_3||null,
       gst_number: form.gst_number||null,
       notes: form.notes||null,
+      // FK fields — must be null if not set (empty string fails FK constraint)
+      created_by: form.created_by||null,
+      updated_by: form.updated_by||null,
+      lead_id: form.lead_id||null,
       client_since: new Date().toISOString().split('T')[0],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -2967,7 +2981,7 @@ function QuotationDetailModal({quotationId, onClose}) {
                 ))}
               </div>
               <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                {[['prices','Prices'],['qty','Qty'],['schedule','Schedule'],['discount','Discount']].map(([k,l])=>(
+                {[['prices','Prices'],['qty','Qty'],['schedule','Schedule'],['discount','Discount'],['coverPage','Cover page'],['bankDetails','Bank details']].map(([k,l])=>(
                   <label key={k} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,color:'var(--grey-700)',cursor:'pointer'}}>
                     <input type="checkbox" checked={!!modalDisplayOpts[k]} onChange={e=>setMDO(k,e.target.checked)} style={{accentColor:'var(--pink)'}}/>{l}
                   </label>
@@ -2975,8 +2989,8 @@ function QuotationDetailModal({quotationId, onClose}) {
               </div>
             </div>
             <div style={{padding:'12px 24px',display:'flex',justifyContent:'flex-end',gap:8}}>
-              <button className="btn" onClick={()=>buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts})}>Print</button>
-              <button className="btn primary" onClick={()=>buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts})}>{'\u2B07'} Download PDF</button>
+              <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
+              <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
             </div>
           </div>
         )}
@@ -5057,23 +5071,26 @@ async function getNextLeadRef() {
   const {data} = await supabase.from('counters').select('*').eq('type','lead').eq('year',year).single();
   if(data){
     const next = (parseInt(data.current_value)||1110) + 1;
-    await supabase.from('counters').update({current_value:next.toString(),updated_at:new Date().toISOString()}).eq('counter_id',data.counter_id);
+    await supabase.from('counters').update({current_value:next,updated_at:new Date().toISOString()}).eq('counter_id',data.counter_id);
     return 'L-'+year+'-'+next;
   }
-  await supabase.from('counters').insert({type:'lead',year:year,current_value:'1111'});
+  await supabase.from('counters').insert({type:'lead',year:year,current_value:1111});
   return 'L-'+year+'-1111';
 }
 
 async function getNextClientRef() {
-  // CL-XXXXXX: year-independent, 6-digit counter starting at 111111
-  const {data} = await supabase.from('counters').select('*').eq('type','client').eq('year',0).single();
-  if(data){
-    const next = (parseInt(data.current_value)||111110) + 1;
-    await supabase.from('counters').update({current_value:next.toString(),updated_at:new Date().toISOString()}).eq('counter_id',data.counter_id);
-    return 'CL-'+next.toString().padStart(6,'0');
+  const {data:existing} = await supabase.from('counters').select('*').eq('type','client').eq('year','0').single();
+  if(!existing){
+    const {data:inserted} = await supabase.from('counters').insert({type:'client',year:'0',current_value:111110,updated_at:new Date().toISOString()}).select().single();
+    if(inserted){
+      await supabase.from('counters').update({current_value:111111,updated_at:new Date().toISOString()}).eq('counter_id',inserted.counter_id);
+      return 'CL-111111';
+    }
+    return 'CL-111111';
   }
-  await supabase.from('counters').insert({type:'client',year:0,current_value:'111111'});
-  return 'CL-111111';
+  const next = (parseInt(existing.current_value)||111110) + 1;
+  await supabase.from('counters').update({current_value:next,updated_at:new Date().toISOString()}).eq('counter_id',existing.counter_id);
+  return 'CL-'+next.toString().padStart(6,'0');
 }
 
 // ── Share helpers ─────────────────────────────────────────────────────────────
@@ -5111,105 +5128,205 @@ function openEmail(provider, to, subject, body){
 // Item 12: branded quotation PDF (action: 'download' | 'print')
 function buildQuotationPDF(quot, lineItems, opts={}){
   const jsPDFctor = window.jspdf && window.jspdf.jsPDF;
-  if(!jsPDFctor){ alert('PDF library not loaded yet. Please check your connection and refresh.'); return false; }
+  if(!jsPDFctor){ alert('PDF library not loaded yet. Please refresh.'); return false; }
   const doc = new jsPDFctor({unit:'pt', format:'a4'});
-  const dOpts = opts.displayOpts || {prices:true,qty:true,grouping:true,schedule:true,discount:true};
-  const PINK=[232,24,90], DARK=[42,26,34], GREY=[120,120,120];
-  const pageW=doc.internal.pageSize.getWidth();
-  const pageH=doc.internal.pageSize.getHeight();
-  const M=40;
-  const fmt=(d)=> d? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '\u2014';
+  const dOpts = Object.assign({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:false}, opts.displayOpts||{});
+  const settings = opts.settings || {};
+  const PINK=[232,24,90], DARK=[40,40,40], GREY=[130,130,130], LGREY=[220,220,220];
+  const pageW=doc.internal.pageSize.getWidth(), pageH=doc.internal.pageSize.getHeight(), M=50;
+  const fmt=(d)=>d?new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
+  const fmtM=(n)=>'₹'+parseFloat(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const CLOGO='/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAB1AKoDASIAAhEBAxEB/8QAHAABAAIDAQEBAAAAAAAAAAAAAAQGAQMFBwII/8QAPxAAAQQBAgMDCQUGBQUAAAAAAQACAwQFERIGITETQVEHFCI1YXSBkbIVFlVx0TJSc5OhwSM2QoKxJTNDkqL/xAAcAQEBAQACAwEAAAAAAAAAAAAAAQIFBgMEBwj/xAA0EQABAwIEBAQEBAcAAAAAAAABAAIRAwQFEiExBhMyQRQigZEVUWFxByNSchYzQpPR4eL/2gAMAwEAAhEDEQA/APx7liTlLf8AHf8AUVG1UnLetbf8d/1FRllvSFXblERFpRERERERNERETRZ0URYRNE0VREWdE0RFhFnRNFJRYRZ0RJRYWUREREREUvMAfa9z+O/6ioil5j1vc94f9RURZb0hV25RERVRERERERWPyd42nlOIRDdYJIo4nSBhPJxBAAPs56/BF7mHWNS/uqdtTjM8gCdlXEXucnD+DfGWHD0ACNPRgaD8wNV45xHThoZy5Trv3RRSFrSTroPD4KAyux8ScH3OA02ValQOa4xpOh37rnoiKrqCIiIiIiIiIiIiIiIiIiIil5n1vd94k+oqIpeZ9cXfeJPqKiLLOkKu3KIiLSiIiIiLt8GY69kcxsx1wVLEMZlbIde4gacvzXEVx8kn+ZZvdHfUxDsub4btWXeK0KNSYLhsYPoRsuhxNf44xlQizJEYCNDZrsGo/M93yVWxXD2ay/8AjVqkjmOOplkO1p9up6/Be1yxsljdHI0PY4EOaRqCFwuEN9aXJYglzoqVjSDcdSI3DcG/BZlfWcV4LZdYjRF1cVH0nSACZIcBMSexAPadFT4fJzlXMBlu1Iz4Dcf7L5seTrLMZrDbqSnw1LT/AML0O7l8XTfstZCtC/8AddIAfkvujk8deOlO9XnPgyQE/JSSva/gbhpzuSD5/wB+vt/peL5bBZbFc7tKSNn749Jp+I5Lmr9ByMZIwskY17HDQtcNQQvO+O+DY68L8piI9rG85oB0A/eb+iocuncSfh3VsKTrmxcXsGpB6gPmI39gfuqAiItL5kiIiIiIiIiIiIpma9cXfeJPqKhqZmvXN33iT6ioayzpCrt0REWlEREREVx8kn+ZZvdHfUxU5XDyTHTiaUeNV4/+mqHZdj4RMY3bfuC9VVOtUMrkMvm6+OyMdJrpIhI7aS8jsxyBHQK4qsuvQ4Tii+7JSCGteYySGZw9Hc0bXNPt6FYC+/cQUqNRtEXBLaefzGS2AWPGpBEAkgesKunyb3CdXZWEk9f8M/qsx+Tm9G8Pjy8THtOoc2NwI/qrd96eHvxav8yn3p4e/Fq/zKsldZHDHCIM52/3f+lKwNfI1aIgyVtluRp0bKGkEj2+J9qnkAggjUHqFxvvTw9+LV/mU+9PD34tX+ZUXbqGJ4ZQpNpNuGkDTV4J9STJ9V5XxhjRis/YrMGkRO+MeDSToFx1YvKFka2T4hM9SRskTImxh46HQk/3VdXkC/NeOU6FPEa7bcywOMRtE9kRERcUiIiIiIiIpma9c3feJPqKhqZm/XN73iT6ioayzpCp3RERaURERERSsVfs4y9HdqSbJYzy8CO8H2KKiLyUqr6LxUpmHDUEbgr3PhzM1M3j22qzgHAaSx6843eB/VSMpj6eTqOq3YGyxO7j1B8Qe4rw/F5C5jLTbNKd0Mg7x0I8CO8K+Yfyiwua2PK1HMf0MkPMH4Hp/VYLV9wwPj+wv7fw+KQ10QSRLXf4nuDp9UveTeF0hdSyT42E/syx7tPiCFsxvk5qRyB9+9JO0f6I27AfzPMqw1+KuH52BwyldnskdtP9V8W+LOH67C45KKT2RHcf6JJXujAuEGO8R+XG/Xp7Zo9Fx+KeBalqDtsOxlawxunZa+hJp/wfavM7deepYfXsxPilYdHMcNCFfM15RSWujxFQtJ5drP1H5NH9yqLdtWLtl9m3M+aZ51c9x1JWhK+bca1sCrVw/DOv+qBDPT6/YR6rQiIqujoiIiIiIiIiIiKZm/XV73iT6ioamZz11e95k+orXNSuQxmSapYjYOrnRkD5rLOkLyCm90lokDdR0UjzG72LZvM7HZuaXB/ZnaQBqTr4ac08yudj23mk/Zbd2/szt08dfBaWvD1f0n2KjopJx98NDjSsgEgAmJ3PXp3L6+zcj+H2/wCS79ElXwtf9B9ioiKTHRvSt3R07DwCRq2IkajqOiOo3WyMjdTsNe/Xa0xHV2nXTlzRTw9aJyGPsVGRSvs+/v2eY2d2munZO108ei0SxyRSGOVjo3jq1w0I+CLL6NRglzSPRfCL7kjkj29oxzNzQ5u4aag9CPYswQzTv2QRSSv012saSdPgiyGOLsoGq1opT8ffYxz30bLWtGpJicAB49F8vp3GQ9s+pO2LQHeYyG6Hv1ReQ29YbsPsVHRSGUrr42yMqWHMd+y4Rkg/kV9/ZuR/D7f8l36JKotqx1DD7FREW6SrajhE0laZkZ6PcwhvzWW1LToO3bWmdCAT2gjO3QdefRFjk1JjKZ327fNaEUv7NyP4fb/ku/Ra21LbrPmza0xnH/jEZ3fLqi0bas2JYdfoVoRbZ69iuQJ4JYtddN7C3XTr1WpF43Ncww4QVMznrq97zJ9RVn4jt2HcMcMtkfLYZLvdLGXEmXa5ugPj1KrOd9d3/eZPqK6tziOCxToVm4pkYoPDoHCYkjmCRzHfosN6Quewi6pUKF1TqVMpe0AaEzD2uOwI2BGvzjaVbLjp8pFfvYTIyWGy1nw2MZM4tMWrC30R3EHu058+fNcbEyOseTeeOzkzVjbe7MSP3uAZsb6GjQTpzPLooL+KoWWbV6lhoquQstc107ZnEN3dSG9Nfb4qK3OwN4bdhBi2bHHtDJ2x1Mmmm7T+ysFdoucesqlZ1TmgksqAj8zKS6IgQHNndwByg9J1K7HE1iaHgnCiDJyWQZZNZ2l7d+jjp+1oeXTn4Lu52T/rmO3cRT0neaNk81aXgSkbjqT+zz00OvXT8lTbefqWcRVxjsOwQ1Xbo9J3a8zq758/mt+R4mo5C1DZuYCGaSFjY2a2H6bQSQCByPUpBW24/ZtLyKzdW0QAeaAMgh2oGbfaZnvK6fBFyaxiOJJZbr6gIbIJG7tIS4vJLQOY+CjZC3NHPgYYszLkWum7XzhznbgS/aWjXmBoOh9vcdFEq8VNjZkRPi45zkXazkzObq3ntaNOgAOij/b1RjK0NfDRQwQziw9gmcTI8Ahurjz5apC9Q4va+CpUBXEtBBMVJ/m5xp0xETuR2J0Bu3F/nmM8/wAxjXSWbL9sT3btRTZsaTo3xPXXu1Xn2Fp2M5nYK8kskj5n6yyPcSQ0ftEk+wLsx8ZyR5ybKR49rXWI9k0XbEseRoASNO4DT4qNDxDj4H2318BDC61GY37J3DRp6hvh8EEhaxq/wvE7xtbnxTDiSwh8HWZBy7v2M6t7EtAC7flEoec4atloqhrms413s5co9SGH/j/2VV4Ulli4lxpikezdaia7a4jVpeNQfYpGAzzMZjLlCSgy3Fb5SB8paNNNOQHQ+3r08FBxN6GhlY7zqgmETw+OMyFoa4HUHXv00VC4rEcQtLu/oX9N2Vxy5xr5S0xMhoBkAHQbyrlxFadBazk0fEEth7GFv2e7fsaHuawgg8joHHp36dyiYCzYzvB2Qwjp5HWqwE8ALiS9g6s9o7v9w8Fz5OJqhyMuTjwcDbz9XNlM7yGuI03bemq5XD+Umw2Vivwt3lmocwnQPaRzCkaLkLjHrf4gH8yaT87Xhufpcerza5tZgaDKI3gdfiS7bxtLHYKG3Mx9WISWC2QgiR3pBv8AtGitmdnc3iWOQcRS1nx1u1FIbw2QtaSNf9OhI5jrovN5bnnGUfeuxdv2khkkZuLd2vdr3Lu3uKKV7Isv2uH4JZ2ABpNh+nLpy6IQtYfj9BvOL6gaC6nkDuZoxkjdg3gj6EzIXS4RykH3dvjMl01KW0yJzSSRGHg8wO4AgHks5Wjd4f4ZuwstPlrG1E+q8P8ARdGdTpy9vUd/VcCXPRzYy5Umx7XyW5jPJN2pB36kg6dOWvRaXZ23Jw59iTaSQtkD4nk82Aa+j7Rz+CQs/HrRtqKL35ntpuDXgEEE5vK6RqCCCInK4bwVacRmcle4U4hvzXJhMHNdGWPIEWvc3nyCicM51lyxfdl7EtWSzBFXF6IEdmWg6anuLtNfgei5GIz8NDCWMW7GtmbZ/wC88zEF3h+Wi0YTLQ0KlypZx8d2G0WF7XPLdNu7oR3+l19iQoziGX2hdcTla7PmDiMxzkTpJkOyy2SNSNgurx9XyVeLGxXpm3I2MeIrgfr2w1B5+BA07zr4qqLrZ3MfaNepUgqtqU6jSIoWvLuZOpJJ6lclaC63jtxRub59Wg4lpDd5OzQDqQCQIgEiSNTqpud9d3/eZPqKhIiyzpC4k7oiItKIiIiIiIiqIiIoiIiIiIiKIiIiqIiIiIiIiIiIgX//2Q==';
+  const WLOGO='iVBORw0KGgoAAAANSUhEUgAAAKoAAAB1CAYAAADeHnp4AAAD/klEQVR4nO3d25ajIBCFYZjV7//KzkXijM3iUMUZ6/+uehkFxC2SmNjOAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwDS/ugErXdd1ldbx3pvuo138Wd2AVSQh1ayHsUwGlfCdx2RQtQj2egQVRyCoOAJBxRFMBlX7kRMfUa1nMqjOycNHSPfAQXDxd/UEFICa2VHjHkV7jpzckh3HZKelAqUJUc+bAIS3zGQHlUKWCs6MO1SENs7su/6cWCBn3Ua9vmbUdRKTZ68mCN57vzI4jLAfjKgCK8PC6PpBUAt2CArTAYIqcl3XtcMl2HJYCephrIaVoB7IYlgJ6qGshfVndQPeJjeX7R2uXebOM5jYydAutz97tMNKULn0C8UC0RqSHiGzMgUgqAp3sPxXrzKtjIotCKrSjqGyMKryZkrJQih2xIiqsHNId25bDwQVRyCoOAJBxREIKo5AUBV2/GjKCoKKIxBUobd//LM7gvoSb5+WEFSF+2t1u4Vit/aM8PodjGm9jFsIxm4YUSswX53PZFB3+h4oP4WWMX0J6xWQmuD3eFCbJeY7ZfbPUng0ZR3zHbLzZZfA/mdyjvq0cxh2PolmMx9U5wjrCQjqF2HdG0F92PGuEz4IasRuYd2tPSuY74CS1ZddQvpBJwisCCsB/Y3OUBodWgIaR6dU2uVBa1bQQZ1o/9PKyLYAAAAAAAAAAAAAAAAAAAAA+E30Bd7wS8HhF38lD/zKlRHb3nvvtc9p0qyfqrPU1pj7Ab+lusNterRVU560jtS+xNaR1luTmafiz6VjBT6XSRqaK6P1Jx3acnLrpR4BWdpGU/8IkiDntg23l/RB7eMya7crBlXzf+o1y3P/Uvz5mqa8WDnh8lzZ0nJTWsIaa+tdXql+af+l9iW2vHRVmf1zGvUDKCSX7NJ2tZ4d2rujYlONkQcjV3bLPkq2kfZj6cTLDTa55eHrkjYPeVLKqAMcm3L0qqsmpNppgrQdsTlv7z7tMVVyTn5itLTBOed+pCumGpAKT2kHag+oZrvWNxgjyu5V3jPM0pNWErrUyTd68CmVP2RErZ0wIy82j5zVz5J6Ro6uzUHNjZ65yn2gR325OqTlO9fvkwiNmnaG20vr0M5jpaT7XZOX5qBqLvetnuXX1KdZf9UVodTGnn08+njF1OalKagtn9/1Ir383fOv1Lqxjkut+1yeGqVaP6oafVmX1jHieMb6L/bakzqote90R3T6jDdW4XZhJz9fm3WS9qhXcxxHhzXXp/+Wawr8taEv3+K8K20pQ0JbTm79mrLuvzVXmJ7zuR51SNqeq1Ma8toRfNgTp1vPwlGj04p5Wa1cW+/XZvbzzPcgAAAAAAAAAADghf4C8s3JN1CBdfAAAAAASUVORK5CYII=';
 
-  // Header band
-  doc.setFillColor(PINK[0],PINK[1],PINK[2]); doc.rect(0,0,pageW,72,'F');
-  doc.setTextColor(255,255,255);
-  doc.setFont('helvetica','bold'); doc.setFontSize(20); doc.text('ISHEEKA EVENTS', M, 32);
-  doc.setFont('helvetica','normal'); doc.setFontSize(9);
-  doc.text('Making Every Event Memorable', M, 47);
-  doc.text('+91 78423 95867   |   isheekaevents@gmail.com   |   www.isheekaevents.in', M, 61);
-  doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.text('QUOTATION', pageW-M, 34, {align:'right'});
-  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.text(quot.ref_number||'', pageW-M, 52, {align:'right'});
+  const drawHeader=(ref,date,valid)=>{
+    try{doc.addImage(CLOGO,'JPEG',M,14,46,32);}catch(e){}
+    doc.setFont('helvetica','bold');doc.setFontSize(11);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+    doc.text('ISHEEKA EVENTS',M+52,26);
+    doc.setFont('helvetica','italic');doc.setFontSize(8);doc.text('Making Every Event Memorable',M+52,36);
+    doc.setFont('helvetica','italic');doc.setFontSize(7);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.text('est. 2010',M+52,45);
+    doc.setFillColor(245,245,245);doc.roundedRect(pageW-M-115,12,115,16,3,3,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+    doc.text('QUOTATION',pageW-M-57,22,{align:'center'});
+    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+    doc.text('Ref: '+(ref||''),pageW-M,32,{align:'right'});
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.text('Date: '+fmt(date),pageW-M,41,{align:'right'});
+    doc.text('Valid until: '+fmt(valid),pageW-M,50,{align:'right'});
+    doc.setDrawColor(PINK[0],PINK[1],PINK[2]);doc.setLineWidth(1.5);
+    doc.line(M,58,pageW-M,58);doc.setLineWidth(0.5);
+  };
 
-  let y=98;
-  doc.setTextColor(DARK[0],DARK[1],DARK[2]);
-  doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.text('Bill To', M, y);
-  doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.text(quot.client_name||'\u2014', M, y+16);
-  if(quot.event_name){ doc.setFontSize(9); doc.setTextColor(GREY[0],GREY[1],GREY[2]); doc.text(quot.event_name, M, y+30); doc.setTextColor(DARK[0],DARK[1],DARK[2]); }
-  doc.setFontSize(9);
-  doc.text('Date: '+fmt(quot.doc_date), pageW-M, y, {align:'right'});
-  doc.text('Valid until: '+fmt(quot.valid_until), pageW-M, y+14, {align:'right'});
-  doc.text('Status: '+((typeof QUOT_STATUS_LABELS!=='undefined'&&QUOT_STATUS_LABELS[quot.status])||quot.status||'Draft'), pageW-M, y+28, {align:'right'});
+  const drawFooter=(contd)=>{
+    doc.setFillColor(255,240,244);doc.rect(0,pageH-28,pageW,28,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+    doc.text('Isheeka Events',M,pageH-12);
+    doc.setFont('helvetica','normal');
+    doc.text(' · +91 78423 95867 · ',M+56,pageH-12);
+    doc.setFont('helvetica','italic');doc.text('Making Every Event Memorable',M+132,pageH-12);
+    if(contd){doc.setFont('helvetica','italic');doc.setFontSize(7.5);doc.setTextColor(GREY[0],GREY[1],GREY[2]);doc.text('Contd...',pageW-M,pageH-12,{align:'right'});}
+  };
 
-  y+=50;
+  // PAGE 1: Cover
+  if(dOpts.coverPage){
+    const lw=90,lh=62;
+    try{doc.addImage(CLOGO,'JPEG',(pageW-lw)/2,48,lw,lh);}catch(e){}
+    doc.setFont('helvetica','bold');doc.setFontSize(20);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+    doc.text('ISHEEKA EVENTS',pageW/2,126,{align:'center'});
+    doc.setFont('helvetica','italic');doc.setFontSize(12);
+    doc.text('Making Every Event Memorable',pageW/2,144,{align:'center'});
+    doc.setFont('helvetica','italic');doc.setFontSize(9);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.text('est. 2010',pageW/2,158,{align:'center'});
+    doc.setDrawColor(LGREY[0],LGREY[1],LGREY[2]);doc.setLineWidth(0.5);
+    doc.line(M,172,pageW-M,172);
+    const pill='QUOTATION  ·  '+(quot.ref_number||'');
+    const pw=170;
+    doc.setDrawColor(PINK[0],PINK[1],PINK[2]);doc.setLineWidth(1.2);
+    doc.roundedRect((pageW-pw)/2,186,pw,22,11,11,'S');
+    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+    doc.text(pill,pageW/2,200,{align:'center'});
+    doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.setCharSpace(2);doc.text('PREPARED FOR',pageW/2,228,{align:'center'});doc.setCharSpace(0);
+    doc.setFont('helvetica','bold');doc.setFontSize(22);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+    doc.text(quot.client_name||'',pageW/2,252,{align:'center'});
+    if(quot.event_name){
+      doc.setFont('helvetica','italic');doc.setFontSize(12);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+      doc.text(quot.event_name,pageW/2,270,{align:'center'});
+    }
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.text(fmt(quot.doc_date),pageW/2,285,{align:'center'});
+    doc.setFillColor(PINK[0],PINK[1],PINK[2]);
+    [pageW/2-10,pageW/2,pageW/2+10].forEach(x=>doc.circle(x,299,2.5,'F'));
+    const intro=settings.cover_intro||'Every great event is a unique story waiting to be told through beautiful design and flawless execution. We bring a fresh, creative mindset to ensure your gathering is not just any other event, but a grand success filled with moments your guests will talk about for years. Let us transform your vision into a vibrant, stress-free reality where you can simply enjoy being the host.';
+    doc.setFont('helvetica','italic');doc.setFontSize(9.5);doc.setTextColor(80,80,80);
+    const ilines=doc.splitTextToSize(intro,pageW-2*M-20);
+    doc.text(ilines,pageW/2,316,{align:'center'});
+    let cy=316+ilines.length*13+10;
+    const l2="It's a pleasure for Isheeka Events to provide the white glove services that you deserve.";
+    const l2w=doc.splitTextToSize(l2,pageW-2*M-20);
+    doc.text(l2w,pageW/2,cy,{align:'center'});cy+=l2w.length*13+18;
+    doc.setFont('helvetica','bolditalic');doc.setFontSize(10);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+    doc.text('— Swathi N, Founder & CEO',pageW-M,cy,{align:'right'});
+    drawFooter(true);doc.addPage();
+  }
+
+  // PAGE 2: Main quotation
+  drawHeader(quot.ref_number,quot.doc_date,quot.valid_until);
+  let y=76;
+
+  // Event name
+  doc.setFont('helvetica','bold');doc.setFontSize(13);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+  doc.text(quot.event_name||'',M,y);y+=18;
+
+  // CLIENT DETAILS
+  doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+  doc.setCharSpace(1.5);doc.text('CLIENT DETAILS',M,y);doc.setCharSpace(0);y+=5;
+  doc.setFillColor(255,248,250);doc.setDrawColor(245,208,218);
+  doc.roundedRect(M,y,pageW-2*M,26,2,2,'FD');
+  doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+  doc.text('Shri/Smt. '+(quot.client_name||''),M+8,y+11);
+  doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+  doc.text('+91 — | '+( quot.client_email||'—'),M+8,y+21);
+  y+=34;
+
+  // Line items
   const groups={};
-  (lineItems||[]).forEach(li=>{ const k=li.sub_event_name?(li.sub_event_name.charAt(0).toUpperCase()+li.sub_event_name.slice(1)):'General Items'; (groups[k]=groups[k]||[]).push(li); });
+  (lineItems||[]).forEach(li=>{const k=li.sub_event_name?(li.sub_event_name.charAt(0).toUpperCase()+li.sub_event_name.slice(1)):'General Items';(groups[k]=groups[k]||[]).push(li);});
   const body=[];
-  const showGroups=dOpts.grouping&&Object.keys(groups).length>1;
+  const showG=dOpts.grouping&&Object.keys(groups).length>1;
+  const ncols=1+(dOpts.qty?1:0)+(dOpts.prices?2:0);
   Object.keys(groups).forEach(k=>{
-    if(showGroups) body.push([{content:k, colSpan:dOpts.prices?(dOpts.qty?4:3):(dOpts.qty?2:1), styles:{fontStyle:'bold', fillColor:[251,234,240], textColor:PINK}}]);
+    if(showG)body.push([{content:k,colSpan:ncols,styles:{fontStyle:'bold',fillColor:[255,240,244],textColor:PINK,fontSize:8}}]);
     groups[k].forEach(li=>{
-      const qty=parseFloat(li.quantity)||0, up=parseFloat(li.unit_price)||0;
+      const qty=parseFloat(li.quantity)||0,up=parseFloat(li.unit_price)||0;
       const amt=(li.amount!=null&&li.amount!=='')?parseFloat(li.amount):qty*up;
-      const row=[];
-      row.push(li.description||'');
-      if(dOpts.qty) row.push(qty.toString());
-      if(dOpts.prices){ row.push('Rs.'+up.toLocaleString('en-IN')); row.push('Rs.'+amt.toLocaleString('en-IN')); }
+      const row=[li.description||''];
+      if(dOpts.qty)row.push(qty.toString());
+      if(dOpts.prices){row.push(fmtM(up));row.push(fmtM(amt));}
       body.push(row);
     });
   });
-  if(body.length===0) body.push([{content:'No line items', colSpan:dOpts.prices?(dOpts.qty?4:3):(dOpts.qty?2:1), styles:{textColor:GREY, halign:'center'}}]);
+  if(!body.length)body.push([{content:'No line items',colSpan:ncols,styles:{halign:'center',textColor:GREY}}]);
   const head=[['Description']];
-  if(dOpts.qty) head[0].push('Qty');
-  if(dOpts.prices){ head[0].push('Unit Price'); head[0].push('Amount'); }
-  const colStyles={0:{cellWidth:'auto'}};
-  if(dOpts.qty) colStyles[1]={cellWidth:40,halign:'center'};
-  if(dOpts.prices){ colStyles[dOpts.qty?2:1]={cellWidth:80,halign:'right'}; colStyles[dOpts.qty?3:2]={cellWidth:80,halign:'right'}; }
+  if(dOpts.qty)head[0].push('Qty');
+  if(dOpts.prices){head[0].push('Unit Price');head[0].push('Amount');}
+  const cs={0:{cellWidth:'auto',halign:'left'}};
+  if(dOpts.qty)cs[1]={cellWidth:35,halign:'center'};
+  if(dOpts.prices){cs[dOpts.qty?2:1]={cellWidth:75,halign:'right'};cs[dOpts.qty?3:2]={cellWidth:80,halign:'right',fontStyle:'bold'};}
   doc.autoTable({
-    startY:y, head:head, body,
-    theme:'grid', headStyles:{fillColor:DARK, textColor:255, fontSize:9},
-    bodyStyles:{fontSize:9, textColor:DARK, overflow:'linebreak'},
-    columnStyles:colStyles,
-    rowPageBreak:'avoid',
-    margin:{left:M,right:M}
+    startY:y,head:head,body,theme:'plain',
+    headStyles:{fillColor:PINK,textColor:255,fontSize:8,fontStyle:'bold'},
+    bodyStyles:{fontSize:9,textColor:DARK},
+    alternateRowStyles:{fillColor:[252,252,252]},
+    columnStyles:cs,rowPageBreak:'avoid',margin:{left:M,right:M},
+    didDrawPage:()=>{drawHeader(quot.ref_number,quot.doc_date,quot.valid_until);drawFooter(true);}
   });
-  let ty=doc.lastAutoTable.finalY+18;
-  const subtotal=parseFloat(quot.subtotal)||0, disc=parseFloat(quot.discount_amount)||0;
-  const gt=(quot.grand_total!=null&&quot.grand_total!=='')?parseFloat(quot.grand_total):(subtotal-disc);
-  const tx=pageW-M-200;
-  const totalLine=(label,val,bold)=>{ doc.setFont('helvetica',bold?'bold':'normal'); doc.setFontSize(bold?11:9);
-    doc.text(label,tx,ty); doc.text(val,pageW-M,ty,{align:'right'}); ty+=bold?18:14; };
-  if(dOpts.prices){ totalLine('Subtotal','Rs.'+subtotal.toLocaleString('en-IN'),false); }
-  if(dOpts.prices&&dOpts.discount&&disc>0) totalLine('Discount'+(quot.discount_pct>0?' ('+quot.discount_pct+'%)':''),'-Rs.'+disc.toLocaleString('en-IN'),false);
-  doc.setDrawColor(PINK[0],PINK[1],PINK[2]); doc.line(tx,ty-6,pageW-M,ty-6);
-  doc.setTextColor(PINK[0],PINK[1],PINK[2]); totalLine('Grand Total','Rs.'+gt.toLocaleString('en-IN'),true);
-  doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+  y=doc.lastAutoTable.finalY+8;
 
-  let ps=quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} }
-  let py=ty+12;
-  if(ps&&ps.length){
-    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.text('Payment Schedule', M, py); py+=4;
-    doc.autoTable({ startY:py, head:[['%','Installment','When due']],
-      body: ps.map(p=>[(p.pct||0)+'%', p.label||'', p.when||'']),
-      theme:'striped', headStyles:{fillColor:DARK,textColor:255,fontSize:9}, bodyStyles:{fontSize:9},
-      margin:{left:M,right:pageW/2-10} });
-    py=doc.lastAutoTable.finalY+14;
+  // Totals
+  const sub=parseFloat(quot.subtotal)||0,disc=parseFloat(quot.discount_amount)||0;
+  const gt=parseFloat(quot.grand_total)||(sub-disc);
+  const tx=pageW-M-185;
+  if(dOpts.prices){
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+    doc.text('Subtotal',tx,y+12);doc.text(fmtM(sub),pageW-M,y+12,{align:'right'});
+    if(dOpts.discount&&disc>0){y+=13;doc.text('Discount'+(quot.discount_pct>0?' ('+quot.discount_pct+'%)':''),tx,y+12);doc.text('-'+fmtM(disc),pageW-M,y+12,{align:'right'});}
+    y+=6;
   }
-  const addText=(title,txt)=>{ if(!txt) return; if(py>pageH-90){ doc.addPage(); py=60; }
-    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(DARK[0],DARK[1],DARK[2]); doc.text(title,M,py); py+=12;
-    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
-    const wrapped=doc.splitTextToSize(txt, pageW-2*M); doc.text(wrapped,M,py); py+=wrapped.length*11+8; doc.setTextColor(DARK[0],DARK[1],DARK[2]); };
-  addText('Notes', quot.additional_notes);
-  addText('Payment terms', quot.payment_terms);
-  addText('Additional terms & conditions', quot.additional_terms);
+  doc.setDrawColor(DARK[0],DARK[1],DARK[2]);doc.setLineWidth(1);
+  doc.line(tx,y+12,pageW-M,y+12);doc.setLineWidth(0.5);
+  doc.setFont('helvetica','bold');doc.setFontSize(12);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+  doc.text('Grand total',tx,y+24);
+  doc.setFontSize(14);doc.text(fmtM(gt),pageW-M,y+24,{align:'right'});
+  y+=42;
 
-  doc.setFontSize(8); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
-  doc.text('Thank you for choosing Isheeka Events.', M, pageH-24);
+  // Signature
+  doc.setFont('helvetica','bolditalic');doc.setFontSize(22);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+  doc.text('Swathi',pageW-M-75,y+8,{align:'center'});
+  doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+  doc.text('Swathi N',pageW-M-75,y+20,{align:'center'});
+  doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(GREY[0],GREY[1],GREY[2]);
+  doc.text('Founder & CEO',pageW-M-75,y+30,{align:'center'});
+  drawFooter(false);
+
+  // PAGE 3: Terms
+  let ps=quot.payment_schedule;if(typeof ps==='string'){try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];}}
+  const hasTerms=(ps&&ps.length&&dOpts.schedule)||quot.payment_terms||quot.additional_terms||(dOpts.bankDetails&&(settings.bank_name||settings.account_number));
+  if(hasTerms){
+    doc.addPage();
+    drawHeader(quot.ref_number,quot.doc_date,quot.valid_until);
+    let ty=76;
+    if(dOpts.bankDetails&&(settings.bank_name||settings.account_number)){
+      doc.setFillColor(245,245,245);doc.rect(M,ty,pageW-2*M,30,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+      doc.setCharSpace(1.5);doc.text('PAYMENT DETAILS',M+8,ty+11);doc.setCharSpace(0);
+      doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+      const bl=[settings.bank_name&&('Bank: '+settings.bank_name),settings.account_number&&('Acct: '+settings.account_number),settings.ifsc_code&&('IFSC: '+settings.ifsc_code)].filter(Boolean).join('   |   ');
+      doc.text(bl,M+8,ty+22);ty+=40;
+    }
+    doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(PINK[0],PINK[1],PINK[2]);
+    doc.setCharSpace(1.5);doc.text('PAYMENT, GENERAL TERMS & CONDITIONS',M,ty);doc.setCharSpace(0);ty+=10;
+    if(ps&&ps.length&&dOpts.schedule){
+      ps.forEach((p,i)=>{
+        doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+        doc.text(String.fromCharCode(97+i)+') '+(p.pct||0)+'% ('+p.label+') — '+p.when,M,ty);ty+=13;
+      });ty+=4;
+    }
+    const addTerm=(txt)=>{if(!txt)return;txt.split('\n').filter(l=>l.trim()).forEach(l=>{
+      doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(DARK[0],DARK[1],DARK[2]);
+      const w=doc.splitTextToSize(l.trim(),pageW-2*M);doc.text(w,M,ty);ty+=w.length*12+2;
+    });};
+    addTerm(quot.payment_terms);addTerm(quot.additional_terms);
+    drawFooter(false);
+  }
 
   const fname='Quotation_'+String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf';
-  if(opts.action==='print'){ try{doc.autoPrint();}catch(e){} window.open(doc.output('bloburl'),'_blank'); }
-  else { doc.save(fname); }
+  if(opts.action==='print'){try{doc.autoPrint();}catch(e){}window.open(doc.output('bloburl'),'_blank');}
+  else{doc.save(fname);}
   return true;
 }
+
 
 // ── Stable inputs for quote wizard ───────────────────────────────────────────
 function QWSubEventNameInput({value, onChange}) {
@@ -5274,12 +5391,12 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   const [createdQuot, setCreatedQuot] = React.useState(null);
   const [emailMenuOpen, setEmailMenuOpen] = React.useState(false);
   // Quote display options — what the CLIENT sees (not internal data)
-  const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false});
+  const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:false});
   const setDO=(field,val)=>setDisplayOpts(o=>({...o,[field]:val}));
   const applyPreset=(preset)=>{
-    if(preset==='full') setDisplayOpts({prices:true,qty:true,grouping:true,schedule:true,discount:true});
-    else if(preset==='items') setDisplayOpts({prices:false,qty:true,grouping:true,schedule:true,discount:false});
-    else if(preset==='summary') setDisplayOpts({prices:false,qty:false,grouping:true,schedule:false,discount:false});
+    if(preset==='full') setDisplayOpts({prices:true,qty:true,grouping:true,schedule:true,discount:true,coverPage:displayOpts.coverPage,bankDetails:displayOpts.bankDetails});
+    else if(preset==='items') setDisplayOpts({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:displayOpts.coverPage,bankDetails:displayOpts.bankDetails});
+    else if(preset==='summary') setDisplayOpts({prices:false,qty:false,grouping:true,schedule:false,discount:false,coverPage:displayOpts.coverPage,bankDetails:displayOpts.bankDetails});
   };
 
   const [subEventBlocks, setSubEventBlocks] = React.useState(()=>{
@@ -5547,7 +5664,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     setEmailMenuOpen(false);
   };
 
-  const handleQuotePDF=(action)=>{
+  const handleQuotePDF=async(action)=>{
     if(!createdQuot) return;
     const pdfItems=subEventBlocks.flatMap(b=>(b.items||[]).filter(i=>i.description&&i.description.trim()).map(i=>({
       sub_event_name:(b.name&&b.name.trim()&&b.name.trim().toLowerCase()!=='general items')?b.name.trim():null,
@@ -5555,7 +5672,8 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       quantity:i.quantity, unit_price:i.unit_price,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
-    buildQuotationPDF(createdQuot, pdfItems, {action, displayOpts});
+    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();
+    buildQuotationPDF(createdQuot,pdfItems,{action,displayOpts,settings:s||{}});
   };
 
   const steps=['Client','Line items','Quote details','Share'];
@@ -5755,7 +5873,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
                   ))}
                 </div>
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
-                  {[['prices','Show item prices'],['qty','Show quantities'],['grouping','Show sub-event grouping'],['schedule','Show payment schedule'],['discount','Show discount']].map(([k,l])=>(
+                  {[['prices','Show item prices'],['qty','Show quantities'],['grouping','Show sub-event grouping'],['schedule','Show payment schedule'],['discount','Show discount'],['coverPage','Include cover page'],['bankDetails','Show bank details']].map(([k,l])=>(
                     <label key={k} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}>
                       <input type="checkbox" checked={!!displayOpts[k]} onChange={e=>setDO(k,e.target.checked)} style={{accentColor:'var(--pink)'}}/>{l}
                     </label>
