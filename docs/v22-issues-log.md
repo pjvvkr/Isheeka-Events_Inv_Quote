@@ -5,6 +5,12 @@ No fix is applied without explicit approval.
 
 ---
 
+## P0-4 · Atomic ref-number counters
+**Status:** FIXED + VERIFIED — 12 Jun 2026. Created Postgres `next_counter(p_type,p_year,p_seed)` (atomic INSERT…ON CONFLICT increment, relies on UNIQUE(type,year)). Replaced the 3 `getNext…Ref()` read-modify-write bodies with single `supabase.rpc('next_counter', …)` calls + error handling. Eliminates duplicate-ref race. Numbering unchanged. Deployed (commit 458564). Smoke-tested OK (lead/quote/client refs increment correctly).
+
+## P2-10 · Pin CDN dependency versions
+**Status:** FIXED + VERIFIED — 12 Jun 2026. Pinned react 18.3.1, react-dom 18.3.1, @babel/standalone 7.29.7, @supabase/supabase-js 2.106.2 (exact versions, same CDNs). Prevents upstream releases from breaking the live app. Deployed (commit 86dce72). App loads normally.
+
 ## P1-8 · RLS / security assessment
 **Status:** ASSESSED + main hole CLOSED — 12 Jun 2026.
 **Findings:**
