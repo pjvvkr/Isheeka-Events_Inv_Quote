@@ -370,12 +370,13 @@ function TemplateEditor({template, onSave, onCancel}) {
       let tplId = template?.template_id;
       if(tplId){
         // Update template
-        await supabase.from('event_templates').update({name,event_type:eventType||null,updated_at:new Date().toISOString()}).eq('template_id',tplId);
+        const {error:tue}=await supabase.from('event_templates').update({name,event_type:eventType||null,updated_at:new Date().toISOString()}).eq('template_id',tplId); if(tue) throw tue;
         // Delete existing items and re-insert
-        await supabase.from('event_template_items').delete().eq('template_id',tplId);
+        const {error:tdie}=await supabase.from('event_template_items').delete().eq('template_id',tplId); if(tdie) throw tdie;
       } else {
         // Insert new template
-        const {data} = await supabase.from('event_templates').insert({name,event_type:eventType||null,is_active:true,sort_order:0,created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false}).select().single();
+        const {data,error:tie} = await supabase.from('event_templates').insert({name,event_type:eventType||null,is_active:true,sort_order:0,created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false}).select().single();
+        if(tie) throw tie;
         tplId = data.template_id;
       }
       // Insert all items
@@ -387,9 +388,9 @@ function TemplateEditor({template, onSave, onCancel}) {
           }
         });
       });
-      if(allItems.length>0) await supabase.from('event_template_items').insert(allItems);
+      if(allItems.length>0){ const {error:tiie}=await supabase.from('event_template_items').insert(allItems); if(tiie) throw tiie; }
       onSave();
-    } catch(err){ setSaveError('Could not save template. Please try again.'); }
+    } catch(err){ console.error('[Isheeka ERP] template save failed:', err); setSaveError('Could not save template. Please try again.'); }
     finally { setSaving(false); }
   };
 
@@ -473,12 +474,14 @@ function TemplatesTab() {
 
   const handleArchive = async (tpl) => {
     if(!window.confirm(`Archive "${tpl.name}"? It will no longer appear in the Events wizard but can be restored.`)) return;
-    await supabase.from('event_templates').update({is_active:false,updated_at:new Date().toISOString()}).eq('template_id',tpl.template_id);
+    const {error:tae}=await runDb(supabase.from('event_templates').update({is_active:false,updated_at:new Date().toISOString()}).eq('template_id',tpl.template_id),'archive template');
+    if(tae) return;
     loadTemplates();
   };
 
   const handleRestore = async (tpl) => {
-    await supabase.from('event_templates').update({is_active:true,updated_at:new Date().toISOString()}).eq('template_id',tpl.template_id);
+    const {error:tre}=await runDb(supabase.from('event_templates').update({is_active:true,updated_at:new Date().toISOString()}).eq('template_id',tpl.template_id),'restore template');
+    if(tre) return;
     loadTemplates();
   };
 
@@ -572,11 +575,12 @@ function LeadSourcesTab() {
     if(!newLabel.trim()){setAddError('Label is required');return;}
     const val = newLabel.trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
     setSaving(true);
-    await supabase.from('lead_sources').insert({
+    const {error:lsie}=await runDb(supabase.from('lead_sources').insert({
       label:newLabel.trim(), value:val,
       sort_order:sources.length+1, is_active:true,
       created_at:new Date().toISOString()
-    });
+    }),'add lead source');
+    if(lsie){ setSaving(false); return; }
     setNewLabel(''); setNewValue(''); setAddError('');
     await loadSources();
     setSuccessMsg('Source added!');
@@ -585,7 +589,8 @@ function LeadSourcesTab() {
   };
 
   const toggleActive = async (src) => {
-    await supabase.from('lead_sources').update({is_active:!src.is_active}).eq('source_id',src.source_id);
+    const {error:lte}=await runDb(supabase.from('lead_sources').update({is_active:!src.is_active}).eq('source_id',src.source_id),'update lead source');
+    if(lte) return;
     setSources(s=>s.map(x=>x.source_id===src.source_id?{...x,is_active:!x.is_active}:x));
     _leadSourcesCache = null;
   };
@@ -593,8 +598,10 @@ function LeadSourcesTab() {
   const moveUp = async (idx) => {
     if(idx===0) return;
     const a=sources[idx], b=sources[idx-1];
-    await supabase.from('lead_sources').update({sort_order:b.sort_order}).eq('source_id',a.source_id);
-    await supabase.from('lead_sources').update({sort_order:a.sort_order}).eq('source_id',b.source_id);
+    const {error:lm1}=await runDb(supabase.from('lead_sources').update({sort_order:b.sort_order}).eq('source_id',a.source_id),'reorder lead source');
+    if(lm1) return;
+    const {error:lm2}=await runDb(supabase.from('lead_sources').update({sort_order:a.sort_order}).eq('source_id',b.source_id),'reorder lead source');
+    if(lm2) return;
     await loadSources(); _leadSourcesCache=null;
   };
 
@@ -1301,10 +1308,12 @@ function ClientDetail({clientId, onBack}) {
 
   const handleSaveAlt = async (form) => {
     if(editingAlt) {
-      await supabase.from('alternative_contacts').update({...form,updated_at:new Date().toISOString()}).eq('contact_id',editingAlt.contact_id);
+      const {error:aue}=await runDb(supabase.from('alternative_contacts').update({...form,updated_at:new Date().toISOString()}).eq('contact_id',editingAlt.contact_id),'update contact');
+      if(aue) return;
       setAltContacts(ac=>ac.map(a=>a.contact_id===editingAlt.contact_id?{...a,...form}:a));
     } else {
-      const {data} = await supabase.from('alternative_contacts').insert({...form,client_id:clientId,created_at:new Date().toISOString()}).select().single();
+      const {data,error:aie} = await runDb(supabase.from('alternative_contacts').insert({...form,client_id:clientId,created_at:new Date().toISOString()}).select().single(),'add contact');
+      if(aie) return;
       if(data) setAltContacts(ac=>[...ac,data]);
     }
     setShowAltForm(false); setEditingAlt(null);
@@ -1312,7 +1321,8 @@ function ClientDetail({clientId, onBack}) {
 
   const handleDeleteAlt = async (contactId) => {
     if(!window.confirm('Remove this alternative contact?')) return;
-    await supabase.from('alternative_contacts').update({is_deleted:true}).eq('contact_id',contactId);
+    const {error:ade}=await runDb(supabase.from('alternative_contacts').update({is_deleted:true}).eq('contact_id',contactId),'remove contact');
+    if(ade) return;
     setAltContacts(ac=>ac.filter(a=>a.contact_id!==contactId));
   };
 
@@ -2161,7 +2171,7 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
     if(Object.keys(e).length>0){setErrors(e);setSaveError('Please fill in all required fields.');return;}
     setSaving(true); setSaveError('');
     try {
-      await supabase.from('events').update({
+      const {error:eue}=await supabase.from('events').update({
         name:form.name,type:form.type,status:form.status,
         main_date:form.main_date,location:form.location,
         guest_count:form.guest_count?parseInt(form.guest_count):null,
@@ -2175,14 +2185,16 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
         internal_notes:form.internal_notes||null,
         updated_at:new Date().toISOString()
       }).eq('event_id',eventId);
-      await supabase.from('sub_event_items').update({is_deleted:true}).eq('event_id',eventId);
-      await supabase.from('sub_events').update({is_deleted:true}).eq('event_id',eventId);
+      if(eue) throw eue;
+      const {error:sidel}=await supabase.from('sub_event_items').update({is_deleted:true}).eq('event_id',eventId); if(sidel) throw sidel;
+      const {error:sedel}=await supabase.from('sub_events').update({is_deleted:true}).eq('event_id',eventId); if(sedel) throw sedel;
       for(const se of editSubEvents){
         if(!se.name?.trim()) continue;
-        const {data:seData} = await supabase.from('sub_events').insert({
+        const {data:seData,error:seierr} = await supabase.from('sub_events').insert({
           event_id:eventId,name:se.name,date:se.date||null,location:se.location||null,
           sort_order:editSubEvents.indexOf(se),created_at:new Date().toISOString(),is_deleted:false
         }).select().single();
+        if(seierr) throw seierr;
         if(seData && se.items?.length>0){
           const rows=se.items.filter(r=>r.description?.trim()).map((r,i)=>({
             sub_event_id:seData.sub_event_id,event_id:eventId,
@@ -2190,7 +2202,7 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
             unit_price:parseFloat(r.unit_price)||0,
             sort_order:i,created_at:new Date().toISOString(),is_deleted:false
           }));
-          if(rows.length>0) await supabase.from('sub_event_items').insert(rows);
+          if(rows.length>0){ const {error:rie}=await supabase.from('sub_event_items').insert(rows); if(rie) throw rie; }
         }
       }
       const mainRows=editMainItems.filter(r=>r.description?.trim()).map((r,i)=>({
@@ -2199,27 +2211,29 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
         unit_price:parseFloat(r.unit_price)||0,
         sort_order:i,created_at:new Date().toISOString(),is_deleted:false
       }));
-      if(mainRows.length>0) await supabase.from('sub_event_items').insert(mainRows);
+      if(mainRows.length>0){ const {error:mrie}=await supabase.from('sub_event_items').insert(mainRows); if(mrie) throw mrie; }
       await loadAll();
       setSuccessMsg('Event updated successfully!');
       setTimeout(()=>setSuccessMsg(''),4000);
-    } catch(err){ setSaveError('Could not save changes. Please try again.'); }
+    } catch(err){ console.error('[Isheeka ERP] event save failed:', err); setSaveError('Could not save changes. Please try again.'); }
     finally { setSaving(false); }
   };
 
   const handleStatusChange = async (newStatus) => {
-    await supabase.from('events').update({status:newStatus,updated_at:new Date().toISOString()}).eq('event_id',eventId);
+    const {error:ese}=await runDb(supabase.from('events').update({status:newStatus,updated_at:new Date().toISOString()}).eq('event_id',eventId),'update event status');
+    if(ese) return;
     setEvent(ev=>({...ev,status:newStatus}));
   };
 
   const handleChangeClient = async (newClient) => {
-    await supabase.from('events').update({
+    const {error:ecc}=await runDb(supabase.from('events').update({
       client_id:newClient.client_id,
       client_name:newClient.first_name+' '+newClient.last_name,
       primary_contact_id:null,primary_contact_name:null,
       secondary_contact_id:null,secondary_contact_name:null,
       updated_at:new Date().toISOString()
-    }).eq('event_id',eventId);
+    }).eq('event_id',eventId),'change event client');
+    if(ecc) return;
     setShowChangeClient(false);
     await loadAll();
     setSuccessMsg('Client changed to '+newClient.first_name+' '+newClient.last_name+'. Primary and secondary contacts have been reset — please reassign them.');
@@ -2229,22 +2243,26 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
   const toggleChecklist = async (item) => {
     const done = !item.is_done;
     setChecklist(c=>c.map(i=>i.checklist_id===item.checklist_id?{...i,is_done:done}:i));
-    await supabase.from('event_checklists').update({is_done:done,done_at:done?new Date().toISOString():null}).eq('checklist_id',item.checklist_id);
+    const {error:tce}=await runDb(supabase.from('event_checklists').update({is_done:done,done_at:done?new Date().toISOString():null}).eq('checklist_id',item.checklist_id),'update task');
+    if(tce) setChecklist(c=>c.map(i=>i.checklist_id===item.checklist_id?{...i,is_done:!done}:i));
   };
 
   const addChecklistItem = async () => {
     if(!newTask.trim()) return;
-    const {data} = await supabase.from('event_checklists').insert({
+    const {data,error:ace} = await runDb(supabase.from('event_checklists').insert({
       event_id:eventId,task:newTask.trim(),is_done:false,
       sort_order:checklist.length,created_at:new Date().toISOString()
-    }).select().single();
+    }).select().single(),'add task');
+    if(ace) return;
     if(data) setChecklist(c=>[...c,data]);
     setNewTask(''); setAddingTask(false);
   };
 
   const deleteChecklistItem = async (id) => {
+    const prevChecklist = checklist;
     setChecklist(c=>c.filter(i=>i.checklist_id!==id));
-    await supabase.from('event_checklists').delete().eq('checklist_id',id);
+    const {error:dce}=await runDb(supabase.from('event_checklists').delete().eq('checklist_id',id),'delete task');
+    if(dce) setChecklist(prevChecklist);
   };
 
   const enterEditMode = () => { setForm({...event}); setErrors({}); setSaveError(''); setMode('edit'); };
@@ -4818,11 +4836,12 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
       // Insert sub events and their items
       for(const se of subEvents){
         if(!se.name.trim()) continue;
-        const {data:seData} = await supabase.from('sub_events').insert({
+        const {data:seData,error:wsie} = await supabase.from('sub_events').insert({
           event_id:eventData.event_id, name:se.name, date:se.date||null,
           location:se.location||null, sort_order:subEvents.indexOf(se),
           created_at:new Date().toISOString(), is_deleted:false
         }).select().single();
+        if(wsie) throw wsie;
         if(seData && se.items.length>0){
           const itemRows = se.items.filter(r=>r.description.trim()).map((r,i)=>({
             sub_event_id:seData.sub_event_id, event_id:eventData.event_id,
@@ -4830,7 +4849,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
             unit_price:parseFloat(r.unit_price)||0,
             sort_order:i, created_at:new Date().toISOString(), is_deleted:false
           }));
-          if(itemRows.length>0) await supabase.from('sub_event_items').insert(itemRows);
+          if(itemRows.length>0){ const {error:irie}=await supabase.from('sub_event_items').insert(itemRows); if(irie) throw irie; }
         }
       }
 
@@ -4841,10 +4860,11 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
         unit_price:parseFloat(r.unit_price)||0,
         sort_order:i, created_at:new Date().toISOString(), is_deleted:false
       }));
-      if(mainRows.length>0) await supabase.from('sub_event_items').insert(mainRows);
+      if(mainRows.length>0){ const {error:wmrie}=await supabase.from('sub_event_items').insert(mainRows); if(wmrie) throw wmrie; }
 
       await onSave(eventData);
     } catch(err){
+      console.error('[Isheeka ERP] event creation failed:', err);
       setSaveError('Could not save event. Please try again.');
     } finally { setSaving(false); }
   };
