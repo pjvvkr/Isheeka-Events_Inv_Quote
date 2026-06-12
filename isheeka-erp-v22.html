@@ -857,6 +857,9 @@ function SettingsModule() {
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="ifsc_code" label="IFSC code" required placeholder="ICIC0000588"/>
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="upi_id" label="UPI ID" placeholder="e.g. isheeka@hdfc"/>
             </div>
+            <div className="form-grid">
+              <SettingsField form={form} errors={errors} handleChange={handleChange} field="gst_pct" label="GST %" type="number" placeholder="18" hint="Used on invoices when GST is marked applicable"/>
+            </div>
             <hr className="divider"/>
             <div style={{fontSize:13,fontWeight:500,color:'var(--grey-600)',marginBottom:12}}>Preview</div>
             <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'14px 16px',border:'1px solid var(--grey-100)'}}>
@@ -2294,7 +2297,7 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'18px 24px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
         <div>
           <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{event.name}</div>
-          <div style={{fontSize:12,color:'var(--grey-400)'}}>{event.type?event.type.charAt(0).toUpperCase()+event.type.slice(1):''} · {event.client_name}</div>
+          <div style={{fontSize:12,color:'var(--grey-400)'}}>{event.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{event.ref_number} · </span>}{event.type?event.type.charAt(0).toUpperCase()+event.type.slice(1):''} · {event.client_name}</div>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
           {mode==='view' && <>
@@ -3285,7 +3288,9 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       }
 
       // 3. Create the event from lead + approved quotation
+      const evRef = await getNextEventRef();
       const {data:event,error:ee} = await supabase.from('events').insert({
+        ref_number:evRef,
         name:(approvedQuot&&approvedQuot.event_name)||(lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event'),
         type:lead.event_type||null,status:'planning',
         main_date:lead.tentative_date||null,
@@ -4113,6 +4118,7 @@ function EventsModule({initialEventId, onConsumed}) {
                       <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{EVENT_STATUS_LABELS[e.status?.toLowerCase()]||e.status}</span>
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
+                      {e.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{e.ref_number}</span>}
                       {e.client_name&&<span>👤 {e.client_name}</span>}
                       {e.main_date&&<span>📅 {new Date(e.main_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
                       {e.location&&<span>📍 {e.location}</span>}
@@ -4831,7 +4837,9 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
       }
 
       // Insert event
+      const evRef = await getNextEventRef();
       const {data:eventData, error:eventError} = await supabase.from('events').insert({
+        ref_number:evRef,
         name:form.name, type:form.type.toLowerCase(), status:form.status,
         main_date:form.main_date, location:form.location,
         guest_count:form.guest_count?parseInt(form.guest_count):null,
@@ -5159,6 +5167,13 @@ async function getNextClientRef() {
   const {data,error} = await supabase.rpc('next_counter',{p_type:'client',p_year:'0',p_seed:111111});
   if(error||data==null){ notify("Couldn't generate a client number. Please try again.",'error'); throw error||new Error('counter failed'); }
   return 'CL-'+String(data).padStart(6,'0');
+}
+
+async function getNextEventRef() {
+  const year = new Date().getFullYear().toString().slice(-2);
+  const {data,error} = await supabase.rpc('next_counter',{p_type:'event',p_year:year,p_seed:1});
+  if(error||data==null){ notify("Couldn't generate an event number. Please try again.",'error'); throw error||new Error('counter failed'); }
+  return 'EV-'+year+'-'+String(data).padStart(4,'0');
 }
 
 // ── Share helpers ─────────────────────────────────────────────────────────────
