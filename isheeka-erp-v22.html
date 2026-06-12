@@ -6016,7 +6016,40 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
 }
 
 
-ReactDOM.render(<App/>, document.getElementById('root'));
+// ── Error Boundary (P0-1) ────────────────────────────────────────────────────
+// Catches render/lifecycle errors anywhere in the tree and shows a branded
+// recovery screen instead of a blank page. Does NOT catch event-handler or
+// async errors (those are handled separately). componentDidCatch is the seam
+// where centralized error logging will be added later.
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = {hasError:false, error:null}; }
+  static getDerivedStateFromError(error){ return {hasError:true, error}; }
+  componentDidCatch(error, info){
+    console.error('[Isheeka ERP] Render error:', error, info && info.componentStack);
+  }
+  render(){
+    if(!this.state.hasError) return this.props.children;
+    return (
+      <div className="login-page">
+        <div className="login-card" style={{textAlign:'center'}}>
+          <div style={{fontSize:44,marginBottom:8}}>🌸</div>
+          <div className="login-title">Something went wrong</div>
+          <div className="login-sub">Your data is safe — nothing was lost. Please reload to continue.</div>
+          <button className="btn primary" style={{width:'100%',marginTop:8}}
+                  onClick={()=>window.location.reload()}>Reload app</button>
+          <details style={{marginTop:16,textAlign:'left'}}>
+            <summary style={{fontSize:12,color:'var(--grey-400)',cursor:'pointer'}}>Technical details</summary>
+            <div className="error-msg" style={{marginTop:8,whiteSpace:'pre-wrap',fontFamily:'monospace',fontSize:11}}>
+              {String(this.state.error)}
+            </div>
+          </details>
+        </div>
+      </div>
+    );
+  }
+}
+
+ReactDOM.render(<ErrorBoundary><App/></ErrorBoundary>, document.getElementById('root'));
 </script>
 </body>
 </html>
