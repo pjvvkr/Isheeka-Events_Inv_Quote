@@ -18,7 +18,9 @@ No fix is applied without explicit approval.
 ---
 
 ## ISSUE-001 · Template save shows no success confirmation
-**Status:** OPEN — minor (missing functionality)
+**Status:** FIXED + VERIFIED — 12 Jun 2026. Added `notify('Template saved!','success')` before navigating back to the list. Deployed (commit 7ba7d56). Smoke-tested OK.
+
+> **P1-5 (client-blank PDF):** FIXED + VERIFIED — 12 Jun 2026. QuotationDetailModal now enriches quot with client/lead contact details on load; re-downloaded PDFs show phone/email/city on page 2. Deployed (commit 7ba7d56). Smoke-tested OK.
 **Found:** 12 Jun 2026, manual testing
 **Symptom:** Editing a template and clicking save returns to the templates list with **no success message** — unclear whether it saved.
 **Root cause:** `TemplateEditor.handleSave` calls `onSave()` (which navigates back to the list) but never shows a success toast/message. Save itself works.
