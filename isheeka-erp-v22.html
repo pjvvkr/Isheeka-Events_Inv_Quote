@@ -389,6 +389,7 @@ function TemplateEditor({template, onSave, onCancel}) {
         });
       });
       if(allItems.length>0){ const {error:tiie}=await supabase.from('event_template_items').insert(allItems); if(tiie) throw tiie; }
+      notify('Template saved!','success');
       onSave();
     } catch(err){ console.error('[Isheeka ERP] template save failed:', err); setSaveError('Could not save template. Please try again.'); }
     finally { setSaving(false); }
@@ -2949,7 +2950,20 @@ function QuotationDetailModal({quotationId, onClose}) {
         supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order'),
       ]);
       if(!alive) return;
-      setQuot(q||null); setItems(li||[]);
+      // P1-5: enrich with client contact details so the PDF client box isn't blank
+      // (mirrors the wizard's enrichedQuot). Prefer the linked client, fall back to the lead.
+      let qEnriched = q;
+      if(q){
+        if(q.client_id){
+          const {data:c}=await supabase.from('clients').select('phone_1,email_1,city').eq('client_id',q.client_id).single();
+          if(c) qEnriched={...q,client_phone:q.client_phone||c.phone_1||'',client_email:q.client_email||c.email_1||'',client_city:q.client_city||c.city||''};
+        } else if(q.lead_id){
+          const {data:l}=await supabase.from('leads').select('phone,email,location').eq('lead_id',q.lead_id).single();
+          if(l) qEnriched={...q,client_phone:q.client_phone||l.phone||'',client_email:q.client_email||l.email||'',client_city:q.client_city||l.location||''};
+        }
+      }
+      if(!alive) return;
+      setQuot(qEnriched||null); setItems(li||[]);
       if(q&&q.display_options){ try{ setModalDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
       setLoading(false);
     })();
