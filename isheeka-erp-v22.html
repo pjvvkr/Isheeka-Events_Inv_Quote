@@ -5138,44 +5138,27 @@ const QUOT_STATUS_LABELS = {
   expired:'Expired', converted:'Converted',
 };
 
+// P0-4: ref numbers come from an atomic Postgres function (next_counter) so
+// concurrent calls can never produce duplicates. The DB does find-or-create +
+// increment in one locked operation; we just format the returned integer.
 async function getNextQuotRef() {
   const year = new Date().getFullYear().toString().slice(-2);
-  const {data} = await supabase.from('counters').select('*').eq('type','quotation').eq('year',year).single();
-  if(data){
-    const next = (parseInt(data.current_value)||1110) + 1;
-    await supabase.from('counters').update({current_value:next.toString(),updated_at:new Date().toISOString()}).eq('counter_id',data.counter_id);
-    return 'Q-'+year+'-'+next;
-  }
-  // Create counter if not exists
-  await supabase.from('counters').insert({type:'quotation',year:year,current_value:'1111'});
-  return 'Q-'+year+'-1111';
+  const {data,error} = await supabase.rpc('next_counter',{p_type:'quotation',p_year:year,p_seed:1111});
+  if(error||data==null){ notify("Couldn't generate a quotation number. Please try again.",'error'); throw error||new Error('counter failed'); }
+  return 'Q-'+year+'-'+data;
 }
 
 async function getNextLeadRef() {
   const year = new Date().getFullYear().toString().slice(-2);
-  const {data} = await supabase.from('counters').select('*').eq('type','lead').eq('year',year).single();
-  if(data){
-    const next = (parseInt(data.current_value)||1110) + 1;
-    await supabase.from('counters').update({current_value:next,updated_at:new Date().toISOString()}).eq('counter_id',data.counter_id);
-    return 'L-'+year+'-'+next;
-  }
-  await supabase.from('counters').insert({type:'lead',year:year,current_value:1111});
-  return 'L-'+year+'-1111';
+  const {data,error} = await supabase.rpc('next_counter',{p_type:'lead',p_year:year,p_seed:1111});
+  if(error||data==null){ notify("Couldn't generate a lead number. Please try again.",'error'); throw error||new Error('counter failed'); }
+  return 'L-'+year+'-'+data;
 }
 
 async function getNextClientRef() {
-  const {data:existing} = await supabase.from('counters').select('*').eq('type','client').eq('year','0').single();
-  if(!existing){
-    const {data:inserted} = await supabase.from('counters').insert({type:'client',year:'0',current_value:111110,updated_at:new Date().toISOString()}).select().single();
-    if(inserted){
-      await supabase.from('counters').update({current_value:111111,updated_at:new Date().toISOString()}).eq('counter_id',inserted.counter_id);
-      return 'CL-111111';
-    }
-    return 'CL-111111';
-  }
-  const next = (parseInt(existing.current_value)||111110) + 1;
-  await supabase.from('counters').update({current_value:next,updated_at:new Date().toISOString()}).eq('counter_id',existing.counter_id);
-  return 'CL-'+next.toString().padStart(6,'0');
+  const {data,error} = await supabase.rpc('next_counter',{p_type:'client',p_year:'0',p_seed:111111});
+  if(error||data==null){ notify("Couldn't generate a client number. Please try again.",'error'); throw error||new Error('counter failed'); }
+  return 'CL-'+String(data).padStart(6,'0');
 }
 
 // ── Share helpers ─────────────────────────────────────────────────────────────
