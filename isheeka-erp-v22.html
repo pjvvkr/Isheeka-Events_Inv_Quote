@@ -5173,7 +5173,7 @@ async function getNextEventRef() {
   const year = new Date().getFullYear().toString().slice(-2);
   const {data,error} = await supabase.rpc('next_counter',{p_type:'event',p_year:year,p_seed:1});
   if(error||data==null){ notify("Couldn't generate an event number. Please try again.",'error'); throw error||new Error('counter failed'); }
-  return 'EV-'+year+'-'+String(data).padStart(4,'0');
+  return 'E-'+year+'-'+String(data).padStart(4,'0');
 }
 
 // ── Share helpers ─────────────────────────────────────────────────────────────
