@@ -141,6 +141,12 @@ body{font-family:'Inter',sans-serif;background:#f8f4f6;color:#1a1a1a;min-height:
 .tag.pink{background:var(--pink-light);color:var(--pink)}
 .divider{border:none;border-top:1px solid var(--grey-100);margin:20px 0}
 .info-box{background:var(--blue-light);border-radius:var(--radius-md);padding:12px 16px;font-size:13px;color:var(--blue);margin-bottom:16px;display:flex;gap:8px;align-items:flex-start}
+.toast-host{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:8px;max-width:360px}
+.toast{padding:12px 16px;border-radius:var(--radius-md);font-size:13px;font-weight:500;box-shadow:var(--shadow-lg);cursor:pointer;border:1px solid;animation:toastIn .2s ease}
+.toast.error{background:var(--red-light);color:var(--red);border-color:rgba(163,45,45,0.25)}
+.toast.success{background:var(--green-light);color:var(--green);border-color:rgba(15,110,86,0.25)}
+.toast.info{background:var(--pink-light);color:var(--pink);border-color:var(--pink-mid)}
+@keyframes toastIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
 </style>
 </head>
 <body>
@@ -152,6 +158,45 @@ const supabase = window.supabase.createClient(
   'https://jlcssesetnxulnkbrmyp.supabase.co',
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpsY3NzZXNldG54dWxua2JybXlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5NTQ3NDMsImV4cCI6MjA5NjUzMDc0M30.0usmCkhy8ZrZNQH1sEunyx3133OylAAd45F43ZThIrQ'
 );
+
+// ── Toast notifications + DB helper (P0-2) ───────────────────────────────────
+// notify(): non-blocking branded toast, callable from anywhere (incl. non-component fns).
+// runDb(): wraps a Supabase query, surfaces + logs errors instead of failing silently.
+let _toastApi = null;
+function notify(message, type='error', ttl=5000){
+  if(_toastApi) _toastApi.push({message, type, ttl});
+  else console.error('[Isheeka ERP]', type, message);
+}
+function ToastHost(){
+  const [toasts, setToasts] = useState([]);
+  useEffect(()=>{
+    _toastApi = { push:(t)=>{ const id=Date.now()+Math.random();
+      setToasts(ts=>[...ts,{...t,id}]);
+      setTimeout(()=>setToasts(ts=>ts.filter(x=>x.id!==id)), t.ttl||5000); } };
+    return ()=>{ _toastApi=null; };
+  },[]);
+  return (
+    <div className="toast-host">
+      {toasts.map(t=>(
+        <div key={t.id} className={'toast '+t.type} onClick={()=>setToasts(ts=>ts.filter(x=>x.id!==t.id))}>{t.message}</div>
+      ))}
+    </div>
+  );
+}
+async function runDb(query, action){
+  try{
+    const { data, error } = await query;
+    if(error){
+      console.error('[Isheeka ERP] DB error ('+action+'):', error);
+      notify("Couldn't "+action+". "+(error.message||'Please try again.'), 'error');
+    }
+    return { data, error };
+  }catch(err){
+    console.error('[Isheeka ERP] DB exception ('+action+'):', err);
+    notify("Couldn't "+action+". Please try again.", 'error');
+    return { data:null, error:err };
+  }
+}
 
 const SESSION_TIMEOUT = 30*60*1000;
 const SESSION_WARNING = 25*60*1000;
@@ -1436,7 +1481,7 @@ function MassClientUpload({ onClose, onSuccess }) {
         const wb = XLSX.read(evt.target.result, {type:'array'});
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
-        if (data.length < 2) { alert('File appears empty. Please add at least one client row.'); return; }
+        if (data.length < 2) { notify('File appears empty. Please add at least one client row.','error'); return; }
 
         const header = data[0].map(h => String(h).trim().toLowerCase().replace(/ /g,'_'));
         const dataRows = data.slice(1).filter(r => r.some(c => String(c).trim() !== ''));
@@ -1469,7 +1514,7 @@ function MassClientUpload({ onClose, onSuccess }) {
         setErrors(rowErrors);
         setStep('preview');
       } catch(err) {
-        alert('Could not read file. Please use the provided template.');
+        notify('Could not read file. Please use the provided template.','error');
       }
     };
     reader.readAsArrayBuffer(file);
@@ -1855,7 +1900,7 @@ const MAX_PRICE = 9999999; // 99,99,999 — ~1 crore per item
 const sanitizeNum = (val, max) => {
   const n = parseFloat(String(val).replace(/[^0-9.]/g,''));
   if(isNaN(n)||n<0) return 0;
-  if(n>max){ setTimeout(()=>alert('Value '+n.toLocaleString('en-IN')+' seems too high — please check. Maximum allowed is '+max.toLocaleString('en-IN')+'.'),0); return max; }
+  if(n>max){ notify('Value '+n.toLocaleString('en-IN')+' seems too high — please check. Maximum allowed is '+max.toLocaleString('en-IN')+'.','error'); return max; }
   return n;
 };
 const FastItemQty = React.forwardRef(({value, onChange, onTab, onPaste}, ref) => {
@@ -3066,18 +3111,19 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       const phoneChanged = (form.phone||'')!==(lead.phone||'');
       const emailChanged = (form.email||'')!==(lead.email||'');
       if((nameChanged||phoneChanged||emailChanged) && lead.client_id){
-        await supabase.from('clients').update({
+        const {error:cce}=await supabase.from('clients').update({
           first_name:form.first_name,last_name:form.last_name,
           phone_1:form.phone,email_1:form.email||null,
           updated_at:new Date().toISOString()
         }).eq('client_id',lead.client_id);
+        if(cce) throw cce;
       }
       if(nameChanged){
         const newClientName=form.first_name+' '+form.last_name;
         const {data:quots}=await supabase.from('quotations').select('quotation_id,status').eq('lead_id',leadId).eq('is_deleted',false);
         const targets=(quots||[]).filter(q=>!['superseded','rejected','expired','converted'].includes(q.status));
         for(const q of targets){
-          await supabase.from('quotations').update({client_name:newClientName,updated_at:new Date().toISOString()}).eq('quotation_id',q.quotation_id);
+          const {error:qcce}=await supabase.from('quotations').update({client_name:newClientName,updated_at:new Date().toISOString()}).eq('quotation_id',q.quotation_id); if(qcce) throw qcce;
         }
       }
 
@@ -3086,7 +3132,8 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       setTimeout(()=>setSuccessMsg(''),4000);
     } catch(err) {
       setSuccessMsg('');
-      alert('Could not save lead: '+(err?.message||'Please try again.'));
+      console.error('[Isheeka ERP] lead save failed:', err);
+      notify('Could not save lead: '+(err?.message||'Please try again.'),'error');
     } finally { setSaving(false); }
   };
 
@@ -3101,7 +3148,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       setLead(l=>({...l,stage:newStage}));
       // Item 16: confirming the quote approves the active quotation
       if(newStage==='quote_confirmed' && lead.active_quotation_id){
-        await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',lead.active_quotation_id);
+        const {error:ae}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',lead.active_quotation_id); if(ae) throw ae;
         const {data:quots}=await supabase.from('quotations').select('quotation_id,ref_number,status,grand_total,valid_until,revision_number,created_at').eq('lead_id',leadId).eq('is_deleted',false).order('created_at',{ascending:false});
         if(quots) setLeadQuotations(quots);
       }
@@ -3115,7 +3162,8 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       setSuccessMsg(labels[newStage]||'Stage updated.');
       setTimeout(()=>setSuccessMsg(''),4000);
     } catch(err) {
-      alert('Could not update stage: '+(err?.message||'Please try again.'));
+      console.error('[Isheeka ERP] stage update failed:', err);
+      notify('Could not update stage: '+(err?.message||'Please try again.'),'error');
     }
   };
 
@@ -3149,10 +3197,11 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   };
 
   const handleLoss = async (reason, notes) => {
-    await supabase.from('leads').update({
+    const {error:lle}=await runDb(supabase.from('leads').update({
       stage:'lost',lost_reason:reason,lost_notes:notes||null,
       lost_at:new Date().toISOString(),updated_at:new Date().toISOString()
-    }).eq('lead_id',leadId);
+    }).eq('lead_id',leadId),'mark lead as lost');
+    if(lle) return;
     setShowLoss(false);
     await loadLead();
     setSuccessMsg('Lead marked as lost.');
@@ -3223,21 +3272,22 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
         const names=[...new Set((li||[]).map(x=>x.sub_event_name).filter(n=>n&&n.trim()&&n!=='General Items'))];
         let so=0;
         for(const name of names){
-          await supabase.from('sub_events').insert({event_id:event.event_id,name,sort_order:so++,created_at:new Date().toISOString(),is_deleted:false});
+          const {error:sie}=await supabase.from('sub_events').insert({event_id:event.event_id,name,sort_order:so++,created_at:new Date().toISOString(),is_deleted:false}); if(sie) throw sie;
         }
       }
 
       // 5. Mark the approved quotation as converted
       if(approvedQuot){
-        await supabase.from('quotations').update({status:'converted',updated_at:new Date().toISOString()}).eq('quotation_id',approvedQuot.quotation_id);
+        const {error:cve}=await supabase.from('quotations').update({status:'converted',updated_at:new Date().toISOString()}).eq('quotation_id',approvedQuot.quotation_id); if(cve) throw cve;
       }
 
       // 6. Update the lead — reuse client, link event
-      await supabase.from('leads').update({
+      const {error:lue}=await supabase.from('leads').update({
         stage:'event_triggered',client_id:clientId,
         event_id:event.event_id,converted_at:new Date().toISOString(),
         updated_at:new Date().toISOString()
       }).eq('lead_id',leadId);
+      if(lue) throw lue;
 
       setConvertedEventId(event.event_id);
       setConvertClientOutcome({type:clientOutcome, name:lead.first_name+' '+lead.last_name});
@@ -3245,7 +3295,8 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       setShowWelcome(true);
       await loadLead();
     } catch(err){
-      alert('Could not convert lead: '+(err&&err.message?err.message:'Please try again.'));
+      console.error('[Isheeka ERP] lead conversion failed:', err);
+      notify('Could not convert lead: '+(err&&err.message?err.message:'Please try again.'),'error');
     }
   };
 
@@ -4725,8 +4776,8 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
           else { newSubEvents.push({id:'se-'+Date.now()+Math.random(),name:sheetName,date:'',location:'',items}); }
         });
         if(newSubEvents.length>0) setSubEvents(s=>[...s,...newSubEvents]);
-        alert(`Imported ${wb.SheetNames.length} sheet(s) successfully!`);
-      } catch(err){ alert('Could not read file. Please use the provided template.'); }
+        notify(`Imported ${wb.SheetNames.length} sheet(s) successfully!`,'success');
+      } catch(err){ notify('Could not read file. Please use the provided template.','error'); }
     };
     reader.readAsArrayBuffer(file);
     e.target.value='';
@@ -5128,7 +5179,7 @@ function openEmail(provider, to, subject, body){
 // Item 12: branded quotation PDF (action: 'download' | 'print')
 function buildQuotationPDF(quot, lineItems, opts={}){
   const jsPDFctor = window.jspdf && window.jspdf.jsPDF;
-  if(!jsPDFctor){ alert('PDF library not loaded. Please refresh.'); return false; }
+  if(!jsPDFctor){ notify('PDF library not loaded. Please refresh.','error'); return false; }
   const doc = new jsPDFctor({unit:'pt', format:'a4'});
   const dOpts = Object.assign({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:false}, opts.displayOpts||{});
   const settings = opts.settings||{};
@@ -5613,7 +5664,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   });
 
   const handleCreate=async()=>{
-    if(!quotDetails.valid_until){alert('Please set a valid until date.');return;}
+    if(!quotDetails.valid_until){notify('Please set a valid until date.','error');return;}
     setSaving(true);
     try {
       // Item 5: continuing an in-progress draft — update it in place, no new client/ref
@@ -5640,8 +5691,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
         }).eq('quotation_id',existingQuotationId);
         if(ue) throw ue;
         // Hard-delete old items first, then insert fresh set — prevents pile-up on repeated edits
-        await supabase.from('quotation_line_items').delete().eq('quotation_id',existingQuotationId);
-        if(contItems.length>0) await supabase.from('quotation_line_items').insert(contItems);
+        const {error:de}=await supabase.from('quotation_line_items').delete().eq('quotation_id',existingQuotationId);
+        if(de) throw de;
+        if(contItems.length>0){ const {error:cie}=await supabase.from('quotation_line_items').insert(contItems); if(cie) throw cie; }
         const {data:updated}=await supabase.from('quotations').select('*').eq('quotation_id',existingQuotationId).single();
         setCreatedQuot(updated); setStep(4); setSaving(false); return;
       }
@@ -5666,7 +5718,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       }
 
       if(isRevision&&existingQuotationId){
-        await supabase.from('quotations').update({status:'superseded',updated_at:new Date().toISOString()}).eq('quotation_id',existingQuotationId);
+        const {error:spe}=await supabase.from('quotations').update({status:'superseded',updated_at:new Date().toISOString()}).eq('quotation_id',existingQuotationId); if(spe) throw spe;
       }
 
       const {data:oldQ}=isRevision&&existingQuotationId?await supabase.from('quotations').select('revision_number').eq('quotation_id',existingQuotationId).single():{data:null};
@@ -5703,19 +5755,21 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       }).select().single();
       if(qe) throw qe;
 
-      if(lineItems.length>0) await supabase.from('quotation_line_items').insert(lineItems.map(i=>({...i,quotation_id:newQ.quotation_id})));
+      if(lineItems.length>0){ const {error:lie}=await supabase.from('quotation_line_items').insert(lineItems.map(i=>({...i,quotation_id:newQ.quotation_id}))); if(lie) throw lie; }
 
-      await supabase.from('leads').update({
+      const {error:lqe}=await supabase.from('leads').update({
         active_quotation_id:newQ.quotation_id,
         client_id:clientId||lead.client_id||null,
         stage:'quote_generation_in_progress',
         updated_at:new Date().toISOString()
       }).eq('lead_id',lead.lead_id);
+      if(lqe) throw lqe;
 
       setCreatedQuot(newQ);
       setStep(4);
     } catch(err){
-      alert('Could not create quotation: '+(err&&err.message?err.message:'Please try again.'));
+      console.error('[Isheeka ERP] quote creation failed:', err);
+      notify('Could not create quotation: '+(err&&err.message?err.message:'Please try again.'),'error');
     } finally { setSaving(false); }
   };
 
@@ -5723,8 +5777,10 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     if(!createdQuot) return;
     // Always set to sent (never confirmed) — Swathi manually confirms on client's verbal yes
     const newStage = isRevision ? 'revised_quote_sent' : 'quote_sent';
-    await supabase.from('quotations').update({status:'sent',updated_at:new Date().toISOString()}).eq('quotation_id',createdQuot.quotation_id);
-    await supabase.from('leads').update({stage:newStage,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id);
+    const {error:qse}=await runDb(supabase.from('quotations').update({status:'sent',updated_at:new Date().toISOString()}).eq('quotation_id',createdQuot.quotation_id),'mark quotation sent');
+    if(qse) return;
+    const {error:lse}=await runDb(supabase.from('leads').update({stage:newStage,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id),'update lead stage');
+    if(lse) return;
     onComplete(createdQuot);
   };
 
@@ -6049,7 +6105,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-ReactDOM.render(<ErrorBoundary><App/></ErrorBoundary>, document.getElementById('root'));
+ReactDOM.render(<ErrorBoundary><App/><ToastHost/></ErrorBoundary>, document.getElementById('root'));
 </script>
 </body>
 </html>
