@@ -79,7 +79,7 @@ Installment `amount_due` = percentage × grand_total; `balance` = amount_due −
 - **overdue:** any unpaid installment past its due date (computed/badged).
 - **cancelled:** voided (soft).
 
-Ref number: **`INV-YY-####`** via the atomic `next_counter` (invoice counter already exists at 1110 → first new = 1111).
+Ref number: **`I-YY-####`** via the atomic `next_counter` (invoice counter already exists at 1110 → first new = 1111). *(Prefixes standardized to single letter for consistency: `Q-` quote, `E-` event, `I-` invoice.)*
 
 ---
 
