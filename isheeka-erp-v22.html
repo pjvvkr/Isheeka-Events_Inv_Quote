@@ -3028,7 +3028,9 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
     const msg = buildQuoteShareMsg(quot, qSettings, url);
     if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
     else openEmail(channel==='gmail'?'gmail':'default', quot.client_email, 'Quotation '+quot.ref_number+' — Isheeka Events', msg);
-    logQuoteSend(quot.quotation_id, channel==='whatsapp'?'whatsapp':'email');
+    await logQuoteSend(quot.quotation_id, channel==='whatsapp'?'whatsapp':'email');
+    const {data:qact}=await supabase.from('quotation_activity_log').select('*').eq('quotation_id',quot.quotation_id).order('logged_at',{ascending:false});
+    setQActivity(qact||[]);
     setSharing(false);
   };
   // Path B — confirm an event-origin quote: mark approved + auto-create the draft invoice,
@@ -6036,7 +6038,17 @@ function buildInvoiceShareMsg(inv, settings, url){
 }
 
 // Phase 3b — per-document activity/audit logging helpers
-async function _currentUid(){ try{ const {data}=await supabase.auth.getUser(); return (data&&data.user&&data.user.id)||null; }catch(e){ return null; } }
+async function _currentUid(){
+  // Resolve the logged-in auth user to their app `users.user_id` (FK target for *_by columns).
+  // The auth user's id is NOT a users row, so we match on email; null if no staff row (FK allows null).
+  try{
+    const {data}=await supabase.auth.getUser();
+    const email=data&&data.user&&data.user.email;
+    if(!email) return null;
+    const {data:u}=await supabase.from('users').select('user_id').eq('email',email).maybeSingle();
+    return (u&&u.user_id)||null;
+  }catch(e){ return null; }
+}
 async function logQuoteSend(quotationId, channel){
   try{ await supabase.from('quotation_activity_log').insert({quotation_id:quotationId, action:'sent', channel, logged_by:await _currentUid()}); }
   catch(e){ console.error('[Isheeka ERP] quote send-log failed:', e); }
