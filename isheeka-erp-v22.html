@@ -4533,6 +4533,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [revReason, setRevReason] = React.useState('');
   const [revSaving, setRevSaving] = React.useState(false);
   const [srcQuote, setSrcQuote] = React.useState(null);
+  const [pdfDisplay, setPdfDisplay] = React.useState({prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true});
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
@@ -4623,7 +4624,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
         +((parseFloat(it.balance)||0)>0?(' (bal Rs.'+(parseFloat(it.balance)||0).toLocaleString('en-IN')+')'):'')
     }))
   });
-  const pdfOpts = (action)=>({action, docType:'invoice', displayOpts:{prices:true,qty:true,grouping:true,schedule:true,discount:true,coverPage:false,bankDetails:true}, settings});
+  const pdfOpts = (action)=>({action, docType:'invoice', displayOpts:{...pdfDisplay,grouping:true}, settings});
   const downloadPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('download')); }catch(e){ notify('Could not generate the PDF.','error'); } };
   const printPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('print')); }catch(e){ notify('Could not open the print view.','error'); } };
   const previewPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('preview')); }catch(e){ notify('Could not open the preview.','error'); } };
@@ -4693,7 +4694,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if((channel==='gmail'||channel==='email') && !clientInfo.email_1){ notify('This client has no email address on file.','error'); return; }
     setSharing(true);
     notify('Preparing the invoice PDF…','info',2500);
-    const url = await uploadInvoicePdf(invForPdf(), items, settings);
+    const url = await uploadInvoicePdf(invForPdf(), items, settings, pdfDisplay);
     if(!url) notify("Couldn't attach the PDF link — sharing the message; you can attach the downloaded PDF manually.",'error');
     const msg = buildInvoiceShareMsg(inv, settings, url);
     if(channel==='whatsapp') openWhatsApp(clientInfo.phone_1, msg);
@@ -4755,6 +4756,15 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       </div>
 
       {inv.status==='cancelled'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--grey-50)',color:'var(--grey-600)',borderRadius:'var(--radius-sm)',fontSize:12}}>This invoice is cancelled. To raise a new one, open the event {inv.event_id&&<a onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>(go to event →)</a>} and click <b>+ Generate invoice</b>.</div>}
+      {/* PDF options — control what the invoice PDF includes */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'10px 16px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+        <span style={{fontSize:12,fontWeight:600,color:'var(--grey-700)'}}>Include in PDF:</span>
+        {[['prices','Prices'],['qty','Qty'],['schedule','Schedule'],['discount','Discount'],['coverPage','Cover page'],['bankDetails','Bank details']].map(([k,l])=>(
+          <label key={k} style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}>
+            <input type="checkbox" checked={!!pdfDisplay[k]} onChange={e=>setPdfDisplay(o=>({...o,[k]:e.target.checked}))} style={{accentColor:'var(--pink)'}}/>{l}
+          </label>
+        ))}
+      </div>
       {/* Client details (Phase: client edit + cascade) */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
@@ -6113,9 +6123,9 @@ function buildQuoteShareMsg(quot, settings, url){
 }
 
 // Phase 5: upload an invoice PDF to Storage and return a public URL (mirrors uploadQuotePdf)
-async function uploadInvoicePdf(inv, items, settings){
+async function uploadInvoicePdf(inv, items, settings, displayOpts){
   try{
-    const blob = buildQuotationPDF(inv, items, {action:'blob', docType:'invoice', displayOpts:{prices:true,qty:true,grouping:true,schedule:true,discount:true,coverPage:false,bankDetails:true}, settings});
+    const blob = buildQuotationPDF(inv, items, {action:'blob', docType:'invoice', displayOpts:{...(displayOpts||{prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true}),grouping:true}, settings});
     if(!blob || !blob.size) return null;
     const _ref = String(inv.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'');
     const _rev = (inv.revision_number && inv.revision_number>0) ? ('-r'+inv.revision_number) : '';
@@ -6225,8 +6235,8 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   // ---- COVER PAGE (optional) ----
   if(dOpts.coverPage){
     drawFrame();
-    const clh=120, clw=clh*LAR; try{ doc.addImage(LOGO,'PNG',(W-clw)/2,64,clw,clh); }catch(e){}
-    let y=210;
+    const clh=104, clw=clh*LAR; try{ doc.addImage(LOGO,'PNG',(W-clw)/2,66,clw,clh); }catch(e){}
+    let y=206;
     script(46); setText(PINK); doc.text('Isheeka Events', W/2, y, {align:'center'}); y+=22;
     sans('italic',12); setText(MUTED); doc.text('Making Every Event Memorable', W/2, y, {align:'center'}); y+=16;
     script(15); setText(PINK); doc.text('Since 2010', W/2, y, {align:'center'}); y+=28;
@@ -6236,9 +6246,9 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     setDraw(PINK); doc.setLineWidth(1.2); doc.roundedRect((W-pw)/2,y,pw,24,12,12,'S');
     doc.text(pillTxt, W/2, y+16, {align:'center'}); y+=58;
     sans('bold',9); setText(PINK); doc.text('PREPARED FOR', W/2, y, {align:'center'}); y+=16;
-    sans('bold',16); setText(INK); doc.text(String(quot.client_name||''), W/2, y, {align:'center'}); y+=16;
+    sans('bold',16); setText(INK); doc.text(String(quot.event_name||''), W/2, y, {align:'center'}); y+=16;
     sans('normal',11); setText(MUTED);
-    doc.text(String((quot.event_name||'')+(quot.doc_date?'  ·  '+fmt(quot.doc_date):'')), W/2, y, {align:'center'}); y+=36;
+    doc.text(fmt(quot.doc_date), W/2, y, {align:'center'}); y+=36;
     const introTpl = settings.cover_intro || 'Thank you for choosing Isheeka Events to be part of your celebration. Every occasion tells a story, and it is our privilege to help bring yours to life with care, creativity, and attention to the smallest detail.\n\nThe pages that follow set out the details, prepared thoughtfully for {event}. Should you wish to adjust anything, we would be delighted to tailor it to your vision.';
     const introBody = introTpl.replace(/\{client\}/g, quot.client_name||'').replace(/\{event\}/g, quot.event_name||'your event');
     const bx=M+60, bw=W-2*(M+60);
