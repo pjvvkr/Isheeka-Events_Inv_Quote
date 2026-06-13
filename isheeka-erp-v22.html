@@ -4538,6 +4538,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [showPay, setShowPay] = React.useState(false);
   const [payForm, setPayForm] = React.useState({amount:'',date:new Date().toISOString().split('T')[0],mode:'upi',installment_id:'',reference:'',notes:''});
   const [paySaving, setPaySaving] = React.useState(false);
+  const [payFile, setPayFile] = React.useState(null);
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
@@ -4710,8 +4711,8 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   };
   // Phase 4 — record payments
   const unpaidInstallments = installments.filter(it=>(parseFloat(it.balance!=null?it.balance:it.amount_due)||0)>0);
-  const canRecordPay = ['sent','partially_paid','overdue'].includes(inv.status) && outstanding>0;
-  const openPay = ()=>{ setPayForm({amount:'',date:new Date().toISOString().split('T')[0],mode:'upi',installment_id:(unpaidInstallments[0]&&unpaidInstallments[0].installment_id)||'',reference:'',notes:''}); setShowPay(true); };
+  const canRecordPay = inv.status!=='cancelled' && outstanding>0;
+  const openPay = ()=>{ setPayForm({amount:'',date:new Date().toISOString().split('T')[0],mode:'upi',installment_id:(unpaidInstallments[0]&&unpaidInstallments[0].installment_id)||'',reference:'',notes:''}); setPayFile(null); setShowPay(true); };
   const recordPayment = async ()=>{
     if(paySaving) return;
     const amt=parseFloat(payForm.amount)||0;
@@ -4720,7 +4721,17 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if(!payForm.installment_id){ notify('Select which installment this payment is against.','error'); return; }
     setPaySaving(true);
     const uid=await _currentUid();
-    const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:invoiceId, installment_id:payForm.installment_id, amount:amt, payment_date:payForm.date, payment_mode:payForm.mode, reference_number:payForm.reference||null, notes:payForm.notes||null, recorded_by:uid});
+    let receiptUrl=null;
+    if(payFile){
+      try{
+        const ext=((payFile.name||'').split('.').pop()||'png').replace(/[^a-z0-9]/gi,'').slice(0,8)||'png';
+        const path='receipts/'+String(inv.ref_number||'inv').replace(/[^A-Za-z0-9_-]/g,'')+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,6)+'.'+ext;
+        const {error:ue}=await supabase.storage.from('quotations').upload(path, payFile, {contentType:payFile.type||'application/octet-stream', upsert:true});
+        if(ue){ notify('Couldn\'t upload the attachment — recording the payment without it.','error'); }
+        else { const {data:pu}=supabase.storage.from('quotations').getPublicUrl(path); receiptUrl=(pu&&pu.publicUrl)||null; }
+      }catch(e){ notify('Attachment upload failed — recording the payment without it.','error'); }
+    }
+    const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:invoiceId, installment_id:payForm.installment_id, amount:amt, payment_date:payForm.date, payment_mode:payForm.mode, reference_number:payForm.reference||null, notes:payForm.notes||null, recorded_by:uid, receipt_url:receiptUrl});
     if(pe){ notify('Could not record payment: '+(pe.message||''),'error'); setPaySaving(false); return; }
     const it=installments.find(x=>x.installment_id===payForm.installment_id);
     if(it){ const paid=(parseFloat(it.amount_paid)||0)+amt; const due=parseFloat(it.amount_due)||0; const bal=Math.max(0,due-paid); const ist=bal<=0?'paid':'partially_paid'; await supabase.from('invoice_installments').update({amount_paid:paid,balance:bal,status:ist,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id); }
@@ -4829,7 +4840,13 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
               <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Against installment <span style={{color:'var(--red)'}}>*</span></div><select className="field-input" value={payForm.installment_id} onChange={e=>setPayForm(f=>({...f,installment_id:e.target.value}))}>{unpaidInstallments.length===0&&<option value="">No unpaid installments</option>}{unpaidInstallments.map(it=><option key={it.installment_id} value={it.installment_id}>{(it.label||('Installment '+it.installment_number))+' · bal ₹'+(parseFloat(it.balance!=null?it.balance:it.amount_due)||0).toLocaleString('en-IN')}</option>)}</select></div>
             </div>
             <div style={{marginBottom:8}}><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Reference no. (optional)</div><input className="field-input" value={payForm.reference} onChange={e=>setPayForm(f=>({...f,reference:e.target.value}))} placeholder="UTR / cheque no. / txn id"/></div>
-            <div style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Notes (optional)</div><input className="field-input" value={payForm.notes} onChange={e=>setPayForm(f=>({...f,notes:e.target.value}))}/></div>
+            <div style={{marginBottom:12}}><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Notes (optional)</div><input className="field-input" value={payForm.notes} onChange={e=>setPayForm(f=>({...f,notes:e.target.value}))}/></div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Payment confirmation (optional)</div>
+              <input type="file" accept="image/*,application/pdf" onChange={e=>setPayFile((e.target.files&&e.target.files[0])||null)} style={{fontSize:12}}/>
+              {payFile&&<div style={{fontSize:11,color:'var(--grey-400)',marginTop:4}}>Attached: {payFile.name}</div>}
+              <div style={{fontSize:11,color:'var(--grey-400)',marginTop:2}}>Screenshot or PDF — from your phone or computer.</div>
+            </div>
             <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
               <button className="btn" onClick={()=>setShowPay(false)}>Cancel</button>
               <button className="btn primary" disabled={paySaving} onClick={recordPayment}>{paySaving?'Saving…':'Record payment'}</button>
@@ -4941,7 +4958,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             {payments.length===0&&<div style={{fontSize:11,color:'var(--grey-400)',marginTop:4}}>No payments recorded yet.</div>}
             {payments.map(p=>(
               <div key={p.payment_id} style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'3px 0',borderBottom:'1px solid var(--grey-50)'}}>
-                <span style={{color:'var(--grey-600)'}}>{new Date(p.payment_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} · {String(p.payment_mode||'').toUpperCase()}{p.reference_number?(' · '+p.reference_number):''}</span>
+                <span style={{color:'var(--grey-600)'}}>{new Date(p.payment_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} · {String(p.payment_mode||'').toUpperCase()}{p.reference_number?(' · '+p.reference_number):''}{p.receipt_url?<a href={p.receipt_url} target="_blank" rel="noreferrer" style={{color:'var(--pink)',marginLeft:6}}>📎 receipt</a>:''}</span>
                 <span style={{fontWeight:500,color:'var(--green)'}}>₹{parseFloat(p.amount||0).toLocaleString('en-IN')}</span>
               </div>
             ))}
