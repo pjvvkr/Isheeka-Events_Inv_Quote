@@ -7691,7 +7691,10 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
               if(step===1&&clientMode==='existing'&&!existingClient&&!isRevision) return;
               setStep(s=>s+1);
             }}>Next</button>}
-            {step===3&&<button className="btn primary" onClick={handleCreate} disabled={saving}>{saving?'Creating...':isRevision?'Create revised quote':'Create quotation'}</button>}
+            {step===3&&<div style={{display:'flex',alignItems:'center',gap:10}}>
+              {grandTotal>0&&!schedBalanced&&<span style={{fontSize:12,fontWeight:500,color:'var(--orange)',maxWidth:300,textAlign:'right'}}>⚠ Installments {schedBalance<0?('exceed by ₹'+Math.abs(schedBalance).toLocaleString('en-IN')):('₹'+schedBalance.toLocaleString('en-IN')+' short')} — must total ₹{Math.round(grandTotal).toLocaleString('en-IN')}</span>}
+              <button className="btn primary" onClick={handleCreate} disabled={saving||(grandTotal>0&&!schedBalanced)}>{saving?'Creating...':isRevision?'Create revised quote':'Create quotation'}</button>
+            </div>}
           </div>
         )}
       </div>
