@@ -4326,6 +4326,93 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
   );
 }
 
+// ── Quotations Module (standalone list) ──────────────────────────────────────
+function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
+  const [quotes, setQuotes] = React.useState([]);
+  const [viewQuotId, setViewQuotId] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [search, setSearch] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState('');
+
+  const loadQuotes = React.useCallback(async () => {
+    setLoading(true);
+    const {data} = await supabase.from('quotations').select('*').eq('is_deleted',false).order('doc_date',{ascending:false});
+    if(data) setQuotes(data);
+    setLoading(false);
+  },[]);
+  React.useEffect(()=>{ loadQuotes(); },[loadQuotes]);
+  React.useEffect(()=>{ if(initialQuotId){ setViewQuotId(initialQuotId); onConsumed&&onConsumed(); } },[initialQuotId]);
+
+  const filtered = quotes.filter(q=>{
+    const s=search.toLowerCase();
+    const matchSearch=!s||`${q.ref_number} ${q.client_name||''} ${q.event_name||''}`.toLowerCase().includes(s);
+    const matchStatus=!statusFilter||q.status===statusFilter;
+    return matchSearch&&matchStatus;
+  });
+  const cnt=(f)=>quotes.filter(f).length;
+
+  return (
+    <div>
+      <div className="metrics-grid" style={{marginBottom:20}}>
+        <div className="metric-card pink"><div className="metric-icon">📋</div><div className="metric-value">{quotes.length}</div><div className="metric-label">Total quotations</div></div>
+        <div className="metric-card orange"><div className="metric-icon">📤</div><div className="metric-value">{cnt(q=>q.status==='sent')}</div><div className="metric-label">Awaiting response</div></div>
+        <div className="metric-card green"><div className="metric-icon">✅</div><div className="metric-value">{cnt(q=>['approved','converted'].includes(q.status))}</div><div className="metric-label">Confirmed</div></div>
+        <div className="metric-card pink"><div className="metric-icon">📝</div><div className="metric-value">{cnt(q=>q.status==='draft')}</div><div className="metric-label">Draft</div></div>
+      </div>
+
+      <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <div style={{flex:1,minWidth:200,position:'relative'}}>
+          <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,color:'var(--grey-400)',pointerEvents:'none'}}>🔍</span>
+          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by ref, client, event..." value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
+        <select className="field-input" style={{width:170}} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          {Object.keys(QUOT_STATUS_LABELS).map(s=><option key={s} value={s}>{QUOT_STATUS_LABELS[s]}</option>)}
+        </select>
+      </div>
+
+      {loading ? (
+        <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>
+      ) : filtered.length===0 ? (
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:60,textAlign:'center',border:'1px solid var(--grey-100)'}}>
+          <div style={{fontSize:48,marginBottom:12}}>📋</div>
+          <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>{search||statusFilter?'No quotations found':'No quotations yet'}</div>
+          <div style={{fontSize:13,color:'var(--grey-400)'}}>{search||statusFilter?'Try adjusting your search or filter':'Quotations are created from a lead or an event.'}</div>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {filtered.map(q=>{
+            const sc=QUOT_STATUS_COLORS[q.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
+            return (
+              <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer',opacity:q.status==='superseded'?0.65:1}}
+                onMouseEnter={ev=>ev.currentTarget.style.borderColor='var(--grey-200)'}
+                onMouseLeave={ev=>ev.currentTarget.style.borderColor='var(--grey-100)'}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr auto auto',alignItems:'center',padding:'14px 16px',gap:12}}>
+                  <div>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                      <span style={{fontSize:14,fontWeight:500,color:'var(--pink)'}}>{q.ref_number}</span>
+                      {q.revision_number>0&&<span style={{fontSize:11,color:'var(--grey-400)'}}>Rev {q.revision_number}</span>}
+                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{QUOT_STATUS_LABELS[q.status]||q.status}</span>
+                    </div>
+                    <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
+                      {q.client_name&&<span>👤 {q.client_name}</span>}
+                      {q.event_name&&<span>🎪 {q.event_name}</span>}
+                      {q.doc_date&&<span>📅 {new Date(q.doc_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
+                    </div>
+                  </div>
+                  <div style={{textAlign:'right',fontSize:14,fontWeight:600,color:'var(--grey-800)'}}>₹{parseFloat(q.grand_total||0).toLocaleString('en-IN')}</div>
+                  <span style={{color:'var(--grey-400)',fontSize:18}}>›</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>{setViewQuotId(null);loadQuotes();}} onNavigate={onNavigate}/>}
+    </div>
+  );
+}
+
 // ── Invoices Module (Phase 3a) ────────────────────────────────────────────────
 function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
   const [view, setView] = React.useState('list'); // list | detail
@@ -4880,7 +4967,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState('dashboard');
   const [navTarget, setNavTarget] = useState(null);
-  const navigate = useCallback((page, opts={})=>{ setNavTarget((opts&&(opts.eventId||opts.leadId||opts.invoiceId))?{page, eventId:opts.eventId, leadId:opts.leadId, invoiceId:opts.invoiceId}:null); setActivePage(page); },[]);
+  const navigate = useCallback((page, opts={})=>{ setNavTarget((opts&&(opts.eventId||opts.leadId||opts.invoiceId||opts.quotId))?{page, eventId:opts.eventId, leadId:opts.leadId, invoiceId:opts.invoiceId, quotId:opts.quotId}:null); setActivePage(page); },[]);
   const [showWarning, setShowWarning] = useState(false);
   const lastActivity = useRef(Date.now());
   const warningTimer = useRef(null);
@@ -4974,7 +5061,8 @@ function App() {
           {activePage==='events' && <EventsModule initialEventId={navTarget&&navTarget.page==='events'?navTarget.eventId:null} onConsumed={()=>setNavTarget(null)} onNavigate={navigate}/>}
           {activePage==='leads' && <LeadsModule onNavigate={navigate} initialLeadId={navTarget&&navTarget.page==='leads'?navTarget.leadId:null} onConsumed={()=>setNavTarget(null)}/>}
           {activePage==='invoices' && <InvoicesModule onNavigate={navigate} initialInvoiceId={navTarget&&navTarget.page==='invoices'?navTarget.invoiceId:null} onConsumed={()=>setNavTarget(null)}/>}
-          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='invoices' && <ComingSoon page={activePage}/>}
+          {activePage==='quotations' && <QuotationsModule onNavigate={navigate} initialQuotId={navTarget&&navTarget.page==='quotations'?navTarget.quotId:null} onConsumed={()=>setNavTarget(null)}/>}
+          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='invoices' && activePage!=='quotations' && <ComingSoon page={activePage}/>}
         </div>
       </main>
     </div>
