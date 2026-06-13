@@ -3315,7 +3315,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
 
       // 5. Mark the approved quotation as converted
       if(approvedQuot){
-        const {error:cve}=await supabase.from('quotations').update({status:'converted',updated_at:new Date().toISOString()}).eq('quotation_id',approvedQuot.quotation_id); if(cve) throw cve;
+        const {error:cve}=await supabase.from('quotations').update({status:'converted',event_id:event.event_id,updated_at:new Date().toISOString()}).eq('quotation_id',approvedQuot.quotation_id); if(cve) throw cve;
       }
 
       // 6. Update the lead — reuse client, link event
