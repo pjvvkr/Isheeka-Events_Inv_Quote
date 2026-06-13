@@ -1769,7 +1769,7 @@ function ClientsModule() {
 
   const filtered = clients.filter(c=>{
     const q=search.toLowerCase();
-    const matchSearch = !q || `${c.first_name} ${c.last_name} ${c.phone_1} ${c.email_1} ${c.city}`.toLowerCase().includes(q);
+    const matchSearch = !q || `${c.first_name} ${c.last_name} ${c.phone_1} ${c.email_1} ${c.city} ${c.ref_number||''}`.toLowerCase().includes(q);
     const matchStatus = !statusFilter || c.status?.toLowerCase()===statusFilter.toLowerCase();
     const matchSource = !sourceFilter || c.source?.toLowerCase()===sourceFilter.toLowerCase();
     return matchSearch && matchStatus && matchSource;
@@ -1796,7 +1796,7 @@ function ClientsModule() {
       <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center'}}>
         <div style={{flex:1,position:'relative'}}>
           <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,color:'var(--grey-400)',pointerEvents:'none'}}>🔍</span>
-          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by name, phone, email, city..." value={search} onChange={e=>setSearch(e.target.value)}/>
+          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by ref, name, phone, email, city..." value={search} onChange={e=>setSearch(e.target.value)}/>
         </div>
         <select className="field-input" style={{width:140}} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
           <option value="">All statuses</option>
@@ -3866,7 +3866,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
   // Filter leads
   const filtered = leads.filter(l=>{
     const q=search.toLowerCase();
-    const matchSearch = !q || (l.first_name+' '+l.last_name+' '+(l.phone||'')+' '+(l.email||'')).toLowerCase().includes(q);
+    const matchSearch = !q || (l.first_name+' '+l.last_name+' '+(l.phone||'')+' '+(l.email||'')+' '+(l.ref_number||'')).toLowerCase().includes(q);
     const matchStage = !stageFilter || l.stage===stageFilter;
     const matchSource = !sourceFilter || l.source===sourceFilter;
     const matchType = !typeFilter || l.event_type===typeFilter;
@@ -3926,7 +3926,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
       <div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center',flexWrap:'wrap'}}>
         <div style={{flex:1,minWidth:200,position:'relative'}}>
           <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,color:'var(--grey-400)',pointerEvents:'none'}}>🔍</span>
-          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by name, phone, email..." value={search} onChange={e=>setSearch(e.target.value)}/>
+          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by ref, name, phone, email..." value={search} onChange={e=>setSearch(e.target.value)}/>
         </div>
         <select className="field-input" style={{width:150}} value={stageFilter} onChange={e=>setStageFilter(e.target.value)}>
           <option value="">All stages</option>
@@ -4095,7 +4095,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
 
   const filtered = events.filter(e=>{
     const q=search.toLowerCase();
-    const matchSearch = !q || `${e.name} ${e.client_name} ${e.location} ${e.type}`.toLowerCase().includes(q);
+    const matchSearch = !q || `${e.name} ${e.client_name} ${e.location} ${e.type} ${e.ref_number||''}`.toLowerCase().includes(q);
     const matchStatus = !statusFilter || e.status?.toLowerCase()===statusFilter;
     const matchType = !typeFilter || e.type?.toLowerCase()===typeFilter.toLowerCase();
     const matchStaff = !staffFilter || e.assigned_staff_id===staffFilter;
@@ -4133,7 +4133,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
       <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
         <div style={{flex:1,minWidth:200,position:'relative'}}>
           <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,color:'var(--grey-400)',pointerEvents:'none'}}>🔍</span>
-          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by name, client, location..." value={search} onChange={e=>setSearch(e.target.value)}/>
+          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by ref, name, client, location..." value={search} onChange={e=>setSearch(e.target.value)}/>
         </div>
         <select className="field-input" style={{width:140}} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
           <option value="">All statuses</option>
