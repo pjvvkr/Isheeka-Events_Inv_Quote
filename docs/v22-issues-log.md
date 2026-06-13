@@ -23,6 +23,10 @@ No fix is applied without explicit approval.
 
 ---
 
+## ISSUE-003 · sub_event_items.sub_event_id NOT NULL blocked main-event items
+**Status:** FIXED + VERIFIED — 12 Jun 2026. `sub_event_items.sub_event_id` was NOT NULL, but the app stores "main event" items (not under a sub-event) with `sub_event_id = null`. Pre-P0-2 this insert failed *silently* (main items lost, event still saved); after P0-2 it threw and blocked event save. Fix (DB): `ALTER TABLE sub_event_items ALTER COLUMN sub_event_id DROP NOT NULL;`. Verified: event creation with main items now saves. Affects both New Event Wizard and EventDetail edit.
+**Follow-up (open):** multi-table event save (event + sub_events + items) is not transactional — a mid-way failure can leave a partial event. Wrap in a Postgres RPC (same pattern as atomic counters). Also: clean up any partial "New Flow 2" test events created during the failed attempts.
+
 ## ISSUE-001 · Template save shows no success confirmation
 **Status:** FIXED + VERIFIED — 12 Jun 2026. Added `notify('Template saved!','success')` before navigating back to the list. Deployed (commit 7ba7d56). Smoke-tested OK.
 
