@@ -4526,6 +4526,11 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [activity, setActivity] = React.useState([]);
   const [userMap, setUserMap] = React.useState({});
   const [showLog, setShowLog] = React.useState(false);
+  const [revising, setRevising] = React.useState(false);
+  const [revItems, setRevItems] = React.useState([]);
+  const [revDiscount, setRevDiscount] = React.useState(0);
+  const [revReason, setRevReason] = React.useState('');
+  const [revSaving, setRevSaving] = React.useState(false);
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
@@ -4636,6 +4641,46 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     notify('Client updated'+(cascaded?(' — name synced to '+cascaded+' active document'+(cascaded>1?'s':'')):'')+'.','success');
     await loadAll();
   };
+
+  // Revise invoice: edit items + discount in place, mandatory reason, recompute, log the change.
+  const openRevise = () => {
+    if(inv.status==='cancelled') return;
+    if(inv.status==='paid' && !window.confirm('This invoice is fully paid. Revising a settled invoice is an admin action and will be logged. Continue?')) return;
+    setRevItems(items.map(it=>({description:it.description||'',quantity:parseFloat(it.quantity)||1,unit_price:parseFloat(it.unit_price)||0,sub_event_name:it.sub_event_name||null})));
+    setRevDiscount(parseFloat(inv.discount_amount)||0);
+    setRevReason('');
+    setRevising(true);
+  };
+  const revSub = revItems.reduce((s,r)=>s+(parseFloat(r.quantity)||0)*(parseFloat(r.unit_price)||0),0);
+  const revTaxable = Math.max(0, revSub-(parseFloat(revDiscount)||0));
+  const revTax = inv.gst_applicable?Math.round(revTaxable*gstPct/100):0;
+  const revGrand = revTaxable+revTax;
+  const handleRevise = async () => {
+    if(revSaving) return;
+    if(!revReason.trim()){ notify('Please enter a reason for the revision.','error'); return; }
+    if(revItems.filter(r=>r.description.trim()).length===0){ notify('Add at least one line item.','error'); return; }
+    setRevSaving(true);
+    const rows = revItems.filter(r=>r.description.trim()).map((r,idx)=>({invoice_id:invoiceId,description:r.description.trim(),sub_event_name:r.sub_event_name||null,quantity:parseFloat(r.quantity)||0,unit_price:parseFloat(r.unit_price)||0,amount:(parseFloat(r.quantity)||0)*(parseFloat(r.unit_price)||0),sort_order:idx}));
+    const newDiscount=parseFloat(revDiscount)||0, newSub=revSub, newGrand=revGrand, newTax=revTax;
+    const newOut=Math.max(0,newGrand-received);
+    const newRev=(inv.status==='draft')?(inv.revision_number||0):((inv.revision_number||0)+1);
+    const oldGrand=grand;
+    // 1) replace line items
+    const {error:de}=await supabase.from('invoice_line_items').update({is_deleted:true}).eq('invoice_id',invoiceId);
+    if(de){ notify('Could not update line items: '+(de.message||''),'error'); setRevSaving(false); return; }
+    const {error:ie}=await supabase.from('invoice_line_items').insert(rows);
+    if(ie){ notify('Could not save revised items: '+(ie.message||''),'error'); setRevSaving(false); return; }
+    // 2) invoice header
+    const {error:ue}=await supabase.from('invoices').update({subtotal:newSub,discount_amount:newDiscount,tax_amount:newTax,grand_total:newGrand,total_outstanding:newOut,revision_number:newRev,updated_at:new Date().toISOString()}).eq('invoice_id',invoiceId);
+    if(ue){ notify('Could not update the invoice: '+(ue.message||''),'error'); setRevSaving(false); return; }
+    // 3) rescale installments
+    for(const it of installments){ if(it.percentage==null) continue; const due=Math.round(newGrand*(parseFloat(it.percentage)||0)/100); const bal=Math.max(0,due-(parseFloat(it.amount_paid)||0)); await supabase.from('invoice_installments').update({amount_due:due,balance:bal,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id); }
+    // 4) audit
+    await logInvoiceActivity(invoiceId,{action:'revised',field:'grand_total',old_value:'₹'+oldGrand.toLocaleString('en-IN'),new_value:'₹'+newGrand.toLocaleString('en-IN'),reason:revReason.trim(),revision_number:newRev});
+    setRevSaving(false); setRevising(false);
+    notify('Invoice revised'+(newRev>(inv.revision_number||0)?(' (rev '+newRev+')'):'')+'.','success');
+    await loadAll();
+  };
   const canShare = ['sent','partially_paid','paid','overdue'].includes(inv.status);
   const shareInvoice = async (channel)=>{
     if(sharing) return;
@@ -4687,6 +4732,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
             {inv.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})}>Go to event →</button>}
             {inv.status==='draft'&&<button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
+            {inv.status!=='cancelled'&&<button className="btn sm" disabled={saving} onClick={openRevise}>✏️ Revise</button>}
             {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('whatsapp')}>💬 WhatsApp</button>}
             {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('gmail')}>Email</button>}
             <button className="btn sm" disabled={saving} onClick={previewPdf}>👁 Preview</button>
@@ -4722,6 +4768,41 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowClientEdit(false);}}>
           <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:680,boxShadow:'var(--shadow-lg)',padding:'8px 4px'}}>
             <ClientForm initial={clientInfo} title="Edit client" onSave={handleSaveClient} onCancel={()=>setShowClientEdit(false)}/>
+          </div>
+        </div>
+      )}
+      {revising&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setRevising(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:720,boxShadow:'var(--shadow-lg)',padding:'20px 24px'}}>
+            <div style={{fontSize:16,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Revise invoice {inv.ref_number}</div>
+            <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:14}}>Edits recompute totals and installments and are logged. {inv.status!=='draft'?('This invoice has been issued — saving creates revision '+((inv.revision_number||0)+1)+'.'):'This is a draft — it updates in place.'}</div>
+            <div style={{maxHeight:300,overflowY:'auto',marginBottom:12}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 70px 110px 28px',gap:8,fontSize:11,color:'var(--grey-400)',marginBottom:4}}><span>Description</span><span>Qty</span><span>Unit price</span><span></span></div>
+              {revItems.map((r,i)=>(
+                <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 70px 110px 28px',gap:8,marginBottom:6,alignItems:'center'}}>
+                  <input className="field-input" value={r.description} placeholder="Description" onChange={e=>{const a=[...revItems];a[i]={...a[i],description:e.target.value};setRevItems(a);}}/>
+                  <input className="field-input" type="number" value={r.quantity} onChange={e=>{const a=[...revItems];a[i]={...a[i],quantity:e.target.value};setRevItems(a);}}/>
+                  <input className="field-input" type="number" value={r.unit_price} onChange={e=>{const a=[...revItems];a[i]={...a[i],unit_price:e.target.value};setRevItems(a);}}/>
+                  <button className="btn sm" style={{color:'var(--red)'}} onClick={()=>setRevItems(revItems.filter((_,j)=>j!==i))}>✕</button>
+                </div>
+              ))}
+              <button className="btn sm" onClick={()=>setRevItems([...revItems,{description:'',quantity:1,unit_price:0,sub_event_name:null}])}>+ Add item</button>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,borderTop:'1px solid var(--grey-100)',paddingTop:10,marginBottom:10}}>
+              <label style={{fontSize:13,color:'var(--grey-600)'}}>Discount (₹) <input className="field-input" type="number" style={{width:120,display:'inline-block',marginLeft:8}} value={revDiscount} onChange={e=>setRevDiscount(e.target.value)}/></label>
+              <div style={{textAlign:'right',fontSize:13}}>
+                <div style={{color:'var(--grey-400)'}}>Subtotal ₹{revSub.toLocaleString('en-IN')}{inv.gst_applicable?(' · GST ₹'+revTax.toLocaleString('en-IN')):''}</div>
+                <div style={{fontSize:15,fontWeight:600}}>Grand total ₹{revGrand.toLocaleString('en-IN')}</div>
+              </div>
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Reason for revision <span style={{color:'var(--red)'}}>*</span></div>
+              <textarea className="field-input" rows={2} value={revReason} onChange={e=>setRevReason(e.target.value)} placeholder="e.g. Client added lighting on event day"/>
+            </div>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button className="btn" onClick={()=>setRevising(false)}>Cancel</button>
+              <button className="btn primary" disabled={revSaving} onClick={handleRevise}>{revSaving?'Saving…':'Save revision'}</button>
+            </div>
           </div>
         </div>
       )}
