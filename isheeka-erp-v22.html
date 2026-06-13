@@ -3613,82 +3613,10 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
 
   const handleConvert = async (forcedClientId) => {
     setClientMatches(null);
-    const resolvedClientId = forcedClientId!==undefined ? forcedClientId : null;
     try {
-      let clientId = resolvedClientId || lead.client_id || null;
-      let clientOutcome = clientId ? 'reused' : 'created';
-      if(!clientId){
-        const ref_number = await getNextClientRef();
-        const {data:client,error:ce} = await supabase.from('clients').insert({
-          ref_number,
-          first_name:lead.first_name,last_name:lead.last_name,
-          phone_1:lead.phone,phone_2:lead.phone_2||null,
-          email_1:lead.email||null,source:lead.source||'referral',status:'active',
-          client_since:new Date().toISOString().split('T')[0],
-          created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false
-        }).select().single();
-        if(ce) throw ce;
-        clientId = client.client_id;
-        clientOutcome = 'created';
-      }
-
-      // 2. Load the approved (active) quotation to build the event from it
-      let approvedQuot = null;
-      if(lead.active_quotation_id){
-        const {data:q} = await supabase.from('quotations').select('*').eq('quotation_id',lead.active_quotation_id).single();
-        approvedQuot = q;
-      }
-
-      // 3. Create the event from lead + approved quotation
-      const evRef = await getNextEventRef();
-      const {data:event,error:ee} = await supabase.from('events').insert({
-        ref_number:evRef,
-        lead_id:leadId,
-        name:(approvedQuot&&approvedQuot.event_name)||defaultEventName(lead.event_type),
-        type:lead.event_type||null,status:'planning',
-        main_date:lead.tentative_date||null,
-        location:lead.location||null,
-        guest_count:lead.guest_count||null,
-        budget:lead.budget||null,
-        client_id:clientId,
-        client_name:lead.first_name+' '+lead.last_name,
-        created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false
-      }).select().single();
-      if(ee) throw ee;
-
-      // 4. Seed event sub-events from the approved quotation's line items (distinct sub-event names)
-      if(approvedQuot){
-        const {data:li} = await supabase.from('quotation_line_items').select('sub_event_name').eq('quotation_id',approvedQuot.quotation_id).eq('is_deleted',false);
-        const names=[...new Set((li||[]).map(x=>x.sub_event_name).filter(n=>n&&n.trim()&&n!=='General Items'))];
-        let so=0;
-        for(const name of names){
-          const {error:sie}=await supabase.from('sub_events').insert({event_id:event.event_id,name,sort_order:so++,created_at:new Date().toISOString(),is_deleted:false}); if(sie) throw sie;
-        }
-      }
-
-      // 5. Mark the approved quotation as converted
-      if(approvedQuot){
-        const {error:cve}=await supabase.from('quotations').update({status:'converted',event_id:event.event_id,updated_at:new Date().toISOString()}).eq('quotation_id',approvedQuot.quotation_id); if(cve) throw cve;
-      }
-
-      // 5b. Auto-create the draft invoice from the approved quote (Phase 2).
-      // Best-effort: the event already exists, so a hiccup here must not fail the
-      // conversion — the user can re-run it from the event's "Generate invoice".
-      if(approvedQuot){
-        try { await createInvoiceFromQuote(approvedQuot.quotation_id,{eventId:event.event_id}); }
-        catch(invErr){ console.error('[Isheeka ERP] invoice auto-create failed:', invErr); notify('Event created, but the draft invoice couldn\'t be generated automatically — use "Generate invoice" on the event.','error'); }
-      }
-
-      // 6. Update the lead — reuse client, link event
-      const {error:lue}=await supabase.from('leads').update({
-        stage:'event_triggered',client_id:clientId,
-        event_id:event.event_id,converted_at:new Date().toISOString(),
-        updated_at:new Date().toISOString()
-      }).eq('lead_id',leadId);
-      if(lue) throw lue;
-
-      setConvertedEventId(event.event_id);
-      setConvertClientOutcome({type:clientOutcome, name:lead.first_name+' '+lead.last_name});
+      const res = await createEventFromQuote(lead, {forcedClientId});
+      setConvertedEventId(res.eventId);
+      setConvertClientOutcome({type:res.clientOutcome, name:res.clientName});
       setShowConvert(false);
       setShowWelcome(true);
       await loadLead();
@@ -6598,6 +6526,66 @@ async function getNextInvoiceRef() {
 // transactional Postgres RPC in the post-baseline hardening pass.)
 // Returns: the new invoice row · an existing invoice (dedupe, one live per event)
 // · or null on failure (a branded toast explains why).
+// Shared lead→event conversion: resolve/create client → create event → seed sub-events →
+// mark the quote converted → draft invoice (best-effort) → link the lead. Used by the lead's
+// "Convert" and (Phase 2) the quote page's "Confirm & create event".
+// Returns {eventId, clientOutcome, clientName}; throws on hard failures.
+async function createEventFromQuote(lead, opts={}) {
+  let clientId = (opts.forcedClientId!==undefined ? opts.forcedClientId : null) || lead.client_id || null;
+  let clientOutcome = clientId ? 'reused' : 'created';
+  if(!clientId){
+    const ref_number = await getNextClientRef();
+    const {data:client,error:ce} = await supabase.from('clients').insert({
+      ref_number,
+      first_name:lead.first_name,last_name:lead.last_name,
+      phone_1:lead.phone,phone_2:lead.phone_2||null,
+      email_1:lead.email||null,source:lead.source||'referral',status:'active',
+      client_since:new Date().toISOString().split('T')[0],
+      created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false
+    }).select().single();
+    if(ce) throw ce;
+    clientId = client.client_id; clientOutcome='created';
+  }
+  let approvedQuot = opts.quot || null;
+  if(!approvedQuot && lead.active_quotation_id){
+    const {data:q} = await supabase.from('quotations').select('*').eq('quotation_id',lead.active_quotation_id).single();
+    approvedQuot = q;
+  }
+  const evRef = await getNextEventRef();
+  const {data:event,error:ee} = await supabase.from('events').insert({
+    ref_number:evRef,
+    lead_id:lead.lead_id,
+    name:(approvedQuot&&approvedQuot.event_name)||defaultEventName(lead.event_type),
+    type:lead.event_type||null,status:'planning',
+    main_date:lead.tentative_date||null,
+    location:lead.location||null,
+    guest_count:lead.guest_count||null,
+    budget:lead.budget||null,
+    client_id:clientId,
+    client_name:lead.first_name+' '+lead.last_name,
+    created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false
+  }).select().single();
+  if(ee) throw ee;
+  if(approvedQuot){
+    const {data:li} = await supabase.from('quotation_line_items').select('sub_event_name').eq('quotation_id',approvedQuot.quotation_id).eq('is_deleted',false);
+    const names=[...new Set((li||[]).map(x=>x.sub_event_name).filter(n=>n&&n.trim()&&n!=='General Items'))];
+    let so=0;
+    for(const name of names){
+      const {error:sie}=await supabase.from('sub_events').insert({event_id:event.event_id,name,sort_order:so++,created_at:new Date().toISOString(),is_deleted:false}); if(sie) throw sie;
+    }
+    const {error:cve}=await supabase.from('quotations').update({status:'converted',event_id:event.event_id,updated_at:new Date().toISOString()}).eq('quotation_id',approvedQuot.quotation_id); if(cve) throw cve;
+    try { await createInvoiceFromQuote(approvedQuot.quotation_id,{eventId:event.event_id}); }
+    catch(invErr){ console.error('[Isheeka ERP] invoice auto-create failed:', invErr); notify('Event created, but the draft invoice couldn\'t be generated automatically — use "Generate invoice" on the event.','error'); }
+  }
+  const {error:lue}=await supabase.from('leads').update({
+    stage:'event_triggered',client_id:clientId,
+    event_id:event.event_id,converted_at:new Date().toISOString(),
+    updated_at:new Date().toISOString()
+  }).eq('lead_id',lead.lead_id);
+  if(lue) throw lue;
+  return {eventId:event.event_id, clientOutcome, clientName:lead.first_name+' '+lead.last_name};
+}
+
 async function createInvoiceFromQuote(quotationId, opts={}) {
   const {data:quot,error:qe} = await supabase.from('quotations').select('*').eq('quotation_id',quotationId).single();
   if(qe||!quot){ notify('Could not load the quotation to invoice.','error'); return null; }
