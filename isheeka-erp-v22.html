@@ -664,6 +664,115 @@ function LeadSourceInput({value,onChange}) {
   return <input className="field-input" value={value} onChange={e=>onChange(e.target.value)} placeholder="e.g. Trade Show, Instagram..."/>;
 }
 
+// ── Event Types Configuration Tab ────────────────────────────────────────────
+function EventTypesTab() {
+  const [types, setTypes] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [newLabel, setNewLabel] = React.useState('');
+  const [addError, setAddError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [successMsg, setSuccessMsg] = React.useState('');
+
+  React.useEffect(()=>{ loadTypes(); },[]);
+
+  const loadTypes = async () => {
+    setLoading(true);
+    const {data} = await supabase.from('event_types').select('*').order('sort_order').order('label');
+    if(data) setTypes(data);
+    _eventTypesCache = null; // clear so forms reload
+    setLoading(false);
+  };
+
+  const handleAdd = async () => {
+    if(!newLabel.trim()){setAddError('Label is required');return;}
+    const val = newLabel.trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+    if(!val){setAddError('Enter a valid label');return;}
+    if(types.some(t=>t.value===val)){setAddError('That event type already exists');return;}
+    setSaving(true);
+    const {error:eie}=await runDb(supabase.from('event_types').insert({
+      label:newLabel.trim(), value:val,
+      sort_order:types.length+1, is_active:true,
+      created_at:new Date().toISOString()
+    }),'add event type');
+    if(eie){ setSaving(false); return; }
+    setNewLabel(''); setAddError('');
+    await loadTypes();
+    setSuccessMsg('Event type added!');
+    setTimeout(()=>setSuccessMsg(''),3000);
+    setSaving(false);
+  };
+
+  const toggleActive = async (t) => {
+    const {error:ete}=await runDb(supabase.from('event_types').update({is_active:!t.is_active}).eq('event_type_id',t.event_type_id),'update event type');
+    if(ete) return;
+    setTypes(s=>s.map(x=>x.event_type_id===t.event_type_id?{...x,is_active:!x.is_active}:x));
+    _eventTypesCache = null;
+  };
+
+  const moveUp = async (idx) => {
+    if(idx===0) return;
+    const a=types[idx], b=types[idx-1];
+    const {error:em1}=await runDb(supabase.from('event_types').update({sort_order:b.sort_order}).eq('event_type_id',a.event_type_id),'reorder event type');
+    if(em1) return;
+    const {error:em2}=await runDb(supabase.from('event_types').update({sort_order:a.sort_order}).eq('event_type_id',b.event_type_id),'reorder event type');
+    if(em2) return;
+    await loadTypes(); _eventTypesCache=null;
+  };
+
+  return (
+    <div>
+      <div className="settings-section-title">Event types</div>
+      <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:16}}>
+        Configure the event types that appear when creating a lead or event. Deactivating a type hides it from new records but leaves existing events unchanged.
+      </div>
+
+      {successMsg&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'8px 14px',fontSize:13,marginBottom:12}}>✅ {successMsg}</div>}
+
+      {loading ? <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
+        <>
+          <div style={{background:'white',borderRadius:'var(--radius-md)',border:'1px solid var(--grey-100)',overflow:'hidden',marginBottom:16}}>
+            <div style={{padding:'8px 16px',background:'var(--pink-light)',display:'grid',gridTemplateColumns:'1fr auto auto auto',gap:8,fontSize:11,fontWeight:700,color:'var(--pink)',textTransform:'uppercase',letterSpacing:'.04em'}}>
+              <div>Label</div><div>Order</div><div>Status</div><div></div>
+            </div>
+            {types.map((t,i)=>(
+              <div key={t.event_type_id} style={{display:'grid',gridTemplateColumns:'1fr auto auto auto',gap:8,alignItems:'center',padding:'10px 16px',borderBottom:'1px solid var(--grey-100)',opacity:t.is_active?1:.5}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{t.label}</div>
+                  <div style={{fontSize:11,color:'var(--grey-400)',fontFamily:'monospace'}}>{t.value}</div>
+                </div>
+                <button className="btn sm" onClick={()=>moveUp(i)} disabled={i===0} style={{opacity:i===0?.3:1,padding:'2px 8px'}}>↑</button>
+                <button className="btn sm" style={{fontSize:11,color:t.is_active?'var(--green)':'var(--grey-400)',borderColor:t.is_active?'var(--green)':'var(--grey-200)'}}
+                  onClick={()=>toggleActive(t)}>
+                  {t.is_active?'Active':'Inactive'}
+                </button>
+                <div style={{width:20}}/>
+              </div>
+            ))}
+            {types.length===0&&<div style={{padding:20,textAlign:'center',color:'var(--grey-400)',fontSize:13}}>No event types yet</div>}
+          </div>
+
+          <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:16,border:'1px solid var(--grey-100)'}}>
+            <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)',marginBottom:10}}>Add new event type</div>
+            {addError&&<div style={{fontSize:12,color:'var(--red)',marginBottom:8}}>⚠ {addError}</div>}
+            <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
+              <div style={{flex:1}}>
+                <label className="field-label">Event type label</label>
+                <input className="field-input" value={newLabel} onChange={e=>{setNewLabel(e.target.value);setAddError('');}} placeholder="e.g. Baby Shower, Engagement..."/>
+              </div>
+              <button className="btn primary" onClick={handleAdd} disabled={saving} style={{flexShrink:0}}>
+                {saving?'Adding...':'+ Add type'}
+              </button>
+            </div>
+            <div style={{fontSize:11,color:'var(--grey-400)',marginTop:6}}>
+              The value will be auto-generated from the label (e.g. "Baby Shower" → baby_shower)
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Settings Field Component (outside to prevent re-render focus loss) ────────
 function SettingsField({field, label, required, type='text', placeholder='', readOnly=false, hint='', rows=3, form, errors, handleChange}) {
   return (
@@ -729,7 +838,7 @@ function SettingsModule() {
     if (tab === 'company') {
       if (!form.company_name?.trim()) newErrors.company_name = 'Company name is required';
       if (!form.email?.trim()) newErrors.email = 'Email is required';
-      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) newErrors.email = 'Enter a valid email address';
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) newErrors.email = 'Enter a valid email address';
       if (!form.phone_1?.trim()) newErrors.phone_1 = 'Primary phone is required';
       if (!form.street_address?.trim()) newErrors.street_address = 'Street address is required';
       if (!form.city?.trim()) newErrors.city = 'City is required';
@@ -779,6 +888,7 @@ function SettingsModule() {
     {id:'terms',label:'Terms & conditions',icon:'📜'},
     {id:'templates',label:'Templates',icon:'📋'},
     {id:'lead_sources',label:'Lead sources',icon:'🏷️'},
+    {id:'event_types',label:'Event types',icon:'🎉'},
   ];
 
   if (loading) return <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:60}}><div className="spinner"></div></div>;
@@ -941,8 +1051,9 @@ function SettingsModule() {
 
         {activeTab === 'templates' && <TemplatesTab/>}
         {activeTab === 'lead_sources' && <LeadSourcesTab/>}
+        {activeTab === 'event_types' && <EventTypesTab/>}
 
-        {activeTab !== 'templates' && activeTab !== 'lead_sources' && (
+        {activeTab !== 'templates' && activeTab !== 'lead_sources' && activeTab !== 'event_types' && (
         <div className="save-bar">
           <div className="save-hint">
             {saved
@@ -1151,7 +1262,9 @@ function ClientForm({initial={}, onSave, onCancel, title='New client'}) {
     if(!form.last_name?.trim()) e.last_name='Last name is required';
     if(!form.phone_1?.trim()) e.phone_1='Primary phone is required';
     if(!form.email_1?.trim()) e.email_1='Primary email is required';
-    else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_1)) e.email_1='Enter a valid email';
+    else if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_1.trim())) e.email_1='Enter a valid email';
+    if(form.email_2?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_2.trim())) e.email_2='Enter a valid email';
+    if(form.email_3?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_3.trim())) e.email_3='Enter a valid email';
     if(!form.source) e.source='Please select a source';
     return e;
   };
@@ -1160,7 +1273,11 @@ function ClientForm({initial={}, onSave, onCancel, title='New client'}) {
     const e = validate();
     if(Object.keys(e).length>0){setErrors(e);setSaveError('Please fill in all required fields.');return;}
     setSaving(true); setSaveError('');
-    try { await onSave(form); }
+    // Normalize: trim whitespace off contact fields so a stray leading/trailing space
+    // (common from autofill/paste) never gets stored or re-fails validation later.
+    const norm={...form};
+    ['first_name','last_name','email_1','email_2','email_3','phone_1','phone_2','phone_3','city','state','pincode','street_address','gst_number'].forEach(k=>{ if(typeof norm[k]==='string') norm[k]=norm[k].trim(); });
+    try { await onSave(norm); }
     catch(err){ setSaveError('Could not save client. Please try again.'); }
     finally { setSaving(false); }
   };
@@ -1190,8 +1307,8 @@ function ClientForm({initial={}, onSave, onCancel, title='New client'}) {
         </div>
         <div className="form-grid three" style={{marginBottom:16}}>
           <InputField label="Email 1" required value={form.email_1} onChange={v=>set('email_1',v)} placeholder="priya@email.com" error={errors.email_1}/>
-          <InputField label="Email 2" value={form.email_2} onChange={v=>set('email_2',v)} placeholder="alt@email.com"/>
-          <InputField label="Email 3" value={form.email_3} onChange={v=>set('email_3',v)} placeholder="alt2@email.com"/>
+          <InputField label="Email 2" value={form.email_2} onChange={v=>set('email_2',v)} placeholder="alt@email.com" error={errors.email_2}/>
+          <InputField label="Email 3" value={form.email_3} onChange={v=>set('email_3',v)} placeholder="alt2@email.com" error={errors.email_3}/>
         </div>
         <div style={{height:1,background:'var(--grey-100)',margin:'16px 0'}}/>
         <div style={{fontSize:13,fontWeight:500,color:'var(--grey-600)',marginBottom:12}}>Address</div>
@@ -1330,6 +1447,41 @@ function ClientDetail({clientId, onBack}) {
     setAltContacts(ac=>ac.filter(a=>a.contact_id!==contactId));
   };
 
+  const [statusSaving, setStatusSaving] = useState(false);
+  const handleSetStatus = async (newStatus) => {
+    if(!newStatus || newStatus===client.status) return;
+    setStatusSaving(true);
+    const {error:cse}=await runDb(supabase.from('clients').update({status:newStatus,updated_at:new Date().toISOString()}).eq('client_id',clientId),'update client status');
+    setStatusSaving(false);
+    if(cse) return;
+    setClient(c=>({...c,status:newStatus}));
+    notify(newStatus==='inactive'?'Client set to Inactive — they won\'t appear when creating new leads, quotes, or events.':'Client status updated.','success');
+  };
+
+  // Soft-delete (archive). Blocked when the client is referenced by any non-deleted
+  // lead/quotation/event/invoice — those documents must keep a resolvable client.
+  const handleDeleteClient = async () => {
+    // Count live references across all four record types.
+    const checks = await Promise.all([
+      supabase.from('leads').select('lead_id',{count:'exact',head:true}).eq('client_id',clientId).eq('is_deleted',false),
+      supabase.from('quotations').select('quotation_id',{count:'exact',head:true}).eq('client_id',clientId).eq('is_deleted',false),
+      supabase.from('events').select('event_id',{count:'exact',head:true}).eq('client_id',clientId).eq('is_deleted',false),
+      supabase.from('invoices').select('invoice_id',{count:'exact',head:true}).eq('client_id',clientId).eq('is_deleted',false),
+    ]);
+    const labels=['lead','quotation','event','invoice'];
+    const linked=checks.map((r,i)=>({label:labels[i],n:r.count||0})).filter(x=>x.n>0);
+    if(linked.length>0){
+      const summary=linked.map(x=>x.n+' '+x.label+(x.n>1?'s':'')).join(', ');
+      notify('Cannot delete — this client is linked to '+summary+'. Set them Inactive instead to stop using them on new records.','error');
+      return;
+    }
+    if(!window.confirm('Delete (archive) '+client.first_name+' '+client.last_name+'? They will be removed from the Clients list. This can be undone in the database if needed.')) return;
+    const {error:cde}=await runDb(supabase.from('clients').update({is_deleted:true,updated_at:new Date().toISOString()}).eq('client_id',clientId),'delete client');
+    if(cde) return;
+    notify('Client archived.','success');
+    onBack&&onBack();
+  };
+
   if(loading) return <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>;
   if(!client) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>Client not found.</div>;
 
@@ -1367,7 +1519,15 @@ function ClientDetail({clientId, onBack}) {
             </div>
           </div>
         </div>
-        <button className="btn sm primary" onClick={()=>setEditing(true)}>✏️ Edit client</button>
+        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          <select className="field-input" style={{width:130,fontSize:13,padding:'6px 10px'}} value={client.status||'active'} disabled={statusSaving} onChange={e=>handleSetStatus(e.target.value)} title="Client status">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="vip">VIP</option>
+          </select>
+          <button className="btn sm primary" onClick={()=>setEditing(true)}>✏️ Edit client</button>
+          <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={handleDeleteClient}>🗑 Delete</button>
+        </div>
       </div>
 
       <div className="form-grid">
@@ -1513,7 +1673,7 @@ function MassClientUpload({ onClose, onSuccess }) {
           if (obj.status && !VALID_STATUS.includes(obj.status.toLowerCase())) rowErrs.push(`status must be: active, inactive, or vip`);
           if (obj.preferred_contact && !VALID_CONTACT.includes(obj.preferred_contact.toLowerCase())) rowErrs.push(`preferred_contact must be: whatsapp, phone, or email`);
           // Email format
-          if (obj.email_1 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(obj.email_1)) rowErrs.push(`email_1 format is invalid`);
+          if (obj.email_1 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(obj.email_1).trim())) rowErrs.push(`email_1 format is invalid`);
 
           if (rowErrs.length > 0) rowErrors.push({row: ri+2, errors: rowErrs, data: obj});
           else parsed.push({
@@ -2035,7 +2195,7 @@ function ChangeClientModal({currentClient, onSave, onCancel}) {
 
   React.useEffect(()=>{
     supabase.from('clients').select('client_id,first_name,last_name,phone_1,status')
-      .eq('is_deleted',false).order('first_name')
+      .eq('is_deleted',false).neq('status','inactive').order('first_name')
       .then(({data})=>{ if(data) setClients(data); setLoading(false); });
   },[]);
 
@@ -2096,6 +2256,7 @@ function ChangeClientModal({currentClient, onSave, onCancel}) {
 
 // ── EventDetail ───────────────────────────────────────────────────────────────
 function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
+  const eventTypes = useEventTypes();
   const [event, setEvent] = React.useState(null);
   const [subEvents, setSubEvents] = React.useState([]);
   const [checklist, setChecklist] = React.useState([]);
@@ -2331,8 +2492,12 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const sc = EVENT_STATUS_COLORS[event.status?.toLowerCase()]||EVENT_STATUS_COLORS.planning;
   const hasFinancialDocs = quotations.length>0||invoices.length>0;
   const activeQuote = quotations.find(q=>!['superseded','rejected','expired','converted'].includes(q.status));
+  // Once an invoice has been ISSUED (sent or beyond), the invoice is the master — quote revisions
+  // would silently diverge from the document the client received/paid against. Draft invoices still
+  // auto-refresh from the quote, so revising is fine while the only invoice is a draft.
+  const invoiceIssued = invoices.some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase()));
   const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name}));
-  const typeOpts = EVENT_TYPES.map(t=>({value:t.toLowerCase(),label:t}));
+  const typeOpts = eventTypes.map(t=>({value:t.value,label:t.label}));
   const statusOpts = EVENT_STATUS_ORDER.map(s=>({value:s,label:EVENT_STATUS_LABELS[s]}));
   const contactOpts = [{value:'',label:'Client themselves'},...altContacts.map(ac=>({value:ac.contact_id,label:ac.first_name+' '+ac.last_name+' ('+ac.relationship+')'}))];
   const grandTotal = subEvents.reduce((s,se)=>s+se.items.reduce((ss,i)=>ss+(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0),0),0)
@@ -2501,7 +2666,9 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
               <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em'}}>Quotations ({quotations.length})</div>
               {activeQuote
-                ? <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(activeQuote.quotation_id)} title="Revise the active quotation">✏️ Revise</button>
+                ? (invoiceIssued
+                    ? <span style={{fontSize:11,color:'var(--grey-400)',display:'inline-flex',alignItems:'center',gap:4}} title="An invoice has already been issued for this event. To change scope or pricing, revise the invoice instead — revising the quote now would diverge from the issued invoice.">🔒 Invoice issued — revise the invoice</span>
+                    : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(activeQuote.quotation_id)} title="Revise the active quotation">✏️ Revise</button>)
                 : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>}
             </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
@@ -2695,6 +2862,33 @@ async function fetchLeadSources() {
   return LEAD_SOURCES_DEFAULT;
 }
 
+// Configurable event types (mirror of lead sources)
+const EVENT_TYPES_DEFAULT = [
+  {value:'wedding',label:'Wedding'},
+  {value:'corporate',label:'Corporate'},
+  {value:'birthday',label:'Birthday'},
+  {value:'anniversary',label:'Anniversary'},
+  {value:'other',label:'Other'},
+];
+let _eventTypesCache = null;
+async function fetchEventTypes() {
+  if(_eventTypesCache) return _eventTypesCache;
+  try {
+    const {data} = await supabase.from('event_types').select('*').eq('is_active',true).order('sort_order');
+    if(data && data.length>0){
+      _eventTypesCache = data.map(t=>({value:t.value,label:t.label}));
+      return _eventTypesCache;
+    }
+  } catch(e){}
+  return EVENT_TYPES_DEFAULT;
+}
+// Hook: configurable event types as [{value,label}] (falls back to defaults).
+function useEventTypes() {
+  const [t,setT] = React.useState(EVENT_TYPES_DEFAULT);
+  React.useEffect(()=>{ fetchEventTypes().then(setT); },[]);
+  return t;
+}
+
 // ── Lead follow-up urgency ────────────────────────────────────────────────────
 function getFollowUpUrgency(date) {
   if(!date) return 'none';
@@ -2855,6 +3049,7 @@ function ConvertLeadModal({lead, onConfirm, onCancel}) {
 
 // ── Lead Form ─────────────────────────────────────────────────────────────────
 function LeadForm({initial={}, onSave, onCancel, title='New lead', referenceData=null, originalLead=null, originalSubEvents=null, lockEventFields=false}) {
+  const eventTypes = useEventTypes();
   const empty = {
     first_name:'',last_name:'',phone:'',phone_2:'',email:'',
     source:'',event_type:'',tentative_date:'',location:'',
@@ -2910,7 +3105,7 @@ function LeadForm({initial={}, onSave, onCancel, title='New lead', referenceData
     finally { setSaving(false); }
   };
 
-  const typeOpts = EVENT_TYPES.map(t=>({value:t.toLowerCase(),label:t}));
+  const typeOpts = eventTypes.map(t=>({value:t.value,label:t.label}));
   const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name}));
 
   return (
@@ -3401,7 +3596,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
     if(lead.client_id){ await handleConvert(lead.client_id); return; }
     if(!lead.phone){ await handleConvert(null); return; }
     const normalized = normPhone(lead.phone);
-    const {data:allClients} = await supabase.from('clients').select('client_id,first_name,last_name,phone_1,email_1,ref_number').eq('is_deleted',false);
+    const {data:allClients} = await supabase.from('clients').select('client_id,first_name,last_name,phone_1,email_1,ref_number').eq('is_deleted',false).neq('status','inactive');
     const matches = (allClients||[]).filter(c=>normPhone(c.phone_1)===normalized);
     if(matches.length===0){ await handleConvert(null); return; }
     setClientMatches(matches); // show match modal
@@ -3904,6 +4099,7 @@ function LeadRefSearchInput({value, onChange}) {
 
 // ── Leads Module ──────────────────────────────────────────────────────────────
 function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
+  const eventTypes = useEventTypes();
   const [view, setView] = React.useState('list'); // list | new | detail
   const [leads, setLeads] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -4064,7 +4260,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
         </select>
         <select className="field-input" style={{width:130}} value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
           <option value="">All types</option>
-          {EVENT_TYPES.map(t=><option key={t} value={t.toLowerCase()}>{t}</option>)}
+          {eventTypes.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
         <select className="field-input" style={{width:130}} value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)}>
           <option value="">All sources</option>
@@ -4183,6 +4379,7 @@ function matchesBudget(budget, range) {
 }
 
 function EventsModule({initialEventId, onConsumed, onNavigate}) {
+  const eventTypes = useEventTypes();
   const [view, setView] = useState('list'); // list | new | detail
   const [events, setEvents] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -4279,7 +4476,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
         </select>
         <select className="field-input" style={{width:130}} value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
           <option value="">All types</option>
-          {EVENT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          {eventTypes.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
         <select className="field-input" style={{width:130}} value={staffFilter} onChange={e=>setStaffFilter(e.target.value)}>
           <option value="">All staff</option>
@@ -5568,6 +5765,7 @@ function ItemNumInput({value, onChange, align}) {
 
 // ── New Event Wizard ─────────────────────────────────────────────────────────
 function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
+  const eventTypes = useEventTypes();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -5601,7 +5799,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
   const excelFileRef = React.useRef();
 
   useEffect(()=>{
-    supabase.from('clients').select('client_id,first_name,last_name,phone_1,status').eq('is_deleted',false).order('first_name').then(({data})=>{ if(data) setClients(data); });
+    supabase.from('clients').select('client_id,first_name,last_name,phone_1,status').eq('is_deleted',false).neq('status','inactive').order('first_name').then(({data})=>{ if(data) setClients(data); });
     supabase.from('users').select('user_id,first_name,last_name,role').eq('status','active').then(({data})=>{ if(data) setStaffList(data); });
     supabase.from('event_templates').select('*').eq('is_deleted',false).eq('is_active',true).order('sort_order').then(({data})=>{ if(data) setTemplates(data); });
     // Pre-fill from reference event if provided
@@ -5868,7 +6066,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
             <div style={{fontSize:14,fontWeight:600,color:'var(--grey-800)',marginBottom:16}}>Event details <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>— fields marked <span style={{color:'var(--pink)'}}>*</span> are required</span></div>
             <div className="form-grid three" style={{marginBottom:14}}>
               <InputField label="Event name" required value={form.name} onChange={v=>setF('name',v)} placeholder="e.g. Sharma Wedding" error={errors.name}/>
-              <SelectField label="Event type" required value={form.type} onChange={v=>setF('type',v)} options={EVENT_TYPES.map(t=>({value:t,label:t}))} error={errors.type}/>
+              <SelectField label="Event type" required value={form.type} onChange={v=>setF('type',v)} options={eventTypes.map(t=>({value:t.value,label:t.label}))} error={errors.type}/>
               <SelectField label="Status" value={form.status} onChange={v=>setF('status',v)} options={EVENT_STATUS_ORDER.map(s=>({value:s,label:EVENT_STATUS_LABELS[s]}))}/>
             </div>
             <div className="form-grid three" style={{marginBottom:14}}>
@@ -6614,8 +6812,8 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   };
 
   React.useEffect(()=>{
-    supabase.from('clients').select('client_id,first_name,last_name,phone_1,status').eq('is_deleted',false).order('first_name').then(({data})=>{ if(data) setClients(data); });
-    if(lead.phone) supabase.from('clients').select('*').eq('phone_1',lead.phone).eq('is_deleted',false).single().then(({data})=>{ if(data) setDupClient(data); });
+    supabase.from('clients').select('client_id,first_name,last_name,phone_1,status').eq('is_deleted',false).neq('status','inactive').order('first_name').then(({data})=>{ if(data) setClients(data); });
+    if(lead.phone) supabase.from('clients').select('*').eq('phone_1',lead.phone).eq('is_deleted',false).neq('status','inactive').single().then(({data})=>{ if(data) setDupClient(data); });
     supabase.from('settings').select('default_terms,default_validity_days').single().then(({data})=>{
       if(data){
         const d=new Date(); d.setDate(d.getDate()+(parseInt(data.default_validity_days)||7));
