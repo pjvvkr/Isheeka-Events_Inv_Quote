@@ -10,6 +10,7 @@ _Last updated: 12 Jun 2026._
 
 | # | Change | Notes |
 |---|---|---|
+| 26 | **Invoice Phase 5 — invoice PDF + share** | Extended `buildQuotationPDF` with `docType='invoice'`: title/pill say "Invoice", header shows **Due date** (not Valid until), totals add a **GST line** (when applicable) + **Received / Balance due**, filename `Invoice_<ref>…`. Invoice detail now has working **⬇ PDF (download)** and **Print** (any status), plus **WhatsApp** and **Email** (only when status is Sent or later). New helpers `uploadInvoicePdf` (Storage → `invoices/…`) + `buildInvoiceShareMsg`; client phone/email enriched from the linked client. Installment schedule rendered in the PDF with amounts + due dates. Added `.gitattributes` (eol=lf) to stop CRLF diff churn. Code only — no migration. |
 | 1 | **P0-1 — App error boundary** | Render crashes show a branded "your data is safe" screen instead of a white page. |
 | 2 | **P0-2 Phase 1 — toast system + `runDb` + replaced 11 `alert()`s** | Non-blocking branded toasts; central DB-error helper. |
 | 3 | **P0-2 Phase 2 — error handling on money-path writes** | Quote wizard + lead→event conversion now surface failures (no silent data loss). |
@@ -49,9 +50,11 @@ _Last updated: 12 Jun 2026._
 7. **Storage**: created public bucket **`quotations`** + policy `quotations_all` (authenticated upload) — for hosted quote PDFs.
 8. **`sub_event_items.sub_event_id`** — dropped NOT NULL (allows "main event" items not under a sub-event). _ISSUE-003._
 9. Backfills: `quotations.event_id` from the lead's event (converted quotes); `events.lead_id` from `leads.event_id`.
-10. **Invoice Phase 2 — PENDING USER RUN.** The `invoice_*` tables already existed (original schema) with their own column names — verified 13 Jun via `information_schema`. Revised migration only ADDS: `invoices.revision_number`, `invoices.source_quote_total`; `invoice_line_items.is_deleted`; `invoice_installments.label / when_text / is_deleted`; + RLS policies + indexes. Code aligned to existing names (`total_received`/`total_outstanding`, `installment_number`/`percentage`, `client_name`/`event_name`). Script: `docs/v22-invoice-phase2-migration.sql`. **Run before (or with) the Phase 2 code deploy.**
+10. **Invoice Phase 2 — RUN ✅ (13 Jun).** The `invoice_*` tables already existed (original schema) with their own column names — verified via `information_schema`. Revised migration ADDED: `invoices.revision_number`, `invoices.source_quote_total`; `invoice_line_items.is_deleted`; `invoice_installments.label / when_text / is_deleted`; + RLS policies + indexes. Confirmed present in the live schema dump. Code aligned to existing names (`total_received`/`total_outstanding`, `installment_number`/`percentage`, `client_name`/`event_name`). Script: `docs/v22-invoice-phase2-migration.sql`. Note: the 3 redundant `*_all` RLS policies my script added are duplicates of the pre-existing `*_policy` ones — optional cleanup SQL is in `v22-db-schema.md` §3.
 
 > **Reminder:** the database and the code must stay in lock-step. If the app is ever restored from an older state, these migrations must already be present (they are, since they're applied to the live Supabase project).
+
+**Repo relocation (13 Jun 2026):** the working repo was moved **out of OneDrive** (`…\OneDrive\Documents\GitHub\…`) to **`C:\Users\vamsh\GitHub`** after OneDrive repeatedly corrupted the local `.git` (corrupt index, locked loose objects, failed pushes) and gave stale/truncated reads. A fresh clone was made and working files copied in; the post-fix Phase 3a edits were re-applied here (they'd been lost in the corrupt copy). **Do not move the repo back under OneDrive/any sync tool.** Files are now CRLF (a `.gitattributes` normalization is a small pending cleanup to stop whole-file diff churn).
 
 ---
 
