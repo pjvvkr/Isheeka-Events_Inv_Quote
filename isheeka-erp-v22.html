@@ -3096,6 +3096,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   const [showLostConfirm, setShowLostConfirm] = React.useState(false);
   const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
   const [leadQuotations, setLeadQuotations] = React.useState([]);
+  const [linkedEvent, setLinkedEvent] = React.useState(null);
   const [successMsg, setSuccessMsg] = React.useState('');
   const [staffList, setStaffList] = React.useState([]);
 
@@ -3113,6 +3114,10 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
     if(ses) setSubEvents(ses);
     if(staff) setStaffList(staff);
     if(quots) setLeadQuotations(quots);
+    if(l && l.event_id){
+      const {data:ev} = await supabase.from('events').select('event_id,ref_number,name,status,main_date,location,type').eq('event_id',l.event_id).single();
+      setLinkedEvent(ev||null);
+    } else { setLinkedEvent(null); }
     setLoading(false);
   };
 
@@ -3561,6 +3566,27 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
               </div>
             );
           })}
+        </div>
+      )}
+
+      {linkedEvent&&(
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:12}}>Converted to event</div>
+          <div style={{display:'flex',alignItems:'center',gap:12}}>
+            <div style={{width:10,height:10,borderRadius:'50%',flexShrink:0,background:'var(--blue)'}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                {linkedEvent.ref_number&&<span style={{fontSize:13,fontWeight:500,color:'var(--pink)'}}>{linkedEvent.ref_number}</span>}
+                <span style={{fontSize:13,color:'var(--grey-800)'}}>{linkedEvent.name}</span>
+              </div>
+              <div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>
+                {linkedEvent.type?linkedEvent.type.charAt(0).toUpperCase()+linkedEvent.type.slice(1):''}
+                {linkedEvent.main_date&&(' · '+new Date(linkedEvent.main_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}))}
+                {linkedEvent.location&&(' · '+linkedEvent.location)}
+              </div>
+            </div>
+            <button className="btn primary" onClick={()=>onNavigate&&onNavigate('events',{eventId:linkedEvent.event_id})}>View event →</button>
+          </div>
         </div>
       )}
 
