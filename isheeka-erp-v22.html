@@ -2511,7 +2511,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
               <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em'}}>Invoices ({invoices.length})</div>
-              {invoices.length===0&&quotations.some(q=>['approved','converted'].includes(q.status))&&
+              {!invoices.some(i=>i.status!=='cancelled')&&quotations.some(q=>['approved','converted'].includes(q.status))&&
                 <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} disabled={genInv} onClick={handleGenerateInvoice} title="Create the draft invoice from the confirmed quotation">{genInv?'Generating…':'+ Generate invoice'}</button>}
             </div>
             {invoices.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>{quotations.some(q=>['approved','converted'].includes(q.status))?'No invoice yet — generate it from the confirmed quote.':'No invoices yet — confirm a quotation to raise one.'}</div>}
@@ -2534,9 +2534,9 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
           {[
             {label:'Quoted (items)',val:'₹'+grandTotal.toLocaleString('en-IN'),color:'var(--grey-800)'},
-            {label:'Invoiced',val:'₹'+invoices.reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0).toLocaleString('en-IN'),color:'var(--blue)'},
-            {label:'Received',val:'₹'+invoices.reduce((s,i)=>s+(parseFloat(i.total_received)||0),0).toLocaleString('en-IN'),color:'var(--green)'},
-            {label:'Outstanding',val:'₹'+invoices.reduce((s,i)=>s+(parseFloat(i.total_outstanding!=null?i.total_outstanding:((parseFloat(i.grand_total)||0)-(parseFloat(i.total_received)||0)))||0),0).toLocaleString('en-IN'),color:'var(--red)'},
+            {label:'Invoiced',val:'₹'+invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0).toLocaleString('en-IN'),color:'var(--blue)'},
+            {label:'Received',val:'₹'+invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.total_received)||0),0).toLocaleString('en-IN'),color:'var(--green)'},
+            {label:'Outstanding',val:'₹'+invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.total_outstanding!=null?i.total_outstanding:((parseFloat(i.grand_total)||0)-(parseFloat(i.total_received)||0)))||0),0).toLocaleString('en-IN'),color:'var(--red)'},
           ].map((p,i)=>(
             <div key={i} style={{textAlign:'center',padding:'10px',background:'var(--grey-50)',borderRadius:'var(--radius-md)'}}>
               <div style={{fontSize:11,color:'var(--grey-400)',marginBottom:4}}>{p.label}</div>
@@ -4441,7 +4441,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const grand=taxable+tax;
   const received=parseFloat(inv.total_received)||0;
   const outstanding=parseFloat(inv.total_outstanding!=null?inv.total_outstanding:(grand-received))||0;
-  const variance=grand-(parseFloat(inv.source_quote_total)||0);
+  const sourceQuoteTotal=parseFloat(inv.source_quote_total)||0; const variance=taxable-sourceQuoteTotal; // pre-GST compare so toggling GST is never a "difference"
   const locked=['paid','cancelled'].includes(inv.status);
 
   // GST toggle: persist gst flag + recomputed tax/grand/outstanding, and rescale installments to the new grand.
@@ -4514,13 +4514,14 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             {!locked&&<button className="btn sm" disabled={saving} onClick={cancelInvoice} style={{color:'var(--red)'}}>Cancel</button>}
           </div>
         </div>
-        {Math.abs(variance)>=1&&(parseFloat(inv.source_quote_total)||0)>0&&(
+        {Math.abs(variance)>=1&&sourceQuoteTotal>0&&inv.status!=='cancelled'&&(
           <div style={{marginTop:12,padding:'8px 12px',background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>
-            ⚠️ This invoice differs from the source quote by {variance>0?'+':''}₹{Math.abs(variance).toLocaleString('en-IN')} (quote ₹{(parseFloat(inv.source_quote_total)||0).toLocaleString('en-IN')} → invoice ₹{grand.toLocaleString('en-IN')}).
+            ⚠️ This invoice differs from the source quote by {variance>0?'+':''}₹{Math.abs(variance).toLocaleString('en-IN')} before GST (quote ₹{sourceQuoteTotal.toLocaleString('en-IN')} → invoice ₹{taxable.toLocaleString('en-IN')}).
           </div>
         )}
       </div>
 
+      {inv.status==='cancelled'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--grey-50)',color:'var(--grey-600)',borderRadius:'var(--radius-sm)',fontSize:12}}>This invoice is cancelled. To raise a new one, open the event {inv.event_id&&<a onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>(go to event →)</a>} and click <b>+ Generate invoice</b>.</div>}
       <div style={{display:'grid',gridTemplateColumns:'1.6fr 1fr',gap:16,alignItems:'start'}}>
         {/* Line items + totals */}
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
@@ -5672,7 +5673,7 @@ async function createInvoiceFromQuote(quotationId, opts={}) {
   if(qe||!quot){ notify('Could not load the quotation to invoice.','error'); return null; }
   const eventId = opts.eventId || quot.event_id;
   if(!eventId){ notify('No event linked yet — the invoice will be created when the event is.','info'); return null; }
-  const {data:existing} = await supabase.from('invoices').select('invoice_id,ref_number').eq('event_id',eventId).eq('is_deleted',false).limit(1);
+  const {data:existing} = await supabase.from('invoices').select('invoice_id,ref_number').eq('event_id',eventId).eq('is_deleted',false).neq('status','cancelled').limit(1);
   if(existing&&existing.length){ return existing[0]; }
   const {data:items} = await supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order');
   let ref; try{ ref = await getNextInvoiceRef(); }catch(e){ return null; }
