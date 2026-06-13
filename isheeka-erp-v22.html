@@ -2288,7 +2288,9 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       ? {lead_id:null, client_id:event.client_id, first_name:c.first_name, last_name:c.last_name, phone:c.phone_1||'', phone_2:c.phone_2||'', email:c.email_1||'', source:c.source||'referral', event_type:event.type}
       : {lead_id:null, client_id:event.client_id, first_name:nm.split(' ')[0]||nm, last_name:nm.split(' ').slice(1).join(' '), phone:'', phone_2:'', email:'', source:'referral', event_type:event.type};
     setQuoteWizardLead(built);
-    setQuoteWizardSubs((subEvents||[]).map(se=>({name:se.name})));
+    const subsWithItems = (subEvents||[]).map(se=>({name:se.name, items:(se.items||[]).map(i=>({description:i.description,quantity:i.quantity,unit_price:i.unit_price}))}));
+    const mainEvItems = (mainItemsView||[]).map(i=>({description:i.description,quantity:i.quantity,unit_price:i.unit_price}));
+    setQuoteWizardSubs(mainEvItems.length>0 ? [...subsWithItems, {name:'General Items', items:mainEvItems}] : subsWithItems);
     setReviseQuoteId(reviseId||null);
     setShowQuoteWizard(true);
   };
@@ -5691,9 +5693,10 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
 
   const [subEventBlocks, setSubEventBlocks] = React.useState(()=>{
     const blocks = (leadSubEvents||[]).filter(se=>se.name&&se.name.trim()).map(se=>({
-      id:'se-'+Date.now()+Math.random(), name:se.name, items:[]
+      id:'se-'+Date.now()+Math.random(), name:se.name,
+      items:(se.items||[]).map(i=>({id:'li-'+Date.now()+Math.random(),description:i.description,quantity:i.quantity,unit_price:i.unit_price}))
     }));
-    blocks.push({id:'se-main', name:'General Items', items:[]});
+    if(!blocks.some(b=>(b.name||'').trim().toLowerCase()==='general items')) blocks.push({id:'se-main', name:'General Items', items:[]});
     return blocks;
   });
 
@@ -5924,6 +5927,23 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       if(qe) throw qe;
 
       if(lineItems.length>0){ const {error:lie}=await supabase.from('quotation_line_items').insert(lineItems.map(i=>({...i,quotation_id:newQ.quotation_id}))); if(lie) throw lie; }
+
+      // Event mirrors the quote: rebuild the event's sub-events + items to match (best-effort; the quote is already saved)
+      if(originEvent){
+        try {
+          await supabase.from('sub_event_items').update({is_deleted:true}).eq('event_id',originEvent.eventId);
+          await supabase.from('sub_events').update({is_deleted:true}).eq('event_id',originEvent.eventId);
+          const seNames=[...new Set(lineItems.map(i=>i.sub_event_name).filter(n=>n&&String(n).trim()))];
+          const nameToId={}; let so=0;
+          for(const nm of seNames){
+            const {data:se,error:see}=await supabase.from('sub_events').insert({event_id:originEvent.eventId,name:nm,sort_order:so++,created_at:new Date().toISOString(),is_deleted:false}).select().single();
+            if(see) throw see;
+            nameToId[nm]=se.sub_event_id;
+          }
+          const evItems=lineItems.map((i,idx)=>({sub_event_id:i.sub_event_name?(nameToId[i.sub_event_name]||null):null,event_id:originEvent.eventId,description:i.description,quantity:i.quantity,unit_price:i.unit_price,sort_order:idx,created_at:new Date().toISOString(),is_deleted:false}));
+          if(evItems.length>0){ const {error:eie}=await supabase.from('sub_event_items').insert(evItems); if(eie) throw eie; }
+        } catch(syncErr){ console.error('[Isheeka ERP] event item sync failed:', syncErr); notify('Quote saved, but syncing the event items failed — please refresh the event.','error'); }
+      }
 
       if(!originEvent){
         const {error:lqe}=await supabase.from('leads').update({
