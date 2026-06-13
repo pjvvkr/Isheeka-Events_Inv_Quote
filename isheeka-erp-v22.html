@@ -2530,7 +2530,6 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   if(mode==='view') return (
     <div>
       {header}
-      {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>setViewQuotId(null)} onNavigate={onNavigate}/>}
       {showQuoteWizard&&<QuoteGenerationWizard lead={quoteWizardLead} leadSubEvents={quoteWizardSubs} isRevision={!!reviseQuoteId} isContinuation={false} existingQuotationId={reviseQuoteId} originEvent={{eventId:event.event_id, eventName:event.name}} onComplete={async()=>{ setShowQuoteWizard(false); setReviseQuoteId(null); await loadAll(); }} onCancel={()=>{ setShowQuoteWizard(false); setReviseQuoteId(null); }}/>}
       {successMsg&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:12,border:'1px solid rgba(15,110,86,0.2)',display:'flex',alignItems:'center',gap:8}}>✅ {successMsg}</div>}
       {/* Info cards */}
@@ -2664,7 +2663,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               const qs={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},approved:{bg:'var(--green-light)',color:'var(--green)'},converted:{bg:'var(--green-light)',color:'var(--green)'},rejected:{bg:'var(--red-light)',color:'var(--red)'},expired:{bg:'var(--orange-light)',color:'var(--orange)'},revised:{bg:'var(--orange-light)',color:'var(--orange)'},superseded:{bg:'var(--grey-100)',color:'var(--grey-400)'}};
               const renderRow=q=>{
                 const s=qs[q.status?.toLowerCase()]||qs.draft;
-                return <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} title="View quotation" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer',opacity:q.status==='superseded'?0.6:1}}>
+                return <div key={q.quotation_id} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:q.quotation_id})} title="Open quotation" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer',opacity:q.status==='superseded'?0.6:1}}>
                   <div><div style={{fontSize:13,fontWeight:500}}>{q.ref_number}{q.revision_number>0?' · Rev '+q.revision_number:''}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{parseFloat(q.grand_total||0).toLocaleString('en-IN')}</div></div>
                   <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{q.status}</span>
                 </div>;
@@ -3742,7 +3741,6 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       />}
       {showConvert&&<ConvertLeadModal lead={lead} onConfirm={handleConvertInitiate} onCancel={()=>setShowConvert(false)}/>}
       {clientMatches&&clientMatches.length>0&&<ClientMatchModal matches={clientMatches} lead={lead} onLink={(cid)=>handleConvert(cid)} onCreateNew={()=>handleConvert(null)} onCancel={()=>setClientMatches(null)}/>}
-      {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>setViewQuotId(null)} onNavigate={onNavigate}/>}
       {showWelcome&&<WelcomeMessageModal
         lead={lead}
         quotRef={(leadQuotations.find(q=>q.quotation_id===lead.active_quotation_id)||{}).ref_number}
@@ -3906,7 +3904,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
               const sc=QUOT_STATUS_COLORS?QUOT_STATUS_COLORS[q.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}:{bg:'var(--grey-100)',color:'var(--grey-400)'};
               const statusLabel=QUOT_STATUS_LABELS?QUOT_STATUS_LABELS[q.status]||q.status:q.status;
               return (
-                <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} title="View quotation details"
+                <div key={q.quotation_id} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:q.quotation_id})} title="Open quotation"
                   style={{display:'flex',alignItems:'center',gap:12,padding:'10px 8px',margin:'0 -8px',borderRadius:'var(--radius-sm)',cursor:'pointer',borderBottom:showBorder?'1px solid var(--grey-100)':'none',opacity:q.status==='superseded'?0.5:1}}
                   onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'}
                   onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
@@ -4557,6 +4555,242 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
 }
 
 // ── Quotations Module (standalone list) ──────────────────────────────────────
+// ── Quotation Detail (full page — the quote action hub) ───────────────────────
+function QuotationDetail({quotationId, onBack, onNavigate}) {
+  const [quot, setQuot] = React.useState(null);
+  const [items, setItems] = React.useState([]);
+  const [qSettings, setQSettings] = React.useState({});
+  const [qActivity, setQActivity] = React.useState([]);
+  const [qUserMap, setQUserMap] = React.useState({});
+  const [srcLead, setSrcLead] = React.useState(null);
+  const [srcEvent, setSrcEvent] = React.useState(null);
+  const [invoiceIssued, setInvoiceIssued] = React.useState(false);
+  const [qActExpanded, setQActExpanded] = React.useState(false);
+  const [sharing, setSharing] = React.useState(false);
+  const [confirming, setConfirming] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:true});
+  const [showWizard, setShowWizard] = React.useState(false);
+  const [wizardCtx, setWizardCtx] = React.useState(null);
+  const setDO=(k,v)=>setDisplayOpts(o=>({...o,[k]:v}));
+  const applyPreset=(p)=>{
+    if(p==='full') setDisplayOpts(o=>({...o,prices:true,qty:true,grouping:true,schedule:true,discount:true}));
+    else if(p==='items') setDisplayOpts(o=>({...o,prices:false,qty:true,grouping:true,schedule:true,discount:false}));
+    else if(p==='summary') setDisplayOpts(o=>({...o,prices:false,qty:false,grouping:true,schedule:false,discount:false}));
+  };
+
+  const loadAll = React.useCallback(async () => {
+    setLoading(true);
+    const [{data:q},{data:li},{data:st},{data:qact},{data:qus}] = await Promise.all([
+      supabase.from('quotations').select('*').eq('quotation_id',quotationId).single(),
+      supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order'),
+      supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single(),
+      supabase.from('quotation_activity_log').select('*').eq('quotation_id',quotationId).order('logged_at',{ascending:false}),
+      supabase.from('users').select('user_id,first_name,last_name'),
+    ]);
+    let qEnriched=q;
+    if(q){
+      if(q.client_id){ const {data:c}=await supabase.from('clients').select('phone_1,email_1,city').eq('client_id',q.client_id).single(); if(c) qEnriched={...q,client_phone:q.client_phone||c.phone_1||'',client_email:q.client_email||c.email_1||'',client_city:q.client_city||c.city||''}; }
+      else if(q.lead_id){ const {data:l}=await supabase.from('leads').select('phone,email,location').eq('lead_id',q.lead_id).single(); if(l) qEnriched={...q,client_phone:q.client_phone||l.phone||'',client_email:q.client_email||l.email||'',client_city:q.client_city||l.location||''}; }
+    }
+    setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{}); setQActivity(qact||[]);
+    { const m={}; (qus||[]).forEach(u=>{m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim();}); setQUserMap(m); }
+    if(q&&q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
+    if(q&&q.lead_id){ const {data:ld}=await supabase.from('leads').select('lead_id,ref_number,stage').eq('lead_id',q.lead_id).maybeSingle(); setSrcLead(ld||null); } else setSrcLead(null);
+    if(q&&q.event_id){
+      const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status').eq('event_id',q.event_id).maybeSingle(); setSrcEvent(ev||null);
+      const {data:invs}=await supabase.from('invoices').select('status').eq('event_id',q.event_id).eq('is_deleted',false);
+      setInvoiceIssued((invs||[]).some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase())));
+    } else { setSrcEvent(null); setInvoiceIssued(false); }
+    setLoading(false);
+  },[quotationId]);
+  React.useEffect(()=>{ loadAll(); },[loadAll]);
+
+  const doShare = async (channel) => {
+    if(sharing||!quot) return;
+    if(channel==='whatsapp' && !validClientPhone(quot.client_phone)){ notify("This client's phone number looks invalid — please update it before sharing on WhatsApp.",'error'); return; }
+    if((channel==='gmail'||channel==='email') && !quot.client_email){ notify('This client has no email address on file.','error'); return; }
+    setSharing(true);
+    notify('Preparing the quotation PDF…','info',2500);
+    const url = await uploadQuotePdf(quot, items, displayOpts, qSettings);
+    if(!url) notify("Couldn't attach the PDF link — sharing the message; you can attach the downloaded PDF manually.",'error');
+    const msg = buildQuoteShareMsg(quot, qSettings, url);
+    if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
+    else openEmail(channel==='gmail'?'gmail':'default', quot.client_email, 'Quotation '+quot.ref_number+' — Isheeka Events', msg);
+    await logQuoteSend(quot.quotation_id, channel==='whatsapp'?'whatsapp':'email');
+    const {data:qact}=await supabase.from('quotation_activity_log').select('*').eq('quotation_id',quot.quotation_id).order('logged_at',{ascending:false});
+    setQActivity(qact||[]); setSharing(false);
+  };
+  const doExport = async (action) => {
+    if(!quot) return;
+    buildQuotationPDF(quot, items, {action, displayOpts, settings:qSettings});
+  };
+  const doConfirmQuote = async () => {
+    if(confirming||!quot) return;
+    setConfirming(true);
+    const {error}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id);
+    if(error){ notify('Could not confirm the quote: '+(error.message||'Please try again.'),'error'); setConfirming(false); return; }
+    const inv = await createInvoiceFromQuote(quot.quotation_id,{eventId:quot.event_id});
+    setConfirming(false);
+    if(inv){ onNavigate&&onNavigate('events',{eventId:quot.event_id}); }
+    else { setQuot(q=>({...q,status:'approved'})); }
+  };
+  // Reconstruct the wizard context (lead vs event origin) and open it to edit/revise this quote.
+  const launchEdit = async () => {
+    let leadObj=null, origin=null;
+    if(quot.event_id){
+      const {data:ev}=await supabase.from('events').select('event_id,name,type,client_id,client_name').eq('event_id',quot.event_id).single();
+      if(ev){
+        origin={eventId:ev.event_id, eventName:ev.name};
+        const {data:c}=await supabase.from('clients').select('first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',ev.client_id).single();
+        const nm=(ev.client_name||'').trim();
+        leadObj = c ? {lead_id:null,client_id:ev.client_id,first_name:c.first_name,last_name:c.last_name,phone:c.phone_1||'',phone_2:c.phone_2||'',email:c.email_1||'',source:c.source||'referral',event_type:ev.type}
+                    : {lead_id:null,client_id:ev.client_id,first_name:nm.split(' ')[0]||nm,last_name:nm.split(' ').slice(1).join(' '),phone:'',phone_2:'',email:'',source:'referral',event_type:ev.type};
+      }
+    } else if(quot.lead_id){
+      const {data:l}=await supabase.from('leads').select('*').eq('lead_id',quot.lead_id).single();
+      leadObj=l||null;
+    }
+    if(!leadObj){ notify('Could not load the quote context to edit.','error'); return; }
+    setWizardCtx({lead:leadObj, origin, isRevision: quot.status!=='draft'});
+    setShowWizard(true);
+  };
+
+  if(loading) return <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>;
+  if(!quot) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>Quotation not found. <button className="btn sm" onClick={onBack}>← Back</button></div>;
+
+  const fmt=(d)=>fmtDate(d);
+  const groups={}; items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
+  let ps = quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} } ps=Array.isArray(ps)?ps:[];
+  const sc = QUOT_STATUS_COLORS[quot.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
+  const statusLabel = QUOT_STATUS_LABELS[quot.status]||quot.status;
+  const editable = !['converted','rejected','expired','superseded'].includes(quot.status) && !invoiceIssued;
+  const canConfirm = quot.event_id && !['approved','converted','rejected','expired','superseded'].includes(quot.status);
+
+  return (
+    <div>
+      {showWizard&&wizardCtx&&<QuoteGenerationWizard lead={wizardCtx.lead} leadSubEvents={[]} isRevision={wizardCtx.isRevision} isContinuation={!wizardCtx.isRevision} existingQuotationId={quot.quotation_id} originEvent={wizardCtx.origin||undefined} onComplete={async(newQ)=>{ setShowWizard(false); setWizardCtx(null); if(newQ&&newQ.quotation_id&&newQ.quotation_id!==quot.quotation_id){ onNavigate&&onNavigate('quotations',{quotId:newQ.quotation_id}); } else { await loadAll(); } }} onCancel={()=>{ setShowWizard(false); setWizardCtx(null); }}/>}
+
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,fontSize:13}}>
+        <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'var(--pink)',fontSize:13,padding:0,fontFamily:'Inter,sans-serif'}}>← Quotations</button>
+        <span style={{color:'var(--grey-300)'}}>/</span>
+        <span style={{color:'var(--grey-800)',fontWeight:500}}>{quot.ref_number}</span>
+      </div>
+
+      {/* Header */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number}{quot.revision_number>0?<span style={{fontSize:12,color:'var(--grey-400)',fontWeight:400}}> · Rev {quot.revision_number}</span>:''} <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,marginLeft:6}}>{statusLabel}</span></div>
+            <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>{quot.client_name||'—'}{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
+            {(srcLead||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
+              <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
+              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
+              <span>→</span><span style={{color:'var(--grey-600)'}}>📄 {quot.ref_number}</span>
+              {srcEvent&&<><span>→</span><a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎪 {srcEvent.ref_number||'Event'}</a></>}
+            </div>}
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
+          {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
+          {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
+          {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':'✅ Confirm & create invoice'}</button>}
+          {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id})}>Go to event →</button>}
+        </div>
+      </div>
+
+      {/* Status banners */}
+      {(quot.status==='converted'||quot.event_id)&&!invoiceIssued&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:12}}>📅 An event has been created from this quote. Changes flow through the event.</div>}
+      {invoiceIssued&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>🔒 An invoice has been issued — this quote is locked. To change scope or pricing, revise the invoice.</div>}
+
+      {/* What the client sees + share/export */}
+      <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-lg)',padding:'14px 18px',marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:8}}>What the client sees</div>
+        <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>
+          {[['full','Full detail'],['items','Items only'],['summary','Summary only']].map(([k,l])=>{
+            const active=(k==='full'&&displayOpts.prices)||(k==='items'&&!displayOpts.prices&&displayOpts.qty)||(k==='summary'&&!displayOpts.prices&&!displayOpts.qty);
+            return <button key={k} onClick={()=>applyPreset(k)} className="btn sm" style={{fontSize:11,flex:1,minWidth:90,background:active?'var(--pink)':'white',color:active?'white':'var(--grey-600)',border:'1px solid var(--grey-200)'}}>{l}</button>;
+          })}
+        </div>
+        <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:12}}>
+          {[['prices','Prices'],['qty','Quantities'],['grouping','Sub-event grouping'],['schedule','Payment schedule'],['discount','Discount'],['coverPage','Cover page'],['bankDetails','Bank details']].map(([k,l])=>(
+            <label key={k} style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}>
+              <input type="checkbox" checked={!!displayOpts[k]} onChange={e=>setDO(k,e.target.checked)} style={{accentColor:'var(--pink)'}}/>{l}
+            </label>
+          ))}
+        </div>
+        <div style={{borderTop:'1px solid var(--grey-200)',paddingTop:12,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>Share / export (uses the toggles above):</span>
+          <button className="btn sm" disabled={sharing} onClick={()=>doShare('whatsapp')}>💬 WhatsApp</button>
+          <button className="btn sm" disabled={sharing} onClick={()=>doShare('gmail')}>Gmail</button>
+          <button className="btn sm" disabled={sharing} onClick={()=>doShare('email')}>Email</button>
+          <button className="btn sm" onClick={()=>doExport('print')}>Print</button>
+          <button className="btn sm primary" onClick={()=>doExport('download')}>⬇ Download PDF</button>
+        </div>
+      </div>
+
+      {/* Line items */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
+        {Object.keys(groups).map(k=>(
+          <div key={k} style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:'var(--pink)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:6}}>{k}</div>
+            {groups[k].map((li,idx)=>{
+              const qty=parseFloat(li.quantity)||0, up=parseFloat(li.unit_price)||0;
+              const amt=(li.amount!=null&&li.amount!=='')?parseFloat(li.amount):qty*up;
+              return (
+                <div key={idx} style={{display:'flex',justifyContent:'space-between',gap:10,padding:'6px 0',borderBottom:'1px solid var(--grey-100)',fontSize:13}}>
+                  <span style={{flex:1,color:'var(--grey-800)'}}>{li.description}</span>
+                  <span style={{color:'var(--grey-400)',width:120,textAlign:'right'}}>{qty} × ₹{up.toLocaleString('en-IN')}</span>
+                  <span style={{fontWeight:500,width:90,textAlign:'right'}}>₹{amt.toLocaleString('en-IN')}</span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'12px 16px'}}>
+          {[['Subtotal','₹'+(parseFloat(quot.subtotal)||0).toLocaleString('en-IN'),false],['Discount','-₹'+(parseFloat(quot.discount_amount)||0).toLocaleString('en-IN'),false],['Grand total','₹'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN'),true]].map(([l,v,bold],i)=>(
+            <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:i<2?'1px solid var(--grey-200)':'none'}}>
+              <span style={{fontSize:13,color:'var(--grey-400)'}}>{l}</span>
+              <span style={{fontSize:bold?15:13,fontWeight:bold?700:400,color:bold?'var(--green)':'var(--grey-800)'}}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Schedule + terms */}
+      {(ps.length>0||quot.payment_terms||quot.additional_terms||quot.additional_notes)&&(
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
+          {ps.length>0&&<div style={{marginBottom:12}}>
+            <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>Payment schedule <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>(edit via Revise)</span></div>
+            {ps.map((p,i)=>(
+              <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:13,borderBottom:'1px solid var(--grey-100)'}}>
+                <span style={{color:'var(--grey-800)'}}>{p.label||('Installment '+(i+1))} <span style={{color:'var(--grey-400)'}}>· {p.when}</span></span>
+                <span style={{fontWeight:500}}>{parseFloat(p.amount)>0?('₹'+Math.round(p.amount).toLocaleString('en-IN')):((p.pct||0)+'%')}</span>
+              </div>
+            ))}
+          </div>}
+          {quot.additional_notes&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Notes</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.additional_notes}</div></div>}
+          {quot.payment_terms&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Payment terms</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.payment_terms}</div></div>}
+          {quot.additional_terms&&<div><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Additional terms &amp; conditions</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.additional_terms}</div></div>}
+        </div>
+      )}
+
+      {/* Activity & change log */}
+      {quot.status!=='draft'&&(
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'14px 20px'}}>
+          <div onClick={()=>setQActExpanded(v=>!v)} style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',cursor:qActivity.length>1?'pointer':'default'}}>{qActivity.length>1?(qActExpanded?'▾ ':'▸ '):''}Activity &amp; change log{(()=>{const s=qActivity.filter(a=>a.action==='sent');return s.length>0?(' · sent '+s.length+'× · last '+new Date(s[0].logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})):'';})()}</div>
+          {qActivity.length===0&&<div style={{fontSize:12,color:'var(--grey-400)',marginTop:6}}>No sends logged yet.</div>}
+          {(qActExpanded||qActivity.length<=1)&&qActivity.slice(0,10).map(a=>(
+            <div key={a.log_id} style={{fontSize:12,color:'var(--grey-500)',padding:'3px 0'}}>
+              {a.action==='sent'?('Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')))):a.action} · {new Date(a.logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}{a.logged_by&&qUserMap[a.logged_by]?(' · '+qUserMap[a.logged_by]):''}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
   const [quotes, setQuotes] = React.useState([]);
   const [viewQuotId, setViewQuotId] = React.useState(null);
@@ -4572,6 +4806,8 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
   },[]);
   React.useEffect(()=>{ loadQuotes(); },[loadQuotes]);
   React.useEffect(()=>{ if(initialQuotId){ setViewQuotId(initialQuotId); onConsumed&&onConsumed(); } },[initialQuotId]);
+
+  if(viewQuotId) return <QuotationDetail quotationId={viewQuotId} onBack={()=>{setViewQuotId(null);loadQuotes();}} onNavigate={onNavigate}/>;
 
   const filtered = quotes.filter(q=>{
     const s=search.toLowerCase();
@@ -4638,7 +4874,6 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
           })}
         </div>
       )}
-      {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>{setViewQuotId(null);loadQuotes();}} onNavigate={onNavigate}/>}
     </div>
   );
 }
