@@ -4413,8 +4413,10 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [items, setItems] = React.useState([]);
   const [installments, setInstallments] = React.useState([]);
   const [settings, setSettings] = React.useState({});
+  const [clientInfo, setClientInfo] = React.useState({});
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
+  const [sharing, setSharing] = React.useState(false);
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
@@ -4422,9 +4424,11 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       supabase.from('invoices').select('*').eq('invoice_id',invoiceId).single(),
       supabase.from('invoice_line_items').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('sort_order'),
       supabase.from('invoice_installments').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('installment_number'),
-      supabase.from('settings').select('gst_pct,default_invoice_due_days').single(),
+      supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,phone_1,email,website,company_name,cover_intro').single(),
     ]);
     setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{});
+    if(i&&i.client_id){ const {data:c}=await supabase.from('clients').select('phone_1,email_1,city').eq('client_id',i.client_id).single(); setClientInfo(c||{}); }
+    else setClientInfo({});
     setLoading(false);
   },[invoiceId]);
   React.useEffect(()=>{ loadAll(); },[loadAll]);
@@ -4485,6 +4489,36 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     notify('Invoice cancelled.','info'); setSaving(false); await loadAll();
   };
 
+  // Phase 5 — shape the invoice as a quote-like object for the shared PDF engine (docType='invoice')
+  const invForPdf = () => ({
+    ...inv,
+    client_phone:clientInfo.phone_1||'', client_email:clientInfo.email_1||'', client_city:clientInfo.city||'',
+    additional_terms:inv.additional_notes||'',
+    payment_schedule: installments.map(it=>({
+      pct: parseFloat(it.percentage)||0,
+      label: it.label||('Installment '+it.installment_number),
+      when: (it.when_text||(it.due_date?('due '+new Date(it.due_date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})):'on schedule'))
+        +' — Rs.'+(parseFloat(it.amount_due)||0).toLocaleString('en-IN')
+        +((parseFloat(it.balance)||0)>0?(' (bal Rs.'+(parseFloat(it.balance)||0).toLocaleString('en-IN')+')'):'')
+    }))
+  });
+  const pdfOpts = (action)=>({action, docType:'invoice', displayOpts:{prices:true,qty:true,grouping:true,schedule:true,discount:true,coverPage:false,bankDetails:true}, settings});
+  const downloadPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('download')); }catch(e){ notify('Could not generate the PDF.','error'); } };
+  const printPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('print')); }catch(e){ notify('Could not open the print view.','error'); } };
+  const canShare = ['sent','partially_paid','paid','overdue'].includes(inv.status);
+  const shareInvoice = async (channel)=>{
+    if(sharing) return;
+    if(channel==='whatsapp' && !validClientPhone(clientInfo.phone_1)){ notify("This client's phone number looks invalid — update it before sharing on WhatsApp.",'error'); return; }
+    if((channel==='gmail'||channel==='email') && !clientInfo.email_1){ notify('This client has no email address on file.','error'); return; }
+    setSharing(true);
+    notify('Preparing the invoice PDF…','info',2500);
+    const url = await uploadInvoicePdf(invForPdf(), items, settings);
+    if(!url) notify("Couldn't attach the PDF link — sharing the message; you can attach the downloaded PDF manually.",'error');
+    const msg = buildInvoiceShareMsg(inv, settings, url);
+    if(channel==='whatsapp') openWhatsApp(clientInfo.phone_1, msg);
+    else openEmail(channel==='gmail'?'gmail':'default', clientInfo.email_1, 'Invoice '+inv.ref_number+' — Isheeka Events', msg);
+    setSharing(false);
+  };
   const groups={}; items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
   const fmt=(d)=> d? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
 
@@ -4510,7 +4544,10 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
             {inv.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})}>Go to event →</button>}
             {inv.status==='draft'&&<button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
-            <button className="btn" disabled title="Invoice PDF — coming in a later phase">⬇ PDF</button>
+            {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('whatsapp')}>💬 WhatsApp</button>}
+            {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('gmail')}>Email</button>}
+            <button className="btn sm" disabled={saving} onClick={printPdf}>Print</button>
+            <button className="btn" disabled={saving} onClick={downloadPdf}>⬇ PDF</button>
             {!locked&&<button className="btn sm" disabled={saving} onClick={cancelInvoice} style={{color:'var(--red)'}}>Cancel</button>}
           </div>
         </div>
@@ -5777,6 +5814,43 @@ function buildQuoteShareMsg(quot, settings, url){
     'Warm regards,\nTeam Isheeka Events 💕';
 }
 
+// Phase 5: upload an invoice PDF to Storage and return a public URL (mirrors uploadQuotePdf)
+async function uploadInvoicePdf(inv, items, settings){
+  try{
+    const blob = buildQuotationPDF(inv, items, {action:'blob', docType:'invoice', displayOpts:{prices:true,qty:true,grouping:true,schedule:true,discount:true,coverPage:false,bankDetails:true}, settings});
+    if(!blob || !blob.size) return null;
+    const _ref = String(inv.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'');
+    const _rev = (inv.revision_number && inv.revision_number>0) ? ('-r'+inv.revision_number) : '';
+    const _d = new Date(), _p = n=>String(n).padStart(2,'0');
+    const _stamp = ''+_d.getFullYear()+_p(_d.getMonth()+1)+_p(_d.getDate())+'-'+_p(_d.getHours())+_p(_d.getMinutes());
+    const _code = Math.random().toString(36).slice(2,6);
+    const path = 'invoices/Invoice_'+_ref+_rev+'_'+_stamp+'_'+_code+'.pdf';
+    const {error:upErr} = await supabase.storage.from('quotations').upload(path, blob, {contentType:'application/pdf', upsert:true});
+    if(upErr){ console.error('[Isheeka ERP] invoice PDF upload failed:', upErr); return null; }
+    const {data} = supabase.storage.from('quotations').getPublicUrl(path);
+    return (data && data.publicUrl) || null;
+  }catch(err){ console.error('[Isheeka ERP] uploadInvoicePdf error:', err); return null; }
+}
+function buildInvoiceShareMsg(inv, settings, url){
+  const evt = inv.event_name || 'your event';
+  const phone = (settings&&settings.phone_1) || '+91 78423 95867';
+  const email = (settings&&settings.email) || 'isheekaevents@gmail.com';
+  const web = (settings&&settings.website) || 'www.isheekaevents.in';
+  const bal = parseFloat(inv.total_outstanding!=null?inv.total_outstanding:inv.grand_total)||0;
+  return 'Dear '+(inv.client_name||'')+',\n\n'+
+    'Thank you for choosing Isheeka Events for '+evt+'. Please find your invoice below.\n\n'+
+    'Invoice: '+inv.ref_number+'\n'+
+    'Grand Total: Rs.'+(parseFloat(inv.grand_total)||0).toLocaleString('en-IN')+'\n'+
+    'Balance Due: Rs.'+bal.toLocaleString('en-IN')+'\n'+
+    (inv.due_date?('Due by: '+new Date(inv.due_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+'\n'):'')+
+    (url?('\nView / download your invoice here:\n'+url+'\n'):'')+
+    '\nFor any queries, please reach out to us at:\n'+
+    '📞 '+phone+'\n'+
+    '📧 '+email+'\n'+
+    '🌐 '+web+'\n\n'+
+    'Warm regards,\nTeam Isheeka Events 💕';
+}
+
 // Item 12: branded quotation PDF (action: 'download' | 'print')
 function buildQuotationPDF(quot, lineItems, opts={}){
   const jsPDFctor = window.jspdf && window.jspdf.jsPDF;
@@ -5784,6 +5858,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   const doc = new jsPDFctor({unit:'pt', format:'a4'});
   const dOpts = Object.assign({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:false}, opts.displayOpts||{});
   const settings = opts.settings||{};
+  const isInv = opts.docType==='invoice';
   const PINK=[232,24,90], SPINK=[244,114,182], DARK=[40,40,40], GREY=[140,140,140];
   const W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), M=45;
   const fmt=d=>d?new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'--';
@@ -5826,7 +5901,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     doc.text(label+': '+(ref||''),W-M,headerTop+14,{align:'right'});
     doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]);
     doc.text('Date: '+fmt(date),W-M,headerTop+25,{align:'right'});
-    doc.text('Valid until: '+fmt(valid),W-M,headerTop+35,{align:'right'});
+    doc.text((docType==='invoice'?'Due date: ':'Valid until: ')+fmt(valid),W-M,headerTop+35,{align:'right'});
     drawDivider(headerTop+48);
   };
 
@@ -5849,7 +5924,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     drawDivider(y); y+=28;
 
     // Quotation pill — 4-5 lines space after
-    const pill='QUOTATION  \u00b7  '+(quot.ref_number||'');
+    const pill=(isInv?'INVOICE':'QUOTATION')+'  \u00b7  '+(quot.ref_number||'');
     const pillW=200;
     doc.setDrawColor(PINK[0],PINK[1],PINK[2]); doc.setLineWidth(1.3);
     doc.roundedRect((W-pillW)/2,y,pillW,22,11,11,'S');
@@ -5895,7 +5970,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   // PAGE 2 — QUOTATION
   // ══════════════════════════════════════════════════════════════════
   drawSimpleBorder();
-  drawPageHeader(quot.ref_number,quot.doc_date,quot.valid_until,'quotation');
+  drawPageHeader(quot.ref_number,quot.doc_date,isInv?quot.due_date:quot.valid_until,isInv?'invoice':'quotation');
   let y=88; // gap after header divider (headerTop 22 + logo height 55 + small gap)
 
   // Event name
@@ -5987,12 +6062,14 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     }
   }
   doc.setDrawColor(DARK[0],DARK[1],DARK[2]); doc.setLineWidth(1);
+  if(isInv&&quot.gst_applicable&&dOpts.prices){ doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(GREY[0],GREY[1],GREY[2]); doc.text('GST'+(quot.gst_pct?' ('+parseFloat(quot.gst_pct)+'%)':''),tx,y+12); doc.text(fmtM(quot.tax_amount),W-M,y+12,{align:'right'}); y+=13; }
   doc.line(tx,y+10,W-M,y+10); doc.setLineWidth(0.5);
   doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(DARK[0],DARK[1],DARK[2]);
   doc.text('Grand total',tx,y+24);
   doc.setFontSize(14); doc.setTextColor(PINK[0],PINK[1],PINK[2]);
   doc.text(fmtM(gt),W-M,y+24,{align:'right'});
   y+=44;
+  if(isInv&&dOpts.prices){ const _rec=parseFloat(quot.total_received)||0, _bal=parseFloat(quot.total_outstanding!=null?quot.total_outstanding:(gt-_rec))||0; doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(GREY[0],GREY[1],GREY[2]); doc.text('Received',tx,y); doc.text(fmtM(_rec),W-M,y,{align:'right'}); doc.setFont('helvetica','bold'); doc.setTextColor(DARK[0],DARK[1],DARK[2]); doc.text('Balance due',tx,y+15); doc.text(fmtM(_bal),W-M,y+15,{align:'right'}); y+=34; }
 
   // Signature — 75% down page minimum
   const sigY=Math.max(y+30,H*0.72);
@@ -6017,7 +6094,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     drawFooter(false);
     doc.addPage();
     drawSimpleBorder();
-    drawPageHeader(quot.ref_number,quot.doc_date,quot.valid_until,'quotation');
+    drawPageHeader(quot.ref_number,quot.doc_date,isInv?quot.due_date:quot.valid_until,isInv?'invoice':'quotation');
     y=78;
   } else {
     drawDivider(y+6); y+=22;
@@ -6055,7 +6132,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
 
   drawFooter(false);
   addPageNumbers();
-  const fname='Quotation_'+String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf';
+  const fname=(isInv?'Invoice_':'Quotation_')+String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf';
   if(opts.action==='blob'){ return doc.output('blob'); }
   if(opts.action==='print'){ try{doc.autoPrint();}catch(e){} window.open(doc.output('bloburl'),'_blank'); }
   else{ doc.save(fname); }
