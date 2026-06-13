@@ -139,6 +139,17 @@ Reuse the branded `buildQuotationPDF` engine with `docType='invoice'`: header sa
 4. **Phasing:** strict phase-by-phase. ✅
 5. **Revision + audit:** built as the **final phase** (Phase 5), after the core invoice works. ✅
 
+### 7b. Decisions — session 2 (12 Jun 2026)
+6. **No manual invoice creation.** Invoices are created only by automation. The single trigger is **a quotation being confirmed/approved** (unifies both flows):
+   - *Path A (Lead → Quote → Event):* lead "Quote confirmed" sets the active quote → `approved` (already at line 3266); the auto-create hooks here. (Conversion then also stamps `event_id`.)
+   - *Path B (Event → Quote-from-event):* event-origin quotes currently have no confirm action — **Phase 2 adds a "Confirm quote" action** (QuotationDetailModal / EventDetail) that sets the quote → `approved`, which fires the same auto-create.
+   - The event's Invoices tab keeps a **"Generate invoice" safety-net** button only (re-create if the auto-step failed) — never a from-scratch manual builder.
+7. **In-creation / last-minute edits → mandatory reason + mismatch warning + change log.** Editing an invoice linked to a source quote: (a) warns the invoice will differ from the quote, (b) **requires a reason**, (c) bumps `revision_number`, (d) writes a change-log row (field, old→new, reason, **changed_by = logged-in user**, **timestamp**). Change log is **collapsible**, newest-first, with a running "differs from quote: ±₹X" badge for reconciliation/audit.
+8. **Revisions allowed while not paid in full.** Once status = `paid`, Revise is normally locked.
+9. **Exception — revising a fully-paid invoice:** **allowed**, behind a **stronger confirmation**, **mandatory reason**, and full change-log documentation. **Restricted to admin (Swathi)** — gated on the app's resolved role. (Role is hardcoded `admin` today per P0-3; gate becomes enforceable once role resolution + role-aware RLS land. `changed_by` still records the real signed-in user.)
+10. **"Who" on every change** = the logged-in Supabase auth user, independent of the (currently hardcoded) role.
+11. **UI consistency:** the Invoices list/detail reuse the **existing app components and CSS variables** (same list-row pattern, status pills, card styling, fonts/colours) as Leads/Events/Quotations — the chat-rendered mockup was a structural wireframe only, not the in-app styling.
+
 ---
 
 ## 8. Phase 5 — Invoice revision + variance/audit (spec)

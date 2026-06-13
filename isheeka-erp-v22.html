@@ -2103,6 +2103,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [linkedLead, setLinkedLead] = React.useState(null);
   const [viewQuotId, setViewQuotId] = React.useState(null);
   const [showOldQuotes, setShowOldQuotes] = React.useState(false);
+  const [genInv, setGenInv] = React.useState(false);
   const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
   const [quoteWizardLead, setQuoteWizardLead] = React.useState(null);
   const [quoteWizardSubs, setQuoteWizardSubs] = React.useState([]);
@@ -2143,7 +2144,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       supabase.from('sub_event_items').select('*').eq('event_id',eventId).eq('is_deleted',false).order('sort_order'),
       supabase.from('event_checklists').select('*').eq('event_id',eventId).order('sort_order'),
       supabase.from('quotations').select('quotation_id,ref_number,status,grand_total').eq('event_id',eventId).eq('is_deleted',false),
-      supabase.from('invoices').select('invoice_id,ref_number,status,grand_total').eq('event_id',eventId).eq('is_deleted',false),
+      supabase.from('invoices').select('invoice_id,ref_number,status,grand_total,total_received,total_outstanding,revision_number').eq('event_id',eventId).eq('is_deleted',false),
       supabase.from('users').select('user_id,first_name,last_name').eq('status','active'),
     ]);
     if(evt){
@@ -2294,6 +2295,17 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     setQuoteWizardSubs(mainEvItems.length>0 ? [...subsWithItems, {name:'General Items', items:mainEvItems}] : subsWithItems);
     setReviseQuoteId(reviseId||null);
     setShowQuoteWizard(true);
+  };
+
+  // Generate-invoice safety net: re-create the draft from a confirmed quote if the
+  // auto-create at confirmation didn't run (or the invoice was deleted). Not a manual builder.
+  const handleGenerateInvoice = async () => {
+    const q = quotations.find(x=>['approved','converted'].includes(x.status));
+    if(!q){ notify('Confirm a quotation first — invoices are generated from a confirmed quote.','info'); return; }
+    setGenInv(true);
+    const inv = await createInvoiceFromQuote(q.quotation_id,{eventId});
+    setGenInv(false);
+    if(inv) await loadAll();
   };
 
   const enterEditMode = () => { setForm({...event}); setErrors({}); setSaveError(''); setMode('edit'); };
@@ -2497,14 +2509,19 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
             })()}
           </div>
           <div>
-            <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>Invoices ({invoices.length})</div>
-            {invoices.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No invoices yet</div>}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em'}}>Invoices ({invoices.length})</div>
+              {invoices.length===0&&quotations.some(q=>['approved','converted'].includes(q.status))&&
+                <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} disabled={genInv} onClick={handleGenerateInvoice} title="Create the draft invoice from the confirmed quotation">{genInv?'Generating…':'+ Generate invoice'}</button>}
+            </div>
+            {invoices.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>{quotations.some(q=>['approved','converted'].includes(q.status))?'No invoice yet — generate it from the confirmed quote.':'No invoices yet — confirm a quotation to raise one.'}</div>}
             {invoices.map(inv=>{
               const is={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'},overdue:{bg:'var(--red-light)',color:'var(--red)'},cancelled:{bg:'var(--grey-100)',color:'var(--grey-400)'}};
               const s=is[inv.status?.toLowerCase()]||is.draft;
+              const recvd=parseFloat(inv.total_received||0); const tot=parseFloat(inv.grand_total||0);
               return <div key={inv.invoice_id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6}}>
-                <div><div style={{fontSize:13,fontWeight:500}}>{inv.ref_number}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{parseFloat(inv.grand_total||0).toLocaleString('en-IN')}</div></div>
-                <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{inv.status}</span>
+                <div><div style={{fontSize:13,fontWeight:500}}>{inv.ref_number}{inv.revision_number>0?' · Rev '+inv.revision_number:''}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{tot.toLocaleString('en-IN')}{recvd>0?' · ₹'+recvd.toLocaleString('en-IN')+' received':''}</div></div>
+                <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{(inv.status||'').replace('_',' ')}</span>
               </div>;
             })}
           </div>
@@ -2518,8 +2535,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           {[
             {label:'Quoted (items)',val:'₹'+grandTotal.toLocaleString('en-IN'),color:'var(--grey-800)'},
             {label:'Invoiced',val:'₹'+invoices.reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0).toLocaleString('en-IN'),color:'var(--blue)'},
-            {label:'Received',val:'₹0',color:'var(--green)'},
-            {label:'Outstanding',val:'₹'+invoices.reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0).toLocaleString('en-IN'),color:'var(--red)'},
+            {label:'Received',val:'₹'+invoices.reduce((s,i)=>s+(parseFloat(i.total_received)||0),0).toLocaleString('en-IN'),color:'var(--green)'},
+            {label:'Outstanding',val:'₹'+invoices.reduce((s,i)=>s+(parseFloat(i.total_outstanding!=null?i.total_outstanding:((parseFloat(i.grand_total)||0)-(parseFloat(i.total_received)||0)))||0),0).toLocaleString('en-IN'),color:'var(--red)'},
           ].map((p,i)=>(
             <div key={i} style={{textAlign:'center',padding:'10px',background:'var(--grey-50)',borderRadius:'var(--radius-md)'}}>
               <div style={{fontSize:11,color:'var(--grey-400)',marginBottom:4}}>{p.label}</div>
@@ -2989,6 +3006,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
   const [items, setItems] = React.useState([]);
   const [qSettings, setQSettings] = React.useState({});
   const [sharing, setSharing] = React.useState(false);
+  const [confirming, setConfirming] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [modalDisplayOpts, setModalDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false});
   const setMDO=(k,v)=>setModalDisplayOpts(o=>({...o,[k]:v}));
@@ -3009,6 +3027,19 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
     if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
     else openEmail(channel==='gmail'?'gmail':'default', quot.client_email, 'Quotation '+quot.ref_number+' — Isheeka Events', msg);
     setSharing(false);
+  };
+  // Path B — confirm an event-origin quote: mark approved + auto-create the draft invoice,
+  // then jump to the event so the new invoice is visible. (Lead-origin quotes confirm on
+  // the lead and invoice at conversion instead.)
+  const doConfirmQuote = async () => {
+    if(confirming||!quot) return;
+    setConfirming(true);
+    const {error}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id);
+    if(error){ notify('Could not confirm the quote: '+(error.message||'Please try again.'),'error'); setConfirming(false); return; }
+    const inv = await createInvoiceFromQuote(quot.quotation_id,{eventId:quot.event_id});
+    setConfirming(false);
+    if(inv){ onClose&&onClose(); onNavigate&&onNavigate('events',{eventId:quot.event_id}); }
+    else { setQuot(q=>({...q,status:'approved'})); }
   };
   React.useEffect(()=>{
     let alive=true;
@@ -3142,6 +3173,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('whatsapp')}>{'\uD83D\uDCAC'} WhatsApp</button>
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('gmail')}>Gmail</button>
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('email')}>Email</button>
+              {quot.event_id&&!['approved','converted','rejected','expired','superseded'].includes(quot.status)&&<button className="btn primary" disabled={confirming} onClick={doConfirmQuote} title="Mark the quote confirmed and create the draft invoice">{confirming?'Confirming\u2026':'\u2705 Confirm & create invoice'}</button>}
               {(quot.status==='converted'||quot.event_id)&&<button className="btn sm" onClick={()=>{onClose&&onClose();onNavigate&&onNavigate('events',{eventId:quot.event_id});}}>Go to event {'\u2192'}</button>}
               <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
               <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
@@ -3397,6 +3429,14 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       // 5. Mark the approved quotation as converted
       if(approvedQuot){
         const {error:cve}=await supabase.from('quotations').update({status:'converted',event_id:event.event_id,updated_at:new Date().toISOString()}).eq('quotation_id',approvedQuot.quotation_id); if(cve) throw cve;
+      }
+
+      // 5b. Auto-create the draft invoice from the approved quote (Phase 2).
+      // Best-effort: the event already exists, so a hiccup here must not fail the
+      // conversion — the user can re-run it from the event's "Generate invoice".
+      if(approvedQuot){
+        try { await createInvoiceFromQuote(approvedQuot.quotation_id,{eventId:event.event_id}); }
+        catch(invErr){ console.error('[Isheeka ERP] invoice auto-create failed:', invErr); notify('Event created, but the draft invoice couldn\'t be generated automatically — use "Generate invoice" on the event.','error'); }
       }
 
       // 6. Update the lead — reuse client, link event
@@ -5319,6 +5359,61 @@ async function getNextEventRef() {
   const {data,error} = await supabase.rpc('next_counter',{p_type:'event',p_year:year,p_seed:1});
   if(error||data==null){ notify("Couldn't generate an event number. Please try again.",'error'); throw error||new Error('counter failed'); }
   return 'E-'+year+'-'+String(data).padStart(4,'0');
+}
+
+async function getNextInvoiceRef() {
+  const year = new Date().getFullYear().toString().slice(-2);
+  const {data,error} = await supabase.rpc('next_counter',{p_type:'invoice',p_year:year,p_seed:1111});
+  if(error||data==null){ notify("Couldn't generate an invoice number. Please try again.",'error'); throw error||new Error('counter failed'); }
+  return 'I-'+year+'-'+String(data).padStart(4,'0');
+}
+
+// ── Invoice creation (Phase 2) ────────────────────────────────────────────────
+// Create a DRAFT invoice from a confirmed/approved quotation. The single trigger
+// is "quote confirmed": lead-origin quotes reach this at conversion (first moment
+// an event exists); event-origin quotes reach it via the Confirm-quote action.
+// Guarded multi-table write — if a child insert fails, the partial invoice is
+// rolled back so we never leave an orphan header. (To be converted to a single
+// transactional Postgres RPC in the post-baseline hardening pass.)
+// Returns: the new invoice row · an existing invoice (dedupe, one live per event)
+// · or null on failure (a branded toast explains why).
+async function createInvoiceFromQuote(quotationId, opts={}) {
+  const {data:quot,error:qe} = await supabase.from('quotations').select('*').eq('quotation_id',quotationId).single();
+  if(qe||!quot){ notify('Could not load the quotation to invoice.','error'); return null; }
+  const eventId = opts.eventId || quot.event_id;
+  if(!eventId){ notify('No event linked yet — the invoice will be created when the event is.','info'); return null; }
+  const {data:existing} = await supabase.from('invoices').select('invoice_id,ref_number').eq('event_id',eventId).eq('is_deleted',false).limit(1);
+  if(existing&&existing.length){ return existing[0]; }
+  const {data:items} = await supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order');
+  let ref; try{ ref = await getNextInvoiceRef(); }catch(e){ return null; }
+  const subtotal = parseFloat(quot.subtotal||0);
+  const discount = parseFloat(quot.discount_amount||0);
+  const grand = Math.max(0, subtotal - discount); // GST stays off until toggled on the invoice
+  const {data:inv,error:ie} = await supabase.from('invoices').insert({
+    event_id:eventId, event_name:quot.event_name||null, quotation_id:quotationId,
+    client_id:quot.client_id||null, client_name:quot.client_name||null,
+    ref_number:ref, status:'draft', revision_number:0,
+    subtotal, discount_amount:discount, tax_amount:0,
+    gst_applicable:false, gst_pct:0, grand_total:grand,
+    total_received:0, total_outstanding:grand,
+    source_quote_total:parseFloat(quot.grand_total||0),
+    payment_terms:quot.payment_terms||null
+  }).select().single();
+  if(ie||!inv){ notify('Failed to create the invoice. '+((ie&&ie.message)||''),'error'); return null; }
+  if(items&&items.length){
+    const liRows = items.map((it,idx)=>({invoice_id:inv.invoice_id,description:it.description||'—',sub_event_name:it.sub_event_name||null,quantity:it.quantity,unit_price:it.unit_price,amount:it.amount,sort_order:(it.sort_order!=null?it.sort_order:idx)}));
+    const {error:lie} = await supabase.from('invoice_line_items').insert(liRows);
+    if(lie){ await supabase.from('invoices').delete().eq('invoice_id',inv.invoice_id); notify('Failed to copy line items — invoice rolled back. '+(lie.message||''),'error'); return null; }
+  }
+  let ps = quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} }
+  ps = Array.isArray(ps)?ps:[];
+  if(ps.length){
+    const instRows = ps.map((p,idx)=>{ const pct=parseFloat(p.pct)||0; const amt=Math.round(grand*pct/100); return {invoice_id:inv.invoice_id,installment_number:idx+1,percentage:pct,label:p.label||('Installment '+(idx+1)),when_text:p.when||'',amount_due:amt,amount_paid:0,balance:amt,status:'pending'}; });
+    const {error:ine} = await supabase.from('invoice_installments').insert(instRows);
+    if(ine){ await supabase.from('invoice_line_items').delete().eq('invoice_id',inv.invoice_id); await supabase.from('invoices').delete().eq('invoice_id',inv.invoice_id); notify('Failed to create installments — invoice rolled back. '+(ine.message||''),'error'); return null; }
+  }
+  notify('Draft invoice '+ref+' created.','success');
+  return inv;
 }
 
 // ── Share helpers ─────────────────────────────────────────────────────────────
