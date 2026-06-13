@@ -32,6 +32,7 @@ _Last updated: 12 Jun 2026._
 | 20 | **Item carry + sync (quote = master, event mirrors)** | Pre-fills quote from event items; on save rebuilds event sub-events/items to mirror the quote (full mirror). Verified — event total reconciles to active quote. |
 | 21 | **Event "Total items value" row** | Total of all line items shown at the bottom of the event's Sub-events & items box. |
 | 22 | **Create-new-client in New Event wizard** | Step 2 (Client & contact) now has a "+ New client" button + an empty-state "Create new client" prompt; opens the existing ClientForm in a modal, creates the client (same logic as the Clients module), and auto-selects it. |
+| 23 | **Collapse superseded quote revisions** | Event detail (Documents → Quotations) and lead detail (Quotations panel) now show only non-superseded quotes by default; superseded revisions hide behind a "▸ Show N earlier revisions" toggle (expand/collapse in place). Presentational only — no query/data/active-quote logic changed. Rev number now shown on event-side rows too. |
 
 ---
 
@@ -64,7 +65,7 @@ _Last updated: 12 Jun 2026._
 - **Payment summary "Quoted (items)"** should reflect the **active quotation**, not the event's loose items (decide during Invoice build).
 - **"Revise" button inside the quotation-detail modal** (deferred — only the event button was built).
 - **"Go to event" hidden when already on that event** (small UX tweak, discussed, not built).
-- Long revision chains: optional "group/hide superseded" toggle in the quote lists.
+- ~~Long revision chains: optional "group/hide superseded" toggle in the quote lists.~~ ✅ DONE (changelog #23).
 
 **Architecture / hardening (post-baseline):**
 - **Transaction-wrap multi-table flows** (event save, lead→event conversion, quote-from-event + mirror) in Postgres RPCs so a mid-way failure can't leave partial/out-of-sync records.
