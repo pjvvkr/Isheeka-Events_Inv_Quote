@@ -32,7 +32,8 @@ _Last updated: 12 Jun 2026._
 | 20 | **Item carry + sync (quote = master, event mirrors)** | Pre-fills quote from event items; on save rebuilds event sub-events/items to mirror the quote (full mirror). Verified — event total reconciles to active quote. |
 | 21 | **Event "Total items value" row** | Total of all line items shown at the bottom of the event's Sub-events & items box. |
 | 22 | **Create-new-client in New Event wizard** | Step 2 (Client & contact) now has a "+ New client" button + an empty-state "Create new client" prompt; opens the existing ClientForm in a modal, creates the client (same logic as the Clients module), and auto-selects it. |
-| 23 | **Collapse superseded quote revisions** | Event detail (Documents → Quotations) and lead detail (Quotations panel) now show only non-superseded quotes by default; superseded revisions hide behind a "▸ Show N earlier revisions" toggle (expand/collapse in place). Presentational only — no query/data/active-quote logic changed. Rev number now shown on event-side rows too. |
+| 23 | **Collapse superseded quote revisions** | Event detail (Documents → Quotations) and lead detail (Quotations panel) now show only non-superseded quotes by default; superseded revisions hide behind a "▸ Show N earlier revisions" toggle (expand/collapse in place). Presentational only — no query/data/active-quote logic changed. Rev number now shown on event-side rows too. _Tested OK by user._ |
+| 24 | **Invoice Phase 2 — auto-create from confirmed quote** | New `createInvoiceFromQuote()` helper + `getNextInvoiceRef()` (`I-YY-####`). A **draft** invoice is auto-created when a quote is confirmed: Path A (lead→event conversion) creates it at the end of conversion; Path B adds a **"✅ Confirm & create invoice"** action on the QuotationDetailModal for event-origin quotes (sets quote→approved, creates invoice, jumps to event). Event's Invoices box gains a **"+ Generate invoice" safety-net** (when a confirmed quote exists but no invoice) + shows received/rev; Payment summary now shows real Received/Outstanding. Fully-relational schema (line items, installments, payments). Guarded multi-table write (rolls back partial invoice on failure). **Requires the Phase 2 SQL migration (Section B-10).** |
 
 ---
 
@@ -47,6 +48,7 @@ _Last updated: 12 Jun 2026._
 7. **Storage**: created public bucket **`quotations`** + policy `quotations_all` (authenticated upload) — for hosted quote PDFs.
 8. **`sub_event_items.sub_event_id`** — dropped NOT NULL (allows "main event" items not under a sub-event). _ISSUE-003._
 9. Backfills: `quotations.event_id` from the lead's event (converted quotes); `events.lead_id` from `leads.event_id`.
+10. **Invoice Phase 2 — PENDING USER RUN.** The `invoice_*` tables already existed (original schema) with their own column names — verified 13 Jun via `information_schema`. Revised migration only ADDS: `invoices.revision_number`, `invoices.source_quote_total`; `invoice_line_items.is_deleted`; `invoice_installments.label / when_text / is_deleted`; + RLS policies + indexes. Code aligned to existing names (`total_received`/`total_outstanding`, `installment_number`/`percentage`, `client_name`/`event_name`). Script: `docs/v22-invoice-phase2-migration.sql`. **Run before (or with) the Phase 2 code deploy.**
 
 > **Reminder:** the database and the code must stay in lock-step. If the app is ever restored from an older state, these migrations must already be present (they are, since they're applied to the live Supabase project).
 
