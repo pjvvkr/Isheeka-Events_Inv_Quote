@@ -4534,18 +4534,23 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [revSaving, setRevSaving] = React.useState(false);
   const [srcQuote, setSrcQuote] = React.useState(null);
   const [pdfDisplay, setPdfDisplay] = React.useState({prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true});
+  const [payments, setPayments] = React.useState([]);
+  const [showPay, setShowPay] = React.useState(false);
+  const [payForm, setPayForm] = React.useState({amount:'',date:new Date().toISOString().split('T')[0],mode:'upi',installment_id:'',reference:'',notes:''});
+  const [paySaving, setPaySaving] = React.useState(false);
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
-    const [{data:i},{data:li},{data:inst},{data:s},{data:act},{data:us}] = await Promise.all([
+    const [{data:i},{data:li},{data:inst},{data:s},{data:act},{data:us},{data:pays}] = await Promise.all([
       supabase.from('invoices').select('*').eq('invoice_id',invoiceId).single(),
       supabase.from('invoice_line_items').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('sort_order'),
       supabase.from('invoice_installments').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('installment_number'),
       supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,phone_1,email,website,company_name,cover_intro').single(),
       supabase.from('invoice_activity_log').select('*').eq('invoice_id',invoiceId).order('changed_at',{ascending:false}),
       supabase.from('users').select('user_id,first_name,last_name'),
+      supabase.from('invoice_payments').select('*').eq('invoice_id',invoiceId).order('payment_date',{ascending:false}),
     ]);
-    setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{}); setActivity(act||[]);
+    setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{}); setActivity(act||[]); setPayments(pays||[]);
     const m={}; (us||[]).forEach(u=>{ m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim(); }); setUserMap(m);
     if(i&&i.client_id){ const {data:c}=await supabase.from('clients').select('*').eq('client_id',i.client_id).single(); setClientInfo(c||{}); }
     else setClientInfo({});
@@ -4703,6 +4708,30 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     setSharing(false);
     await loadAll();
   };
+  // Phase 4 — record payments
+  const unpaidInstallments = installments.filter(it=>(parseFloat(it.balance!=null?it.balance:it.amount_due)||0)>0);
+  const canRecordPay = ['sent','partially_paid','overdue'].includes(inv.status) && outstanding>0;
+  const openPay = ()=>{ setPayForm({amount:'',date:new Date().toISOString().split('T')[0],mode:'upi',installment_id:(unpaidInstallments[0]&&unpaidInstallments[0].installment_id)||'',reference:'',notes:''}); setShowPay(true); };
+  const recordPayment = async ()=>{
+    if(paySaving) return;
+    const amt=parseFloat(payForm.amount)||0;
+    if(amt<=0){ notify('Enter a valid payment amount.','error'); return; }
+    if(!payForm.date){ notify('Pick a payment date.','error'); return; }
+    if(!payForm.installment_id){ notify('Select which installment this payment is against.','error'); return; }
+    setPaySaving(true);
+    const uid=await _currentUid();
+    const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:invoiceId, installment_id:payForm.installment_id, amount:amt, payment_date:payForm.date, payment_mode:payForm.mode, reference_number:payForm.reference||null, notes:payForm.notes||null, recorded_by:uid});
+    if(pe){ notify('Could not record payment: '+(pe.message||''),'error'); setPaySaving(false); return; }
+    const it=installments.find(x=>x.installment_id===payForm.installment_id);
+    if(it){ const paid=(parseFloat(it.amount_paid)||0)+amt; const due=parseFloat(it.amount_due)||0; const bal=Math.max(0,due-paid); const ist=bal<=0?'paid':'partially_paid'; await supabase.from('invoice_installments').update({amount_paid:paid,balance:bal,status:ist,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id); }
+    const newRec=(parseFloat(inv.total_received)||0)+amt; const newOut=Math.max(0,grand-newRec);
+    const newStatus = newRec>=grand ? 'paid' : 'partially_paid';
+    await supabase.from('invoices').update({total_received:newRec,total_outstanding:newOut,status:newStatus,updated_at:new Date().toISOString()}).eq('invoice_id',invoiceId);
+    try{ await logInvoiceActivity(invoiceId,{action:'payment',channel:payForm.mode,new_value:'₹'+amt.toLocaleString('en-IN'),reason:(payForm.reference?('Ref: '+payForm.reference):'')||'Payment recorded',revision_number:inv.revision_number||0}); }catch(e){}
+    setPaySaving(false); setShowPay(false);
+    notify('Payment of ₹'+amt.toLocaleString('en-IN')+' recorded.','success');
+    await loadAll();
+  };
   const groups={}; items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
   const fmt=(d)=> d? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
   const fmtDT=(d)=> d? new Date(d).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'}):'—';
@@ -4711,6 +4740,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if(a.action==='sent') return 'Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')));
     if(a.action==='revised') return (a.field?(a.field+': '+(a.old_value||'—')+' → '+(a.new_value||'—')):'Revised')+(a.reason?(' — '+a.reason):'');
     if(a.action==='auto_refresh') return 'Auto-refreshed from the confirmed quote'+(a.reason?(' — '+a.reason):'');
+    if(a.action==='payment') return 'Payment received '+(a.new_value||'')+(a.channel?(' via '+String(a.channel).toUpperCase()):'')+(a.reason&&a.reason!=='Payment recorded'?(' — '+a.reason):'');
     if(a.action==='created') return 'Invoice created';
     if(a.action==='cancelled') return 'Invoice cancelled';
     return a.action||'Activity';
@@ -4784,6 +4814,26 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowClientEdit(false);}}>
           <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:680,boxShadow:'var(--shadow-lg)',padding:'8px 4px'}}>
             <ClientForm initial={clientInfo} title="Edit client" onSave={handleSaveClient} onCancel={()=>setShowClientEdit(false)}/>
+          </div>
+        </div>
+      )}
+      {showPay&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowPay(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:480,boxShadow:'var(--shadow-lg)',padding:'20px 24px'}}>
+            <div style={{fontSize:16,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Record payment · {inv.ref_number}</div>
+            <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:14}}>Outstanding: ₹{outstanding.toLocaleString('en-IN')}</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+              <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Amount (₹) <span style={{color:'var(--red)'}}>*</span></div><input className="field-input" type="number" value={payForm.amount} onChange={e=>setPayForm(f=>({...f,amount:e.target.value}))}/></div>
+              <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Date <span style={{color:'var(--red)'}}>*</span></div><input className="field-input" type="date" value={payForm.date} onChange={e=>setPayForm(f=>({...f,date:e.target.value}))}/></div>
+              <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Mode <span style={{color:'var(--red)'}}>*</span></div><select className="field-input" value={payForm.mode} onChange={e=>setPayForm(f=>({...f,mode:e.target.value}))}>{[['upi','UPI'],['neft','Bank / NEFT'],['cash','Cash'],['cheque','Cheque']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+              <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Against installment <span style={{color:'var(--red)'}}>*</span></div><select className="field-input" value={payForm.installment_id} onChange={e=>setPayForm(f=>({...f,installment_id:e.target.value}))}>{unpaidInstallments.length===0&&<option value="">No unpaid installments</option>}{unpaidInstallments.map(it=><option key={it.installment_id} value={it.installment_id}>{(it.label||('Installment '+it.installment_number))+' · bal ₹'+(parseFloat(it.balance!=null?it.balance:it.amount_due)||0).toLocaleString('en-IN')}</option>)}</select></div>
+            </div>
+            <div style={{marginBottom:8}}><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Reference no. (optional)</div><input className="field-input" value={payForm.reference} onChange={e=>setPayForm(f=>({...f,reference:e.target.value}))} placeholder="UTR / cheque no. / txn id"/></div>
+            <div style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Notes (optional)</div><input className="field-input" value={payForm.notes} onChange={e=>setPayForm(f=>({...f,notes:e.target.value}))}/></div>
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button className="btn" onClick={()=>setShowPay(false)}>Cancel</button>
+              <button className="btn primary" disabled={paySaving} onClick={recordPayment}>{paySaving?'Saving…':'Record payment'}</button>
+            </div>
           </div>
         </div>
       )}
@@ -4884,7 +4934,17 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
           <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'14px 18px',border:'1px solid var(--grey-100)'}}>
             <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0'}}><span style={{color:'var(--grey-400)'}}>Received</span><span style={{fontWeight:500,color:'var(--green)'}}>₹{received.toLocaleString('en-IN')}</span></div>
             <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0'}}><span style={{color:'var(--grey-400)'}}>Outstanding</span><span style={{fontWeight:500,color:outstanding>0?'var(--red)':'var(--green)'}}>₹{outstanding.toLocaleString('en-IN')}</span></div>
-            <div style={{fontSize:11,color:'var(--grey-400)',marginTop:8,paddingTop:8,borderTop:'1px solid var(--grey-50)'}}>Recording payments comes in the next phase.</div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8,paddingTop:8,borderTop:'1px solid var(--grey-50)'}}>
+              <span style={{fontSize:11,fontWeight:600,color:'var(--grey-700)'}}>Payments ({payments.length})</span>
+              {canRecordPay&&<button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={openPay}>+ Record</button>}
+            </div>
+            {payments.length===0&&<div style={{fontSize:11,color:'var(--grey-400)',marginTop:4}}>No payments recorded yet.</div>}
+            {payments.map(p=>(
+              <div key={p.payment_id} style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'3px 0',borderBottom:'1px solid var(--grey-50)'}}>
+                <span style={{color:'var(--grey-600)'}}>{new Date(p.payment_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} · {String(p.payment_mode||'').toUpperCase()}{p.reference_number?(' · '+p.reference_number):''}</span>
+                <span style={{fontWeight:500,color:'var(--green)'}}>₹{parseFloat(p.amount||0).toLocaleString('en-IN')}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -6018,8 +6078,29 @@ async function createInvoiceFromQuote(quotationId, opts={}) {
   if(qe||!quot){ notify('Could not load the quotation to invoice.','error'); return null; }
   const eventId = opts.eventId || quot.event_id;
   if(!eventId){ notify('No event linked yet — the invoice will be created when the event is.','info'); return null; }
-  const {data:existing} = await supabase.from('invoices').select('invoice_id,ref_number').eq('event_id',eventId).eq('is_deleted',false).neq('status','cancelled').limit(1);
-  if(existing&&existing.length){ return existing[0]; }
+  const {data:exArr} = await supabase.from('invoices').select('invoice_id,ref_number,status,total_received,gst_applicable,gst_pct,discount_amount,revision_number,grand_total').eq('event_id',eventId).eq('is_deleted',false).neq('status','cancelled').limit(1);
+  const existing = exArr && exArr[0];
+  if(existing){
+    // Issued (sent+) or any payment recorded → keep it as a snapshot, do not touch.
+    if(existing.status!=='draft' || (parseFloat(existing.total_received)||0)>0) return existing;
+    // Draft + unpaid → refresh it in place from the newly-confirmed quote (decision #12).
+    // Preserve invoice-level settings (GST toggle/%, discount); refresh quote-derived items + installments; keep same ref; don't bump revision_number.
+    const {data:qitems} = await supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order');
+    const rSub=parseFloat(quot.subtotal||0), rDisc=parseFloat(existing.discount_amount||0);
+    const rTaxable=Math.max(0,rSub-rDisc);
+    const rTax=existing.gst_applicable?Math.round(rTaxable*(parseFloat(existing.gst_pct)||0)/100):0;
+    const rGrand=rTaxable+rTax;
+    await supabase.from('invoice_line_items').update({is_deleted:true}).eq('invoice_id',existing.invoice_id);
+    if(qitems&&qitems.length){ await supabase.from('invoice_line_items').insert(qitems.map((it,idx)=>({invoice_id:existing.invoice_id,description:it.description||'—',sub_event_name:it.sub_event_name||null,quantity:it.quantity,unit_price:it.unit_price,amount:it.amount,sort_order:(it.sort_order!=null?it.sort_order:idx)}))); }
+    await supabase.from('invoice_installments').update({is_deleted:true}).eq('invoice_id',existing.invoice_id);
+    let rps=quot.payment_schedule; if(typeof rps==='string'){ try{rps=JSON.parse(rps||'[]');}catch(e){rps=[];} } rps=Array.isArray(rps)?rps:[];
+    if(rps.length){ await supabase.from('invoice_installments').insert(rps.map((p,idx)=>{ const pct=parseFloat(p.pct)||0; const amt=Math.round(rGrand*pct/100); return {invoice_id:existing.invoice_id,installment_number:idx+1,percentage:pct,label:p.label||('Installment '+(idx+1)),when_text:p.when||'',amount_due:amt,amount_paid:0,balance:amt,status:'pending'}; })); }
+    const {error:rue}=await supabase.from('invoices').update({quotation_id:quotationId,event_name:quot.event_name||null,client_name:quot.client_name||null,subtotal:rSub,tax_amount:rTax,grand_total:rGrand,total_outstanding:rGrand,source_quote_total:parseFloat(quot.grand_total||0),updated_at:new Date().toISOString()}).eq('invoice_id',existing.invoice_id);
+    if(rue){ notify('Could not refresh the draft invoice: '+(rue.message||''),'error'); return existing; }
+    try{ await logInvoiceActivity(existing.invoice_id,{action:'auto_refresh',field:'grand_total',old_value:'₹'+(parseFloat(existing.grand_total)||0).toLocaleString('en-IN'),new_value:'₹'+rGrand.toLocaleString('en-IN'),reason:'Synced to confirmed quote '+(quot.ref_number||''),revision_number:existing.revision_number||0}); }catch(e){}
+    notify('Draft invoice '+existing.ref_number+' refreshed from the updated quote.','success');
+    return existing;
+  }
   const {data:items} = await supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order');
   let ref; try{ ref = await getNextInvoiceRef(); }catch(e){ return null; }
   const subtotal = parseFloat(quot.subtotal||0);
@@ -6219,7 +6300,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     sans('bold',15); setText(INK); doc.text(String(quot.ref_number||''), W-M, top+28, {align:'right'});
     sans('normal',8); setText(MUTED);
     doc.text('Date: '+fmt(quot.doc_date), W-M, top+40, {align:'right'});
-    doc.text((isInv?'Due date: ':'Valid until: ')+fmt(isInv?quot.due_date:quot.valid_until), W-M, top+51, {align:'right'});
+    { const _dd=isInv?quot.due_date:quot.valid_until; if(_dd) doc.text((isInv?'Due date: ':'Valid until: ')+fmt(_dd), W-M, top+51, {align:'right'}); }
     setDraw(PINK); doc.setLineWidth(1.4); doc.line(M, HDR_BOTTOM-12, W-M, HDR_BOTTOM-12);
   };
 
