@@ -2105,6 +2105,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
   const [quoteWizardLead, setQuoteWizardLead] = React.useState(null);
   const [quoteWizardSubs, setQuoteWizardSubs] = React.useState([]);
+  const [reviseQuoteId, setReviseQuoteId] = React.useState(null);
   const [invoices, setInvoices] = React.useState([]);
   const [altContacts, setAltContacts] = React.useState([]);
   const [staffList, setStaffList] = React.useState([]);
@@ -2279,7 +2280,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   };
 
   // Create a quotation directly from this event (event-originated; no lead, no convert step)
-  const startQuoteFromEvent = async () => {
+  const launchQuoteWizard = async (reviseId) => {
     if(!event.client_id){ notify('Add a client to this event before creating a quotation.','error'); return; }
     const {data:c} = await supabase.from('clients').select('first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',event.client_id).single();
     const nm=(event.client_name||'').trim();
@@ -2288,6 +2289,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       : {lead_id:null, client_id:event.client_id, first_name:nm.split(' ')[0]||nm, last_name:nm.split(' ').slice(1).join(' '), phone:'', phone_2:'', email:'', source:'referral', event_type:event.type};
     setQuoteWizardLead(built);
     setQuoteWizardSubs((subEvents||[]).map(se=>({name:se.name})));
+    setReviseQuoteId(reviseId||null);
     setShowQuoteWizard(true);
   };
 
@@ -2299,6 +2301,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
 
   const sc = EVENT_STATUS_COLORS[event.status?.toLowerCase()]||EVENT_STATUS_COLORS.planning;
   const hasFinancialDocs = quotations.length>0||invoices.length>0;
+  const activeQuote = quotations.find(q=>!['superseded','rejected','expired','converted'].includes(q.status));
   const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name}));
   const typeOpts = EVENT_TYPES.map(t=>({value:t.toLowerCase(),label:t}));
   const statusOpts = EVENT_STATUS_ORDER.map(s=>({value:s,label:EVENT_STATUS_LABELS[s]}));
@@ -2345,7 +2348,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     <div>
       {header}
       {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>setViewQuotId(null)} onNavigate={onNavigate}/>}
-      {showQuoteWizard&&<QuoteGenerationWizard lead={quoteWizardLead} leadSubEvents={quoteWizardSubs} isRevision={false} isContinuation={false} existingQuotationId={null} originEvent={{eventId:event.event_id, eventName:event.name}} onComplete={async()=>{ setShowQuoteWizard(false); await loadAll(); }} onCancel={()=>setShowQuoteWizard(false)}/>}
+      {showQuoteWizard&&<QuoteGenerationWizard lead={quoteWizardLead} leadSubEvents={quoteWizardSubs} isRevision={!!reviseQuoteId} isContinuation={false} existingQuotationId={reviseQuoteId} originEvent={{eventId:event.event_id, eventName:event.name}} onComplete={async()=>{ setShowQuoteWizard(false); setReviseQuoteId(null); await loadAll(); }} onCancel={()=>{ setShowQuoteWizard(false); setReviseQuoteId(null); }}/>}
       {successMsg&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:12,border:'1px solid rgba(15,110,86,0.2)',display:'flex',alignItems:'center',gap:8}}>✅ {successMsg}</div>}
       {/* Info cards */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
@@ -2461,7 +2464,9 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
               <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em'}}>Quotations ({quotations.length})</div>
-              <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={startQuoteFromEvent}>+ Create</button>
+              {activeQuote
+                ? <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(activeQuote.quotation_id)} title="Revise the active quotation">✏️ Revise</button>
+                : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>}
             </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
             {quotations.map(q=>{
