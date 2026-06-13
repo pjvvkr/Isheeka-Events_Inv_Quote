@@ -2095,11 +2095,12 @@ function ChangeClientModal({currentClient, onSave, onCancel}) {
 }
 
 // ── EventDetail ───────────────────────────────────────────────────────────────
-function EventDetail({eventId, onBack, onUseAsReference}) {
+function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [event, setEvent] = React.useState(null);
   const [subEvents, setSubEvents] = React.useState([]);
   const [checklist, setChecklist] = React.useState([]);
   const [quotations, setQuotations] = React.useState([]);
+  const [linkedLead, setLinkedLead] = React.useState(null);
   const [invoices, setInvoices] = React.useState([]);
   const [altContacts, setAltContacts] = React.useState([]);
   const [staffList, setStaffList] = React.useState([]);
@@ -2146,6 +2147,10 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
         const {data:ac} = await supabase.from('alternative_contacts').select('*').eq('client_id',evt.client_id).eq('is_deleted',false);
         if(ac) setAltContacts(ac);
       }
+      if(evt.lead_id){
+        const {data:ld} = await supabase.from('leads').select('lead_id,ref_number').eq('lead_id',evt.lead_id).single();
+        setLinkedLead(ld||null);
+      } else { setLinkedLead(null); }
     }
     if(subs && items){
       const grouped = subs.map(se=>({
@@ -2304,6 +2309,7 @@ function EventDetail({eventId, onBack, onUseAsReference}) {
             <span style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,background:sc.bg,color:sc.color}}>
               {EVENT_STATUS_LABELS[event.status?.toLowerCase()]||event.status}
             </span>
+            {linkedLead&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('leads',{leadId:linkedLead.lead_id})}>← Lead {linkedLead.ref_number||''}</button>}
             <button className="btn sm" onClick={()=>onUseAsReference(event)}>📋 Use as reference</button>
             <button className="btn sm primary" onClick={enterEditMode}>✏️ Edit</button>
           </>}
@@ -3296,6 +3302,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       const evRef = await getNextEventRef();
       const {data:event,error:ee} = await supabase.from('events').insert({
         ref_number:evRef,
+        lead_id:leadId,
         name:(approvedQuot&&approvedQuot.event_name)||(lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event'),
         type:lead.event_type||null,status:'planning',
         main_date:lead.tentative_date||null,
@@ -3742,7 +3749,7 @@ function LeadRefSearchInput({value, onChange}) {
 }
 
 // ── Leads Module ──────────────────────────────────────────────────────────────
-function LeadsModule({onNavigate}) {
+function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
   const [view, setView] = React.useState('list'); // list | new | detail
   const [leads, setLeads] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -3758,6 +3765,9 @@ function LeadsModule({onNavigate}) {
   const [referenceData, setReferenceData] = React.useState(null);
 
   React.useEffect(()=>{ loadLeads(); fetchLeadSources().then(setLeadSources); },[]);
+  React.useEffect(()=>{
+    if(initialLeadId){ setSelectedId(initialLeadId); setView('detail'); onConsumed&&onConsumed(); }
+  },[initialLeadId]);
 
   const loadLeads = useCallback(async () => {
     setLoading(true);
@@ -4009,7 +4019,7 @@ function matchesBudget(budget, range) {
   return b >= min && b <= max;
 }
 
-function EventsModule({initialEventId, onConsumed}) {
+function EventsModule({initialEventId, onConsumed, onNavigate}) {
   const [view, setView] = useState('list'); // list | new | detail
   const [events, setEvents] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -4073,6 +4083,7 @@ function EventsModule({initialEventId, onConsumed}) {
       eventId={selectedId}
       onBack={()=>{setView('list');setSelectedId(null);loadEvents();}}
       onUseAsReference={(evt)=>{setReferenceEvent(evt);setView('new');}}
+      onNavigate={onNavigate}
     />
   );
   if(view==='new') return <NewEventWizard
@@ -4329,7 +4340,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState('dashboard');
   const [navTarget, setNavTarget] = useState(null);
-  const navigate = useCallback((page, opts={})=>{ setNavTarget(opts&&opts.eventId?{page, eventId:opts.eventId}:null); setActivePage(page); },[]);
+  const navigate = useCallback((page, opts={})=>{ setNavTarget((opts&&(opts.eventId||opts.leadId))?{page, eventId:opts.eventId, leadId:opts.leadId}:null); setActivePage(page); },[]);
   const [showWarning, setShowWarning] = useState(false);
   const lastActivity = useRef(Date.now());
   const warningTimer = useRef(null);
@@ -4420,8 +4431,8 @@ function App() {
           {activePage==='dashboard' && <Dashboard user={user}/>}
           {activePage==='settings' && <SettingsModule/>}
           {activePage==='clients' && <ClientsModule/>}
-          {activePage==='events' && <EventsModule initialEventId={navTarget&&navTarget.page==='events'?navTarget.eventId:null} onConsumed={()=>setNavTarget(null)}/>}
-          {activePage==='leads' && <LeadsModule onNavigate={navigate}/>}
+          {activePage==='events' && <EventsModule initialEventId={navTarget&&navTarget.page==='events'?navTarget.eventId:null} onConsumed={()=>setNavTarget(null)} onNavigate={navigate}/>}
+          {activePage==='leads' && <LeadsModule onNavigate={navigate} initialLeadId={navTarget&&navTarget.page==='leads'?navTarget.leadId:null} onConsumed={()=>setNavTarget(null)}/>}
           {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && <ComingSoon page={activePage}/>}
         </div>
       </main>
