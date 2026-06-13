@@ -520,7 +520,7 @@ function TemplatesTab() {
               <span style={{fontSize:24}}>{typeIcons[tpl.event_type]||'🎪'}</span>
               <div style={{flex:1}}>
                 <div style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{tpl.name}</div>
-                <div style={{fontSize:12,color:'var(--grey-400)',textTransform:'capitalize'}}>{tpl.event_type||'General'}</div>
+                <div style={{fontSize:12,color:'var(--grey-400)'}}>{tpl.event_type?eventTypeLabel(tpl.event_type):'General'}</div>
               </div>
               <div style={{display:'flex',gap:6}}>
                 <button className="btn sm" onClick={()=>{setEditingTemplate(tpl);setView('edit');}}>✏️ Edit</button>
@@ -538,7 +538,7 @@ function TemplatesTab() {
                   <span style={{fontSize:20}}>{typeIcons[tpl.event_type]||'🎪'}</span>
                   <div style={{flex:1}}>
                     <div style={{fontSize:13,fontWeight:500,color:'var(--grey-400)',textDecoration:'line-through'}}>{tpl.name}</div>
-                    <div style={{fontSize:12,color:'var(--grey-400)',textTransform:'capitalize'}}>{tpl.event_type||'General'}</div>
+                    <div style={{fontSize:12,color:'var(--grey-400)'}}>{tpl.event_type?eventTypeLabel(tpl.event_type):'General'}</div>
                   </div>
                   <button className="btn sm" onClick={()=>handleRestore(tpl)}>↩ Restore</button>
                 </div>
@@ -2516,7 +2516,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'18px 24px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
         <div>
           <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{event.name}</div>
-          <div style={{fontSize:12,color:'var(--grey-400)'}}>{event.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{event.ref_number} · </span>}{event.type?event.type.charAt(0).toUpperCase()+event.type.slice(1):''} · {event.client_name}</div>
+          <div style={{fontSize:12,color:'var(--grey-400)'}}>{event.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{event.ref_number} · </span>}{event.type?eventTypeLabel(event.type):''} · {event.client_name}</div>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
           {mode==='view' && <>
@@ -2548,7 +2548,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       {/* Info cards */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
         {[
-          {label:'Main event date',val:event.main_date?new Date(event.main_date).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}):'—'},
+          {label:'Main event date',val:event.main_date?fmtDate(event.main_date,{day:'numeric',month:'long',year:'numeric'}):'—'},
           {label:'Location',val:event.location||'—'},
           {label:'Guest count',val:event.guest_count||'—'},
           {label:'Budget',val:event.budget?'₹'+parseFloat(event.budget).toLocaleString('en-IN'):'—'},
@@ -2584,7 +2584,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                 <div style={{width:8,height:8,borderRadius:'50%',background:'#e8185a',flexShrink:0}}/>
                 <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{se.name}</div>
-                {se.date&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {new Date(se.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</div>}
+                {se.date&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {fmtDate(se.date,{day:'numeric',month:'short'})}</div>}
                 {se.location&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {se.location}</div>}
               </div>
               {se.items.length>0
@@ -2871,12 +2871,16 @@ const EVENT_TYPES_DEFAULT = [
   {value:'other',label:'Other'},
 ];
 let _eventTypesCache = null;
+// value -> label map, used by eventTypeLabel() for display. Seeded with the
+// defaults so built-ins render correctly even before the table loads.
+let _eventTypeLabelMap = Object.fromEntries(EVENT_TYPES_DEFAULT.map(t=>[t.value,t.label]));
 async function fetchEventTypes() {
   if(_eventTypesCache) return _eventTypesCache;
   try {
     const {data} = await supabase.from('event_types').select('*').eq('is_active',true).order('sort_order');
     if(data && data.length>0){
       _eventTypesCache = data.map(t=>({value:t.value,label:t.label}));
+      data.forEach(t=>{ _eventTypeLabelMap[t.value]=t.label; });
       return _eventTypesCache;
     }
   } catch(e){}
@@ -2887,6 +2891,22 @@ function useEventTypes() {
   const [t,setT] = React.useState(EVENT_TYPES_DEFAULT);
   React.useEffect(()=>{ fetchEventTypes().then(setT); },[]);
   return t;
+}
+// Display label for a stored event-type value: prefer the configured label,
+// else prettify the value (under_scores -> "Title Case") so it always reads cleanly.
+function prettyTypeValue(v){ return String(v||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+function eventTypeLabel(v){ if(!v) return ''; return _eventTypeLabelMap[v] || prettyTypeValue(v); }
+
+// Timezone-safe date formatter. A bare 'YYYY-MM-DD' is built from its parts as a
+// LOCAL date (avoids new Date('YYYY-MM-DD') being parsed as UTC and shifting a day
+// in non-UTC timezones). Full timestamps fall through to normal parsing.
+function fmtDate(d, opts){
+  if(!d) return '—';
+  const s=String(d);
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const dt = m ? new Date(+m[1], +m[2]-1, +m[3]) : new Date(s);
+  if(isNaN(dt.getTime())) return '—';
+  return dt.toLocaleDateString('en-IN', opts||{day:'numeric',month:'short',year:'numeric'});
 }
 
 // ── Lead follow-up urgency ────────────────────────────────────────────────────
@@ -2957,7 +2977,7 @@ function LossNotesInput({value,onChange}) {
 function WelcomeMessageModal({lead, quotRef, clientOutcome, onClose, onGoToEvent}) {
   const msg = `Dear ${lead.first_name} ${lead.last_name},
 
-Thank you for choosing Isheeka Events for your ${lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'upcoming event'}! We are thrilled to confirm your event with us.
+Thank you for choosing Isheeka Events for your ${lead.event_type?eventTypeLabel(lead.event_type):'upcoming event'}! We are thrilled to confirm your event with us.
 
 ${quotRef?`Your quotation (${quotRef}) has been confirmed`:'Your quotation has been confirmed'}, and our team will now begin preparing every detail to make your occasion truly memorable.
 
@@ -3028,7 +3048,7 @@ function ConvertLeadModal({lead, onConfirm, onCancel}) {
               </div>
               <div style={{fontSize:13,color:'var(--green)',display:'flex',gap:8}}>
                 <span>🎪</span>
-                <span>Event: <strong>{lead.first_name} {lead.last_name} {lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):''}</strong></span>
+                <span>Event: <strong>{lead.first_name} {lead.last_name} {lead.event_type?eventTypeLabel(lead.event_type):''}</strong></span>
               </div>
             </div>
           </div>
@@ -3291,7 +3311,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
     return ()=>{alive=false;};
   },[quotationId]);
 
-  const fmt=(d)=> d? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'\u2014';
+  const fmt=(d)=> fmtDate(d);
   const groups={};
   items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
   let ps = quot&&quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} }
@@ -3635,7 +3655,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       const {data:event,error:ee} = await supabase.from('events').insert({
         ref_number:evRef,
         lead_id:leadId,
-        name:(approvedQuot&&approvedQuot.event_name)||(lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event'),
+        name:(approvedQuot&&approvedQuot.event_name)||(lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?eventTypeLabel(lead.event_type):'Event'),
         type:lead.event_type||null,status:'planning',
         main_date:lead.tentative_date||null,
         location:lead.location||null,
@@ -3759,7 +3779,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
             <span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>
               {isLost?'LOST':LEAD_STAGE_LABELS[lead.stage]||lead.stage}
             </span>
-            {lead.event_type&&<span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{lead.event_type}</span>}
+            {lead.event_type&&<span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
             {lead.source&&<span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--grey-100)',color:'var(--grey-400)',textTransform:'capitalize'}}>{lead.source.replace('_',' ')}</span>}
           </div>
         </div>
@@ -3817,8 +3837,8 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
           <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:14}}>Event details</div>
           {[
-            ['Event type',lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'—'],
-            ['Tentative date',lead.tentative_date?new Date(lead.tentative_date).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}):'—'],
+            ['Event type',lead.event_type?eventTypeLabel(lead.event_type):'—'],
+            ['Tentative date',lead.tentative_date?fmtDate(lead.tentative_date,{day:'numeric',month:'long',year:'numeric'}):'—'],
             ['Location',lead.location||'—'],
             ['Approx. budget',lead.budget?'₹'+parseFloat(lead.budget).toLocaleString('en-IN'):'—'],
             ['Guest count',lead.guest_count||'—'],
@@ -3840,7 +3860,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
             <div>
               <div style={{fontSize:11,color:uc.color,fontWeight:600,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:2}}>Follow-up</div>
               <div style={{fontSize:14,fontWeight:500,color:uc.color}}>
-                {lead.follow_up_date?new Date(lead.follow_up_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'Not set'}
+                {lead.follow_up_date?fmtDate(lead.follow_up_date,{day:'numeric',month:'short',year:'numeric'}):'Not set'}
               </div>
               {urgency!=='none'&&<div style={{fontSize:11,color:uc.color,marginTop:2}}>{uc.label}</div>}
             </div>
@@ -3907,7 +3927,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
                     </div>
                     <div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>
                       {'Rs.'+parseFloat(q.grand_total||0).toLocaleString('en-IN')}
-                      {q.valid_until&&(' · Valid until '+new Date(q.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short'}))}
+                      {q.valid_until&&(' · Valid until '+fmtDate(q.valid_until,{day:'numeric',month:'short'}))}
                     </div>
                   </div>
                   <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{statusLabel}</span>
@@ -3937,7 +3957,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
               </div>
               <div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>
                 {linkedEvent.type?linkedEvent.type.charAt(0).toUpperCase()+linkedEvent.type.slice(1):''}
-                {linkedEvent.main_date&&(' · '+new Date(linkedEvent.main_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}))}
+                {linkedEvent.main_date&&(' · '+fmtDate(linkedEvent.main_date,{day:'numeric',month:'short',year:'numeric'}))}
                 {linkedEvent.location&&(' · '+linkedEvent.location)}
               </div>
             </div>
@@ -4069,12 +4089,12 @@ function LeadReferenceModal({onSelect, onCancel}) {
                   </span>
                 </div>
                 <div style={{display:'flex',gap:12,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
-                  {lead.event_type&&<span style={{textTransform:'capitalize'}}>{lead.event_type}</span>}
+                  {lead.event_type&&<span style={{textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
                   {lead.location&&<span>📍 {lead.location}</span>}
                   {lead.budget&&<span>💰 ₹{parseFloat(lead.budget).toLocaleString('en-IN')}</span>}
                   {lead.guest_count&&<span>👥 {lead.guest_count}</span>}
                   {lead.source&&<span style={{textTransform:'capitalize'}}>{lead.source.replace('_',' ')}</span>}
-                  {lead.tentative_date&&<span>📅 {new Date(lead.tentative_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
+                  {lead.tentative_date&&<span>📅 {fmtDate(lead.tentative_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                 </div>
               </div>
             );
@@ -4319,13 +4339,13 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
                       <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>
                         {isLost?'LOST':isConverted?'CONVERTED':LEAD_STAGE_LABELS[lead.stage]}
                       </span>
-                      {lead.event_type&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{lead.event_type}</span>}
+                      {lead.event_type&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
                     </div>
                     <div style={{display:'flex',gap:14,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {lead.phone&&<span>📞 {lead.phone}</span>}
-                      {lead.tentative_date&&<span>📅 {new Date(lead.tentative_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
+                      {lead.tentative_date&&<span>📅 {fmtDate(lead.tentative_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                       {lead.budget&&<span>💰 ₹{parseFloat(lead.budget).toLocaleString('en-IN')}</span>}
-                      {lead.follow_up_date&&<span style={{color:uc.color,fontWeight:500}}>🔔 {uc.label}: {new Date(lead.follow_up_date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>}
+                      {lead.follow_up_date&&<span style={{color:uc.color,fontWeight:500}}>🔔 {uc.label}: {fmtDate(lead.follow_up_date,{day:'numeric',month:'short'})}</span>}
                     </div>
                   </div>
                   <div style={{padding:'14px 16px',display:'flex',alignItems:'center'}}>
@@ -4517,7 +4537,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {e.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{e.ref_number}</span>}
                       {e.client_name&&<span>👤 {e.client_name}</span>}
-                      {e.main_date&&<span>📅 {new Date(e.main_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
+                      {e.main_date&&<span>📅 {fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                       {e.location&&<span>📍 {e.location}</span>}
                       {e.guest_count&&<span>👥 {e.guest_count} guests</span>}
                       {e.assigned_staff_name&&<span>🧑‍💼 {e.assigned_staff_name}</span>}
@@ -4615,7 +4635,7 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {q.client_name&&<span>👤 {q.client_name}</span>}
                       {q.event_name&&<span>🎪 {q.event_name}</span>}
-                      {q.doc_date&&<span>📅 {new Date(q.doc_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
+                      {q.doc_date&&<span>📅 {fmtDate(q.doc_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                     </div>
                   </div>
                   <div style={{textAlign:'right',fontSize:14,fontWeight:600,color:'var(--grey-800)'}}>₹{parseFloat(q.grand_total||0).toLocaleString('en-IN')}</div>
@@ -4710,7 +4730,7 @@ function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {inv.client_name&&<span>👤 {inv.client_name}</span>}
                       {inv.event_name&&<span>🎪 {inv.event_name}</span>}
-                      {inv.doc_date&&<span>📅 {new Date(inv.doc_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
+                      {inv.doc_date&&<span>📅 {fmtDate(inv.doc_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                     </div>
                   </div>
                   <div style={{padding:'14px 16px',display:'flex',flexDirection:'column',alignItems:'flex-end',justifyContent:'center',gap:2}}>
@@ -4850,7 +4870,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     payment_schedule: installments.map(it=>({
       pct: parseFloat(it.percentage)||0,
       label: it.label||('Installment '+it.installment_number),
-      when: (it.when_text||(it.due_date?('due '+new Date(it.due_date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})):'on schedule'))
+      when: (it.when_text||(it.due_date?('due '+fmtDate(it.due_date,{day:'numeric',month:'short'})):'on schedule'))
         +' — Rs.'+(parseFloat(it.amount_due)||0).toLocaleString('en-IN')
         +((parseFloat(it.balance)||0)>0?(' (bal Rs.'+(parseFloat(it.balance)||0).toLocaleString('en-IN')+')'):'')
     }))
@@ -4977,7 +4997,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     await loadAll();
   };
   const groups={}; items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
-  const fmt=(d)=> d? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
+  const fmt=(d)=> fmtDate(d);
   const fmtDT=(d)=> d? new Date(d).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'}):'—';
   const sends = activity.filter(a=>a.action==='sent');
   const describeActivity=(a)=>{
@@ -5200,7 +5220,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             {payments.length===0&&<div style={{fontSize:11,color:'var(--grey-400)',marginTop:4}}>No payments recorded yet.</div>}
             {payments.map(p=>(
               <div key={p.payment_id} style={{display:'flex',justifyContent:'space-between',fontSize:12,padding:'3px 0',borderBottom:'1px solid var(--grey-50)'}}>
-                <span style={{color:'var(--grey-600)'}}>{new Date(p.payment_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} · {String(p.payment_mode||'').toUpperCase()}{p.reference_number?(' · '+p.reference_number):''}{p.receipt_url?<a href={p.receipt_url} target="_blank" rel="noreferrer" style={{color:'var(--pink)',marginLeft:6}}>📎 receipt</a>:''}</span>
+                <span style={{color:'var(--grey-600)'}}>{fmtDate(p.payment_date,{day:'numeric',month:'short',year:'numeric'})} · {String(p.payment_mode||'').toUpperCase()}{p.reference_number?(' · '+p.reference_number):''}{p.receipt_url?<a href={p.receipt_url} target="_blank" rel="noreferrer" style={{color:'var(--pink)',marginLeft:6}}>📎 receipt</a>:''}</span>
                 <span style={{fontWeight:500,color:'var(--green)'}}>₹{parseFloat(p.amount||0).toLocaleString('en-IN')}</span>
               </div>
             ))}
@@ -5376,7 +5396,7 @@ function Dashboard({ user, onNavigate }) {
           {loading?<div style={{fontSize:13,color:'var(--grey-400)'}}>Loading…</div>:upcoming.length===0?<div style={{fontSize:13,color:'var(--grey-400)'}}>No upcoming events.</div>:upcoming.map(e=>(
             <div key={e.event_id} onClick={()=>onNavigate&&onNavigate('events',{eventId:e.event_id})} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid var(--grey-50)',cursor:'pointer'}}>
               <div><div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{e.name}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>{e.client_name||''}{e.ref_number?' · '+e.ref_number:''}</div></div>
-              <div style={{fontSize:12,color:'var(--pink)',fontWeight:500,whiteSpace:'nowrap'}}>{new Date(e.main_date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</div>
+              <div style={{fontSize:12,color:'var(--pink)',fontWeight:500,whiteSpace:'nowrap'}}>{fmtDate(e.main_date,{day:'numeric',month:'short'})}</div>
             </div>
           ))}
         </div>
@@ -6454,7 +6474,7 @@ function buildQuoteShareMsg(quot, settings, url){
     'Thank you for considering Isheeka Events. We are delighted to share your personalised quotation for '+evt+'.\n\n'+
     'Quotation: '+quot.ref_number+'\n'+
     'Grand Total: Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN')+'\n'+
-    (quot.valid_until?('Valid until: '+new Date(quot.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+'\n'):'')+
+    (quot.valid_until?('Valid until: '+fmtDate(quot.valid_until,{day:'numeric',month:'short',year:'numeric'})+'\n'):'')+
     (url?('\nView your quotation here:\n'+url+'\n'):'')+
     '\nWe would be glad to walk you through the details or tailor anything to your vision.\n\n'+
     'For any queries, please reach out to us at:\n'+
@@ -6492,7 +6512,7 @@ function buildInvoiceShareMsg(inv, settings, url){
     'Invoice: '+inv.ref_number+'\n'+
     'Grand Total: Rs.'+(parseFloat(inv.grand_total)||0).toLocaleString('en-IN')+'\n'+
     'Balance Due: Rs.'+bal.toLocaleString('en-IN')+'\n'+
-    (inv.due_date?('Due by: '+new Date(inv.due_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+'\n'):'')+
+    (inv.due_date?('Due by: '+fmtDate(inv.due_date,{day:'numeric',month:'short',year:'numeric'})+'\n'):'')+
     (url?('\nView / download your invoice here:\n'+url+'\n'):'')+
     '\nFor any queries, please reach out to us at:\n'+
     '📞 '+phone+'\n'+
@@ -6537,7 +6557,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   const LAR=0.781; // logo width/height
   let SCRIPT_OK=false;
   try{ doc.addFileToVFS('GreatVibes.ttf', GV_FONT); doc.addFont('GreatVibes.ttf','GreatVibes','normal'); SCRIPT_OK=true; }catch(e){ SCRIPT_OK=false; }
-  const fmt=d=>d?new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'--';
+  const fmt=d=>d?fmtDate(d):'--';
   const money=n=>'Rs.'+parseFloat(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
   const sans=(style,sz)=>{ doc.setFont('helvetica',style); doc.setFontSize(sz); };
   const script=(sz)=>{ doc.setFont(SCRIPT_OK?'GreatVibes':'times', SCRIPT_OK?'normal':'italic'); doc.setFontSize(sz); };
@@ -7003,7 +7023,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
         client_id:clientId,client_name:clientName,
         lead_id:lead.lead_id||null,
         event_id:originEvent?originEvent.eventId:null,
-        event_name:originEvent?originEvent.eventName:((lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event')),
+        event_name:originEvent?originEvent.eventName:((lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?eventTypeLabel(lead.event_type):'Event')),
         doc_date:quotDetails.doc_date,valid_until:quotDetails.valid_until,
         subtotal,discount_pct:parseFloat(quotDetails.discount_pct)||0,
         discount_amount:discountAmt,grand_total:grandTotal,
@@ -7071,8 +7091,8 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   const handleWhatsApp=()=>{
     if(!createdQuot) return;
     const msg='Dear '+lead.first_name+',\n\nPlease find quotation '+createdQuot.ref_number+' for your upcoming '+
-      (lead.event_type||'event')+'.\n\nGrand Total: Rs.'+parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')+
-      '\nValid until: '+new Date(createdQuot.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+
+      (eventTypeLabel(lead.event_type)||'event')+'.\n\nGrand Total: Rs.'+parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')+
+      '\nValid until: '+fmtDate(createdQuot.valid_until,{day:'numeric',month:'short',year:'numeric'})+
       '\n\nKindly confirm at your earliest convenience.\n\nWarm regards,\nTeam Isheeka Events\n+91 78423 95867';
     openWhatsApp(lead.phone, msg);
     logQuoteSend(createdQuot.quotation_id, 'whatsapp');
