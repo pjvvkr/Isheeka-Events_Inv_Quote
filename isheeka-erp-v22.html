@@ -3005,6 +3005,8 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
   const [quot, setQuot] = React.useState(null);
   const [items, setItems] = React.useState([]);
   const [qSettings, setQSettings] = React.useState({});
+  const [qActivity, setQActivity] = React.useState([]);
+  const [qUserMap, setQUserMap] = React.useState({});
   const [sharing, setSharing] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -3026,6 +3028,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
     const msg = buildQuoteShareMsg(quot, qSettings, url);
     if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
     else openEmail(channel==='gmail'?'gmail':'default', quot.client_email, 'Quotation '+quot.ref_number+' — Isheeka Events', msg);
+    logQuoteSend(quot.quotation_id, channel==='whatsapp'?'whatsapp':'email');
     setSharing(false);
   };
   // Path B — confirm an event-origin quote: mark approved + auto-create the draft invoice,
@@ -3045,10 +3048,12 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
     let alive=true;
     (async()=>{
       setLoading(true);
-      const [{data:q},{data:li},{data:st}] = await Promise.all([
+      const [{data:q},{data:li},{data:st},{data:qact},{data:qus}] = await Promise.all([
         supabase.from('quotations').select('*').eq('quotation_id',quotationId).single(),
         supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order'),
         supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro,phone_1,email,website').single(),
+        supabase.from('quotation_activity_log').select('*').eq('quotation_id',quotationId).order('logged_at',{ascending:false}),
+        supabase.from('users').select('user_id,first_name,last_name'),
       ]);
       if(!alive) return;
       // P1-5: enrich with client contact details so the PDF client box isn't blank
@@ -3064,7 +3069,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
         }
       }
       if(!alive) return;
-      setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{});
+      setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{}); setQActivity(qact||[]); { const m={}; (qus||[]).forEach(u=>{m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim();}); setQUserMap(m); }
       if(q&&q.display_options){ try{ setModalDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
       setLoading(false);
     })();
@@ -3168,6 +3173,16 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
             </div>
             {(quot.status==='converted'||quot.event_id)&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\uD83D\uDCC5'} An event has been created from this quote. For any changes, update the event.</div>}
             {quot.status==='approved'&&!quot.event_id&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\u2705'} This quote is confirmed by the client. To change it, create a revision.</div>}
+            {qActivity.length>0&&(
+              <div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)'}}>
+                <div style={{fontSize:12,fontWeight:600,color:'var(--grey-700)',marginBottom:6}}>Activity · sent {qActivity.filter(a=>a.action==='sent').length}×{qActivity.filter(a=>a.action==='sent')[0]?(' · last '+new Date(qActivity.filter(a=>a.action==='sent')[0].logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})):''}</div>
+                {qActivity.slice(0,8).map(a=>(
+                  <div key={a.log_id} style={{fontSize:12,color:'var(--grey-500)',padding:'2px 0'}}>
+                    {a.action==='sent'?('Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')))):a.action} · {new Date(a.logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}{a.logged_by&&qUserMap[a.logged_by]?(' · '+qUserMap[a.logged_by]):''}
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{padding:'12px 24px',display:'flex',justifyContent:'flex-end',gap:8,flexWrap:'wrap',alignItems:'center'}}>
               <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>Share:</span>
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('whatsapp')}>{'\uD83D\uDCAC'} WhatsApp</button>
@@ -4418,16 +4433,22 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [saving, setSaving] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
   const [showClientEdit, setShowClientEdit] = React.useState(false);
+  const [activity, setActivity] = React.useState([]);
+  const [userMap, setUserMap] = React.useState({});
+  const [showLog, setShowLog] = React.useState(false);
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
-    const [{data:i},{data:li},{data:inst},{data:s}] = await Promise.all([
+    const [{data:i},{data:li},{data:inst},{data:s},{data:act},{data:us}] = await Promise.all([
       supabase.from('invoices').select('*').eq('invoice_id',invoiceId).single(),
       supabase.from('invoice_line_items').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('sort_order'),
       supabase.from('invoice_installments').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('installment_number'),
       supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,phone_1,email,website,company_name,cover_intro').single(),
+      supabase.from('invoice_activity_log').select('*').eq('invoice_id',invoiceId).order('changed_at',{ascending:false}),
+      supabase.from('users').select('user_id,first_name,last_name'),
     ]);
-    setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{});
+    setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{}); setActivity(act||[]);
+    const m={}; (us||[]).forEach(u=>{ m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim(); }); setUserMap(m);
     if(i&&i.client_id){ const {data:c}=await supabase.from('clients').select('*').eq('client_id',i.client_id).single(); setClientInfo(c||{}); }
     else setClientInfo({});
     setLoading(false);
@@ -4537,10 +4558,22 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     const msg = buildInvoiceShareMsg(inv, settings, url);
     if(channel==='whatsapp') openWhatsApp(clientInfo.phone_1, msg);
     else openEmail(channel==='gmail'?'gmail':'default', clientInfo.email_1, 'Invoice '+inv.ref_number+' — Isheeka Events', msg);
+    await logInvoiceActivity(inv.invoice_id,{action:'sent',channel:channel==='whatsapp'?'whatsapp':'email',revision_number:inv.revision_number||0});
     setSharing(false);
+    await loadAll();
   };
   const groups={}; items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
   const fmt=(d)=> d? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
+  const fmtDT=(d)=> d? new Date(d).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'}):'—';
+  const sends = activity.filter(a=>a.action==='sent');
+  const describeActivity=(a)=>{
+    if(a.action==='sent') return 'Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')));
+    if(a.action==='revised') return (a.field?(a.field+': '+(a.old_value||'—')+' → '+(a.new_value||'—')):'Revised')+(a.reason?(' — '+a.reason):'');
+    if(a.action==='auto_refresh') return 'Auto-refreshed from the confirmed quote'+(a.reason?(' — '+a.reason):'');
+    if(a.action==='created') return 'Invoice created';
+    if(a.action==='cancelled') return 'Invoice cancelled';
+    return a.action||'Activity';
+  };
 
   return (
     <div>
@@ -4667,6 +4700,25 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             <div style={{fontSize:11,color:'var(--grey-400)',marginTop:8,paddingTop:8,borderTop:'1px solid var(--grey-50)'}}>Recording payments comes in the next phase.</div>
           </div>
         </div>
+      </div>
+
+      {/* Activity & change log (Phase 3b-i) */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'14px 20px',border:'1px solid var(--grey-100)',marginTop:16}}>
+        <div onClick={()=>setShowLog(v=>!v)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>{showLog?'▾':'▸'} Activity & change log <span style={{fontSize:11,color:'var(--grey-400)',fontWeight:400}}>({activity.length})</span></div>
+          <div style={{fontSize:12,color:'var(--grey-400)'}}>{sends.length>0?('Sent '+sends.length+'× · last '+fmtDT(sends[0].changed_at)):'Not sent yet'}</div>
+        </div>
+        {showLog&&(
+          <div style={{marginTop:10,borderLeft:'2px solid var(--grey-100)',paddingLeft:12}}>
+            {activity.length===0&&<div style={{fontSize:12,color:'var(--grey-400)'}}>No activity recorded yet.</div>}
+            {activity.map(a=>(
+              <div key={a.log_id} style={{padding:'6px 0',borderBottom:'1px solid var(--grey-50)'}}>
+                <div style={{fontSize:13,color:'var(--grey-800)'}}>{describeActivity(a)}</div>
+                <div style={{fontSize:11,color:'var(--grey-400)',marginTop:2}}>{fmtDT(a.changed_at)}{a.changed_by&&userMap[a.changed_by]?(' · '+userMap[a.changed_by]):''}{a.revision_number?(' · rev '+a.revision_number):''}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -5894,6 +5946,17 @@ function buildInvoiceShareMsg(inv, settings, url){
     'Warm regards,\nTeam Isheeka Events 💕';
 }
 
+// Phase 3b — per-document activity/audit logging helpers
+async function _currentUid(){ try{ const {data}=await supabase.auth.getUser(); return (data&&data.user&&data.user.id)||null; }catch(e){ return null; } }
+async function logQuoteSend(quotationId, channel){
+  try{ await supabase.from('quotation_activity_log').insert({quotation_id:quotationId, action:'sent', channel, logged_by:await _currentUid()}); }
+  catch(e){ console.error('[Isheeka ERP] quote send-log failed:', e); }
+}
+async function logInvoiceActivity(invoiceId, row){
+  try{ await supabase.from('invoice_activity_log').insert({invoice_id:invoiceId, changed_by:await _currentUid(), ...row}); }
+  catch(e){ console.error('[Isheeka ERP] invoice activity-log failed:', e); }
+}
+
 // Item 12: branded quotation PDF (action: 'download' | 'print')
 function buildQuotationPDF(quot, lineItems, opts={}){
   const jsPDFctor = window.jspdf && window.jspdf.jsPDF;
@@ -6546,6 +6609,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       '\nValid until: '+new Date(createdQuot.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+
       '\n\nKindly confirm at your earliest convenience.\n\nWarm regards,\nTeam Isheeka Events\n+91 78423 95867';
     openWhatsApp(lead.phone, msg);
+    logQuoteSend(createdQuot.quotation_id, 'whatsapp');
   };
 
   const handleEmailSend=(provider)=>{
@@ -6553,6 +6617,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     const subject='Quotation '+createdQuot.ref_number+' \u2014 Isheeka Events';
     const bodyTxt='Dear '+lead.first_name+',\n\nPlease find the quotation for your upcoming event.\n\nQuotation: '+createdQuot.ref_number+'\nGrand Total: Rs.'+parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')+'\n\nKindly confirm at your earliest convenience.\n\nWarm regards,\nTeam Isheeka Events';
     openEmail(provider, lead.email||'', subject, bodyTxt);
+    logQuoteSend(createdQuot.quotation_id, 'email');
     setEmailMenuOpen(false);
   };
 
