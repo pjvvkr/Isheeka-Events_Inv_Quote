@@ -4855,7 +4855,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
           <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Client details</div>
-          {inv.client_id&&<button className="btn sm" onClick={()=>setShowClientEdit(true)}>✏️ Edit client</button>}
+          {inv.client_id&&!locked&&<button className="btn sm" onClick={()=>setShowClientEdit(true)}>✏️ Edit client</button>}
         </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:'10px 24px',fontSize:13}}>
           <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Name</div><div>{inv.client_name||(((clientInfo.first_name||'')+' '+(clientInfo.last_name||'')).trim())||'—'}</div></div>
