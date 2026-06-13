@@ -2101,6 +2101,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [checklist, setChecklist] = React.useState([]);
   const [quotations, setQuotations] = React.useState([]);
   const [linkedLead, setLinkedLead] = React.useState(null);
+  const [viewQuotId, setViewQuotId] = React.useState(null);
   const [invoices, setInvoices] = React.useState([]);
   const [altContacts, setAltContacts] = React.useState([]);
   const [staffList, setStaffList] = React.useState([]);
@@ -2327,6 +2328,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   if(mode==='view') return (
     <div>
       {header}
+      {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>setViewQuotId(null)} onNavigate={onNavigate}/>}
       {successMsg&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:12,border:'1px solid rgba(15,110,86,0.2)',display:'flex',alignItems:'center',gap:8}}>✅ {successMsg}</div>}
       {/* Info cards */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
@@ -2445,7 +2447,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
             {quotations.map(q=>{
               const qs={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},approved:{bg:'var(--green-light)',color:'var(--green)'},converted:{bg:'var(--green-light)',color:'var(--green)'},rejected:{bg:'var(--red-light)',color:'var(--red)'},expired:{bg:'var(--orange-light)',color:'var(--orange)'},revised:{bg:'var(--orange-light)',color:'var(--orange)'}};
               const s=qs[q.status?.toLowerCase()]||qs.draft;
-              return <div key={q.quotation_id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6}}>
+              return <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} title="View quotation" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer'}}>
                 <div><div style={{fontSize:13,fontWeight:500}}>{q.ref_number}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{parseFloat(q.grand_total||0).toLocaleString('en-IN')}</div></div>
                 <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{q.status}</span>
               </div>;
@@ -2939,7 +2941,7 @@ function ClientMatchModal({matches, lead, onLink, onCreateNew, onCancel}) {
 }
 
 // ── Quotation Detail Modal (item 6) ──────────────────────────────────────────
-function QuotationDetailModal({quotationId, onClose}) {
+function QuotationDetailModal({quotationId, onClose, onNavigate}) {
   const [quot, setQuot] = React.useState(null);
   const [items, setItems] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -3074,7 +3076,14 @@ function QuotationDetailModal({quotationId, onClose}) {
                 ))}
               </div>
             </div>
-            <div style={{padding:'12px 24px',display:'flex',justifyContent:'flex-end',gap:8}}>
+            {(quot.status==='converted'||quot.event_id)&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\uD83D\uDCC5'} An event has been created from this quote. For any changes, update the event.</div>}
+            {quot.status==='approved'&&!quot.event_id&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\u2705'} This quote is confirmed by the client. To change it, create a revision.</div>}
+            <div style={{padding:'12px 24px',display:'flex',justifyContent:'flex-end',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+              <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>Share:</span>
+              <button className="btn sm" onClick={()=>openWhatsApp(quot.client_phone,'Dear '+(quot.client_name||'')+',\n\nPlease find quotation '+quot.ref_number+' for '+(quot.event_name||'your event')+'.\nGrand Total: Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN')+(quot.valid_until?('\nValid until: '+new Date(quot.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})):'')+'\n\nWarm regards,\nTeam Isheeka Events')}>{'\uD83D\uDCAC'} WhatsApp</button>
+              <button className="btn sm" onClick={()=>openEmail('gmail',quot.client_email,'Quotation '+quot.ref_number+' \u2014 Isheeka Events','Dear '+(quot.client_name||'')+',\n\nPlease find quotation '+quot.ref_number+' for '+(quot.event_name||'your event')+'.\nGrand Total: Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN')+'\n\nWarm regards,\nTeam Isheeka Events')}>Gmail</button>
+              <button className="btn sm" onClick={()=>openEmail('default',quot.client_email,'Quotation '+quot.ref_number+' \u2014 Isheeka Events','Dear '+(quot.client_name||'')+',\n\nPlease find quotation '+quot.ref_number+'.\n\nWarm regards,\nTeam Isheeka Events')}>Email</button>
+              {(quot.status==='converted'||quot.event_id)&&<button className="btn sm" onClick={()=>{onClose&&onClose();onNavigate&&onNavigate('events',{eventId:quot.event_id});}}>Go to event {'\u2192'}</button>}
               <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
               <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
             </div>
@@ -3392,7 +3401,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       />}
       {showConvert&&<ConvertLeadModal lead={lead} onConfirm={handleConvertInitiate} onCancel={()=>setShowConvert(false)}/>}
       {clientMatches&&clientMatches.length>0&&<ClientMatchModal matches={clientMatches} lead={lead} onLink={(cid)=>handleConvert(cid)} onCreateNew={()=>handleConvert(null)} onCancel={()=>setClientMatches(null)}/>}
-      {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>setViewQuotId(null)}/>}
+      {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>setViewQuotId(null)} onNavigate={onNavigate}/>}
       {showWelcome&&<WelcomeMessageModal
         lead={lead}
         quotRef={(leadQuotations.find(q=>q.quotation_id===lead.active_quotation_id)||{}).ref_number}
