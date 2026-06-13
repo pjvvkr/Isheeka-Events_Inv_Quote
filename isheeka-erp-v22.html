@@ -5277,7 +5277,12 @@ async function uploadQuotePdf(quot, items, displayOpts, settings){
   try{
     const blob = buildQuotationPDF(quot, items, {action:'blob', displayOpts, settings});
     if(!blob || !blob.size) return null;
-    const path = 'quotes/'+quot.quotation_id+'.pdf';
+    const _ref = String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'');
+    const _rev = (quot.revision_number && quot.revision_number>0) ? ('-r'+quot.revision_number) : '';
+    const _d = new Date(), _p = n=>String(n).padStart(2,'0');
+    const _stamp = ''+_d.getFullYear()+_p(_d.getMonth()+1)+_p(_d.getDate())+'-'+_p(_d.getHours())+_p(_d.getMinutes());
+    const _code = Math.random().toString(36).slice(2,6);
+    const path = 'quotes/Quotation_'+_ref+_rev+'_'+_stamp+'_'+_code+'.pdf';
     const {error:upErr} = await supabase.storage.from('quotations').upload(path, blob, {contentType:'application/pdf', upsert:true});
     if(upErr){ console.error('[Isheeka ERP] PDF upload failed:', upErr); return null; }
     const {data} = supabase.storage.from('quotations').getPublicUrl(path);
