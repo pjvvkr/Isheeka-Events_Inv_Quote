@@ -2944,6 +2944,8 @@ function ClientMatchModal({matches, lead, onLink, onCreateNew, onCancel}) {
 function QuotationDetailModal({quotationId, onClose, onNavigate}) {
   const [quot, setQuot] = React.useState(null);
   const [items, setItems] = React.useState([]);
+  const [qSettings, setQSettings] = React.useState({});
+  const [sharing, setSharing] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [modalDisplayOpts, setModalDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false});
   const setMDO=(k,v)=>setModalDisplayOpts(o=>({...o,[k]:v}));
@@ -2952,13 +2954,27 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
     else if(p==='items') setModalDisplayOpts({prices:false,qty:true,grouping:true,schedule:true,discount:false});
     else if(p==='summary') setModalDisplayOpts({prices:false,qty:false,grouping:true,schedule:false,discount:false});
   };
+  const doShare = async (channel) => {
+    if(sharing||!quot) return;
+    if(channel==='whatsapp' && !validClientPhone(quot.client_phone)){ notify("This client's phone number looks invalid — please update it before sharing on WhatsApp.",'error'); return; }
+    if((channel==='gmail'||channel==='email') && !quot.client_email){ notify('This client has no email address on file.','error'); return; }
+    setSharing(true);
+    notify('Preparing the quotation PDF…','info',2500);
+    const url = await uploadQuotePdf(quot, items, modalDisplayOpts, qSettings);
+    if(!url) notify('Couldn\'t attach the PDF link — sharing the message; you can attach the downloaded PDF manually.','error');
+    const msg = buildQuoteShareMsg(quot, qSettings, url);
+    if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
+    else openEmail(channel==='gmail'?'gmail':'default', quot.client_email, 'Quotation '+quot.ref_number+' — Isheeka Events', msg);
+    setSharing(false);
+  };
   React.useEffect(()=>{
     let alive=true;
     (async()=>{
       setLoading(true);
-      const [{data:q},{data:li}] = await Promise.all([
+      const [{data:q},{data:li},{data:st}] = await Promise.all([
         supabase.from('quotations').select('*').eq('quotation_id',quotationId).single(),
         supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order'),
+        supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro,phone_1,email,website').single(),
       ]);
       if(!alive) return;
       // P1-5: enrich with client contact details so the PDF client box isn't blank
@@ -2974,7 +2990,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
         }
       }
       if(!alive) return;
-      setQuot(qEnriched||null); setItems(li||[]);
+      setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{});
       if(q&&q.display_options){ try{ setModalDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
       setLoading(false);
     })();
@@ -3080,9 +3096,9 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
             {quot.status==='approved'&&!quot.event_id&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\u2705'} This quote is confirmed by the client. To change it, create a revision.</div>}
             <div style={{padding:'12px 24px',display:'flex',justifyContent:'flex-end',gap:8,flexWrap:'wrap',alignItems:'center'}}>
               <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>Share:</span>
-              <button className="btn sm" onClick={()=>openWhatsApp(quot.client_phone,'Dear '+(quot.client_name||'')+',\n\nPlease find quotation '+quot.ref_number+' for '+(quot.event_name||'your event')+'.\nGrand Total: Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN')+(quot.valid_until?('\nValid until: '+new Date(quot.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})):'')+'\n\nWarm regards,\nTeam Isheeka Events')}>{'\uD83D\uDCAC'} WhatsApp</button>
-              <button className="btn sm" onClick={()=>openEmail('gmail',quot.client_email,'Quotation '+quot.ref_number+' \u2014 Isheeka Events','Dear '+(quot.client_name||'')+',\n\nPlease find quotation '+quot.ref_number+' for '+(quot.event_name||'your event')+'.\nGrand Total: Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN')+'\n\nWarm regards,\nTeam Isheeka Events')}>Gmail</button>
-              <button className="btn sm" onClick={()=>openEmail('default',quot.client_email,'Quotation '+quot.ref_number+' \u2014 Isheeka Events','Dear '+(quot.client_name||'')+',\n\nPlease find quotation '+quot.ref_number+'.\n\nWarm regards,\nTeam Isheeka Events')}>Email</button>
+              <button className="btn sm" disabled={sharing} onClick={()=>doShare('whatsapp')}>{'\uD83D\uDCAC'} WhatsApp</button>
+              <button className="btn sm" disabled={sharing} onClick={()=>doShare('gmail')}>Gmail</button>
+              <button className="btn sm" disabled={sharing} onClick={()=>doShare('email')}>Email</button>
               {(quot.status==='converted'||quot.event_id)&&<button className="btn sm" onClick={()=>{onClose&&onClose();onNavigate&&onNavigate('events',{eventId:quot.event_id});}}>Go to event {'\u2192'}</button>}
               <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
               <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
@@ -5254,6 +5270,39 @@ function openEmail(provider, to, subject, body){
     window.open('mailto:'+(to||'')+'?subject='+sub+'&body='+bd);
   }
 }
+
+// ── Quotation share helpers: professional message + hosted PDF link ───────────
+function validClientPhone(p){ const n=(p||'').replace(/\D/g,''); return n.length===10 || (n.length===12 && n.slice(0,2)==='91'); }
+async function uploadQuotePdf(quot, items, displayOpts, settings){
+  try{
+    const blob = buildQuotationPDF(quot, items, {action:'blob', displayOpts, settings});
+    if(!blob || !blob.size) return null;
+    const path = 'quotes/'+quot.quotation_id+'.pdf';
+    const {error:upErr} = await supabase.storage.from('quotations').upload(path, blob, {contentType:'application/pdf', upsert:true});
+    if(upErr){ console.error('[Isheeka ERP] PDF upload failed:', upErr); return null; }
+    const {data} = supabase.storage.from('quotations').getPublicUrl(path);
+    return (data && data.publicUrl) || null;
+  }catch(err){ console.error('[Isheeka ERP] uploadQuotePdf error:', err); return null; }
+}
+function buildQuoteShareMsg(quot, settings, url){
+  const evt = quot.event_name || 'your upcoming event';
+  const phone = (settings&&settings.phone_1) || '+91 78423 95867';
+  const email = (settings&&settings.email) || 'isheekaevents@gmail.com';
+  const web = (settings&&settings.website) || 'www.isheekaevents.in';
+  return 'Dear '+(quot.client_name||'')+',\n\n'+
+    'Thank you for considering Isheeka Events. We are delighted to share your personalised quotation for '+evt+'.\n\n'+
+    'Quotation: '+quot.ref_number+'\n'+
+    'Grand Total: Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN')+'\n'+
+    (quot.valid_until?('Valid until: '+new Date(quot.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})+'\n'):'')+
+    (url?('\nView your quotation here:\n'+url+'\n'):'')+
+    '\nWe would be glad to walk you through the details or tailor anything to your vision.\n\n'+
+    'For any queries, please reach out to us at:\n'+
+    '📞 '+phone+'\n'+
+    '📧 '+email+'\n'+
+    '🌐 '+web+'\n\n'+
+    'Warm regards,\nTeam Isheeka Events 💕';
+}
+
 // Item 12: branded quotation PDF (action: 'download' | 'print')
 function buildQuotationPDF(quot, lineItems, opts={}){
   const jsPDFctor = window.jspdf && window.jspdf.jsPDF;
@@ -5533,6 +5582,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   drawFooter(false);
   addPageNumbers();
   const fname='Quotation_'+String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf';
+  if(opts.action==='blob'){ return doc.output('blob'); }
   if(opts.action==='print'){ try{doc.autoPrint();}catch(e){} window.open(doc.output('bloburl'),'_blank'); }
   else{ doc.save(fname); }
   return true;
