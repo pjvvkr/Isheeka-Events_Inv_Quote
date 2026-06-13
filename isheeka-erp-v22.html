@@ -4659,6 +4659,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if(revSaving) return;
     if(!revReason.trim()){ notify('Please enter a reason for the revision.','error'); return; }
     if(revItems.filter(r=>r.description.trim()).length===0){ notify('Add at least one line item.','error'); return; }
+    if((parseFloat(revDiscount)||0)<0||(parseFloat(revDiscount)||0)>revSub){ notify('Discount must be between ₹0 and the subtotal (₹'+revSub.toLocaleString('en-IN')+').','error'); return; }
     setRevSaving(true);
     const rows = revItems.filter(r=>r.description.trim()).map((r,idx)=>({invoice_id:invoiceId,description:r.description.trim(),sub_event_name:r.sub_event_name||null,quantity:parseFloat(r.quantity)||0,unit_price:parseFloat(r.unit_price)||0,amount:(parseFloat(r.quantity)||0)*(parseFloat(r.unit_price)||0),sort_order:idx}));
     const newDiscount=parseFloat(revDiscount)||0, newSub=revSub, newGrand=revGrand, newTax=revTax;
@@ -5006,7 +5007,7 @@ function Dashboard({ user, onNavigate }) {
   const [loading,setLoading]=React.useState(true);
   React.useEffect(()=>{ (async()=>{
     setLoading(true);
-    const now=new Date(), monthStart=new Date(now.getFullYear(),now.getMonth(),1), todayStr=now.toISOString().split('T')[0];
+    const now=new Date(), _p=n=>String(n).padStart(2,'0'), todayStr=now.getFullYear()+'-'+_p(now.getMonth()+1)+'-'+_p(now.getDate()), monthStr=now.getFullYear()+'-'+_p(now.getMonth()+1);
     const [{data:leads},{data:events},{data:quotes},{data:pays},{data:invs}] = await Promise.all([
       supabase.from('leads').select('stage').eq('is_deleted',false),
       supabase.from('events').select('event_id,name,ref_number,main_date,status,client_name').eq('is_deleted',false),
@@ -5016,8 +5017,8 @@ function Dashboard({ user, onNavigate }) {
     ]);
     const activeLeads=(leads||[]).filter(l=>!['lost','event_triggered'].includes(l.stage)).length;
     const up=(events||[]).filter(e=>e.main_date&&e.main_date>=todayStr&&!['completed','cancelled'].includes(e.status)).sort((a,b)=>a.main_date.localeCompare(b.main_date));
-    const quotedMonth=(quotes||[]).filter(q=>q.status!=='superseded'&&q.doc_date&&new Date(q.doc_date)>=monthStart).reduce((s,q)=>s+(parseFloat(q.grand_total)||0),0);
-    const collectedMonth=(pays||[]).filter(p=>p.payment_date&&new Date(p.payment_date)>=monthStart).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+    const quotedMonth=(quotes||[]).filter(q=>q.status!=='superseded'&&q.doc_date&&q.doc_date.slice(0,7)===monthStr).reduce((s,q)=>s+(parseFloat(q.grand_total)||0),0);
+    const collectedMonth=(pays||[]).filter(p=>p.payment_date&&p.payment_date.slice(0,7)===monthStr).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
     const out=(invs||[]).filter(i=>!['paid','cancelled'].includes(i.status)&&(parseFloat(i.total_outstanding)||0)>0).sort((a,b)=>(parseFloat(b.total_outstanding)||0)-(parseFloat(a.total_outstanding)||0));
     setStats({activeLeads,upcomingCount:up.length,quotedMonth,collectedMonth});
     setUpcoming(up.slice(0,5)); setOutstanding(out.slice(0,5)); setLoading(false);
