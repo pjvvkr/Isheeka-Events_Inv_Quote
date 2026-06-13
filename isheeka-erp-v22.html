@@ -3276,7 +3276,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
       const [{data:q},{data:li},{data:st},{data:qact},{data:qus}] = await Promise.all([
         supabase.from('quotations').select('*').eq('quotation_id',quotationId).single(),
         supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order'),
-        supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro,phone_1,email,website').single(),
+        supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website').single(),
         supabase.from('quotation_activity_log').select('*').eq('quotation_id',quotationId).order('logged_at',{ascending:false}),
         supabase.from('users').select('user_id,first_name,last_name'),
       ]);
@@ -3416,8 +3416,8 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('email')}>Email</button>
               {quot.event_id&&!['approved','converted','rejected','expired','superseded'].includes(quot.status)&&<button className="btn primary" disabled={confirming} onClick={doConfirmQuote} title="Mark the quote confirmed and create the draft invoice">{confirming?'Confirming\u2026':'\u2705 Confirm & create invoice'}</button>}
               {(quot.status==='converted'||quot.event_id)&&<button className="btn sm" onClick={()=>{onClose&&onClose();onNavigate&&onNavigate('events',{eventId:quot.event_id});}}>Go to event {'\u2192'}</button>}
-              <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
-              <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
+              <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
+              <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
             </div>
           </div>
         )}
@@ -4781,7 +4781,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       supabase.from('invoices').select('*').eq('invoice_id',invoiceId).single(),
       supabase.from('invoice_line_items').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('sort_order'),
       supabase.from('invoice_installments').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('installment_number'),
-      supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,phone_1,email,website,company_name,cover_intro').single(),
+      supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,upi_id,phone_1,email,website,company_name,cover_intro').single(),
       supabase.from('invoice_activity_log').select('*').eq('invoice_id',invoiceId).order('changed_at',{ascending:false}),
       supabase.from('users').select('user_id,first_name,last_name'),
       supabase.from('invoice_payments').select('*').eq('invoice_id',invoiceId).order('payment_date',{ascending:false}),
@@ -6888,7 +6888,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           // If the loaded schedule already carries explicit amounts (new format), preserve them and mark touched
           // so auto-fill won't overwrite. Old (pct-only) schedules stay un-touched so amounts fill from pct × grand.
           const hasAmounts=ps.some(p=>parseFloat(p.amount)>0);
-          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:q.event_name||defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:!!(q.payment_terms),payment_schedule_touched:hasAmounts,payment_schedule:ps.length>0?ps:f.payment_schedule}));
+          // payment_terms_touched stays false on load so the terms text keeps auto-regenerating as the user
+          // edits installment amounts in the revision (it only "sticks" once they hand-edit the terms box).
+          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:q.event_name||defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:false,payment_schedule_touched:hasAmounts,payment_schedule:ps.length>0?ps:f.payment_schedule}));
           if(q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
         }
       });
@@ -7157,7 +7159,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       quantity:i.quantity, unit_price:i.unit_price,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
-    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,cover_intro').single();
+    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro').single();
     const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||''};
     buildQuotationPDF(enrichedQuot,pdfItems,{action,displayOpts,settings:s||{}});
   };
