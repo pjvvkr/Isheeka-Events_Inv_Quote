@@ -2102,6 +2102,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [quotations, setQuotations] = React.useState([]);
   const [linkedLead, setLinkedLead] = React.useState(null);
   const [viewQuotId, setViewQuotId] = React.useState(null);
+  const [showOldQuotes, setShowOldQuotes] = React.useState(false);
   const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
   const [quoteWizardLead, setQuoteWizardLead] = React.useState(null);
   const [quoteWizardSubs, setQuoteWizardSubs] = React.useState([]);
@@ -2477,14 +2478,23 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                 : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>}
             </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
-            {quotations.map(q=>{
-              const qs={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},approved:{bg:'var(--green-light)',color:'var(--green)'},converted:{bg:'var(--green-light)',color:'var(--green)'},rejected:{bg:'var(--red-light)',color:'var(--red)'},expired:{bg:'var(--orange-light)',color:'var(--orange)'},revised:{bg:'var(--orange-light)',color:'var(--orange)'}};
-              const s=qs[q.status?.toLowerCase()]||qs.draft;
-              return <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} title="View quotation" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer'}}>
-                <div><div style={{fontSize:13,fontWeight:500}}>{q.ref_number}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{parseFloat(q.grand_total||0).toLocaleString('en-IN')}</div></div>
-                <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{q.status}</span>
-              </div>;
-            })}
+            {(()=>{
+              const qs={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},approved:{bg:'var(--green-light)',color:'var(--green)'},converted:{bg:'var(--green-light)',color:'var(--green)'},rejected:{bg:'var(--red-light)',color:'var(--red)'},expired:{bg:'var(--orange-light)',color:'var(--orange)'},revised:{bg:'var(--orange-light)',color:'var(--orange)'},superseded:{bg:'var(--grey-100)',color:'var(--grey-400)'}};
+              const renderRow=q=>{
+                const s=qs[q.status?.toLowerCase()]||qs.draft;
+                return <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} title="View quotation" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer',opacity:q.status==='superseded'?0.6:1}}>
+                  <div><div style={{fontSize:13,fontWeight:500}}>{q.ref_number}{q.revision_number>0?' · Rev '+q.revision_number:''}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{parseFloat(q.grand_total||0).toLocaleString('en-IN')}</div></div>
+                  <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{q.status}</span>
+                </div>;
+              };
+              const current=quotations.filter(q=>q.status!=='superseded');
+              const older=quotations.filter(q=>q.status==='superseded');
+              return <>
+                {current.map(renderRow)}
+                {older.length>0&&<div onClick={()=>setShowOldQuotes(v=>!v)} style={{fontSize:12,fontWeight:500,color:'var(--blue)',cursor:'pointer',padding:'6px 4px',userSelect:'none'}}>{showOldQuotes?'▾ Hide':'▸ Show'} {older.length} earlier revision{older.length>1?'s':''}</div>}
+                {showOldQuotes&&older.map(renderRow)}
+              </>;
+            })()}
           </div>
           <div>
             <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>Invoices ({invoices.length})</div>
@@ -3155,6 +3165,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   const [showWelcome, setShowWelcome] = React.useState(false);
   const [convertedEventId, setConvertedEventId] = React.useState(null);
   const [viewQuotId, setViewQuotId] = React.useState(null);
+  const [showOldQuotes, setShowOldQuotes] = React.useState(false);
   const [clientMatches, setClientMatches] = React.useState(null);
   const [convertClientOutcome, setConvertClientOutcome] = React.useState(null); // {type:'created'|'reused', name:string}
   const [showLostConfirm, setShowLostConfirm] = React.useState(false);
@@ -3606,31 +3617,40 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       {leadQuotations.length>0&&(
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
           <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:12}}>Quotations</div>
-          {leadQuotations.map((q,i)=>{
-            const isActive=lead.active_quotation_id===q.quotation_id;
-            const sc=QUOT_STATUS_COLORS?QUOT_STATUS_COLORS[q.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}:{bg:'var(--grey-100)',color:'var(--grey-400)'};
-            const statusLabel=QUOT_STATUS_LABELS?QUOT_STATUS_LABELS[q.status]||q.status:q.status;
-            return (
-              <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} title="View quotation details"
-                style={{display:'flex',alignItems:'center',gap:12,padding:'10px 8px',margin:'0 -8px',borderRadius:'var(--radius-sm)',cursor:'pointer',borderBottom:i<leadQuotations.length-1?'1px solid var(--grey-100)':'none',opacity:q.status==='superseded'?0.5:1}}
-                onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'}
-                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <div style={{width:10,height:10,borderRadius:'50%',flexShrink:0,background:isActive?'var(--green)':'var(--grey-300)'}}/>
-                <div style={{flex:1}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    <span style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{q.ref_number}</span>
-                    {isActive&&<span style={{fontSize:10,fontWeight:700,color:'var(--green)',textTransform:'uppercase',letterSpacing:'.04em'}}>ACTIVE</span>}
-                    {q.revision_number>0&&<span style={{fontSize:11,color:'var(--grey-400)'}}>Rev {q.revision_number}</span>}
+          {(()=>{
+            const renderRow=(q,showBorder)=>{
+              const isActive=lead.active_quotation_id===q.quotation_id;
+              const sc=QUOT_STATUS_COLORS?QUOT_STATUS_COLORS[q.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}:{bg:'var(--grey-100)',color:'var(--grey-400)'};
+              const statusLabel=QUOT_STATUS_LABELS?QUOT_STATUS_LABELS[q.status]||q.status:q.status;
+              return (
+                <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} title="View quotation details"
+                  style={{display:'flex',alignItems:'center',gap:12,padding:'10px 8px',margin:'0 -8px',borderRadius:'var(--radius-sm)',cursor:'pointer',borderBottom:showBorder?'1px solid var(--grey-100)':'none',opacity:q.status==='superseded'?0.5:1}}
+                  onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                  <div style={{width:10,height:10,borderRadius:'50%',flexShrink:0,background:isActive?'var(--green)':'var(--grey-300)'}}/>
+                  <div style={{flex:1}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{q.ref_number}</span>
+                      {isActive&&<span style={{fontSize:10,fontWeight:700,color:'var(--green)',textTransform:'uppercase',letterSpacing:'.04em'}}>ACTIVE</span>}
+                      {q.revision_number>0&&<span style={{fontSize:11,color:'var(--grey-400)'}}>Rev {q.revision_number}</span>}
+                    </div>
+                    <div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>
+                      {'Rs.'+parseFloat(q.grand_total||0).toLocaleString('en-IN')}
+                      {q.valid_until&&(' · Valid until '+new Date(q.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short'}))}
+                    </div>
                   </div>
-                  <div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>
-                    {'Rs.'+parseFloat(q.grand_total||0).toLocaleString('en-IN')}
-                    {q.valid_until&&(' · Valid until '+new Date(q.valid_until).toLocaleDateString('en-IN',{day:'numeric',month:'short'}))}
-                  </div>
+                  <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{statusLabel}</span>
                 </div>
-                <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{statusLabel}</span>
-              </div>
-            );
-          })}
+              );
+            };
+            const current=leadQuotations.filter(q=>q.status!=='superseded');
+            const older=leadQuotations.filter(q=>q.status==='superseded');
+            return <>
+              {current.map((q,i)=>renderRow(q,i<current.length-1||(older.length>0)))}
+              {older.length>0&&<div onClick={()=>setShowOldQuotes(v=>!v)} style={{fontSize:12,fontWeight:500,color:'var(--blue)',cursor:'pointer',padding:'8px 0 2px',userSelect:'none'}}>{showOldQuotes?'▾ Hide':'▸ Show'} {older.length} earlier revision{older.length>1?'s':''}</div>}
+              {showOldQuotes&&older.map((q,i)=>renderRow(q,i<older.length-1))}
+            </>;
+          })()}
         </div>
       )}
 
