@@ -2155,7 +2155,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         if(ac) setAltContacts(ac);
       }
       if(evt.lead_id){
-        const {data:ld} = await supabase.from('leads').select('lead_id,ref_number').eq('lead_id',evt.lead_id).single();
+        const {data:ld} = await supabase.from('leads').select('lead_id,ref_number,stage').eq('lead_id',evt.lead_id).single();
         setLinkedLead(ld||null);
       } else { setLinkedLead(null); }
     }
@@ -2239,6 +2239,20 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     const {error:ese}=await runDb(supabase.from('events').update({status:newStatus,updated_at:new Date().toISOString()}).eq('event_id',eventId),'update event status');
     if(ese) return;
     setEvent(ev=>({...ev,status:newStatus}));
+  };
+
+  const markEventCompleted = async () => {
+    const leadNote = linkedLead ? ('\n\nThis will also close the source lead '+(linkedLead.ref_number||'')+'.') : '';
+    if(!window.confirm('Mark this event as completed?'+leadNote+'\n\nUse this once the event has been delivered.')) return;
+    const {error:ese}=await runDb(supabase.from('events').update({status:'completed',updated_at:new Date().toISOString()}).eq('event_id',eventId),'mark event completed');
+    if(ese) return;
+    setEvent(ev=>({...ev,status:'completed'}));
+    if(linkedLead&&linkedLead.lead_id&&linkedLead.stage!=='completed'){
+      const {error:lse}=await runDb(supabase.from('leads').update({stage:'completed',updated_at:new Date().toISOString()}).eq('lead_id',linkedLead.lead_id),'close source lead');
+      if(!lse) setLinkedLead(l=>l?{...l,stage:'completed'}:l);
+    }
+    setSuccessMsg('Event marked completed.'+(linkedLead?' Source lead '+(linkedLead.ref_number||'')+' closed.':''));
+    setTimeout(()=>setSuccessMsg(''),6000);
   };
 
   const handleChangeClient = async (newClient) => {
@@ -2345,6 +2359,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               {EVENT_STATUS_LABELS[event.status?.toLowerCase()]||event.status}
             </span>
             {linkedLead&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('leads',{leadId:linkedLead.lead_id})}>← Lead {linkedLead.ref_number||''}</button>}
+            {!['completed','cancelled'].includes(event.status?.toLowerCase())&&<button className="btn sm" onClick={markEventCompleted} title="Marks the event delivered and closes the source lead">✅ Mark completed</button>}
             <button className="btn sm" onClick={()=>onUseAsReference(event)}>📋 Use as reference</button>
             <button className="btn sm primary" onClick={enterEditMode}>✏️ Edit</button>
           </>}
@@ -2637,6 +2652,7 @@ const LEAD_STAGE_LABELS = {
   revised_quote_sent:'Revised Quote Sent',
   quote_confirmed:'Quote Confirmed',
   event_triggered:'Event Triggered',
+  completed:'Completed',
 };
 const LEAD_STAGE_COLORS = {
   new:{bg:'#E6F1FB',color:'#185FA5'},
@@ -2647,6 +2663,7 @@ const LEAD_STAGE_COLORS = {
   revised_quote_sent:{bg:'#FFF8E1',color:'#F57F17'},
   quote_confirmed:{bg:'#FBEAF0',color:'#993556'},
   event_triggered:{bg:'#FBEAF0',color:'#993556'},
+  completed:{bg:'#E1F5EE',color:'#0F6E56'},
 };
 const LEAD_LOSS_REASONS = [
   {value:'price_too_high',label:'Price too high'},
@@ -4533,6 +4550,8 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [revReason, setRevReason] = React.useState('');
   const [revSaving, setRevSaving] = React.useState(false);
   const [srcQuote, setSrcQuote] = React.useState(null);
+  const [srcLead, setSrcLead] = React.useState(null);
+  const [srcEvent, setSrcEvent] = React.useState(null);
   const [pdfDisplay, setPdfDisplay] = React.useState({prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true});
   const [payments, setPayments] = React.useState([]);
   const [showPay, setShowPay] = React.useState(false);
@@ -4555,8 +4574,17 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     const m={}; (us||[]).forEach(u=>{ m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim(); }); setUserMap(m);
     if(i&&i.client_id){ const {data:c}=await supabase.from('clients').select('*').eq('client_id',i.client_id).single(); setClientInfo(c||{}); }
     else setClientInfo({});
-    if(i&&i.quotation_id){ const {data:sq}=await supabase.from('quotations').select('quotation_id,ref_number,status,grand_total').eq('quotation_id',i.quotation_id).maybeSingle(); setSrcQuote(sq||null); }
-    else setSrcQuote(null);
+    let sq=null;
+    if(i&&i.quotation_id){ const r=await supabase.from('quotations').select('quotation_id,ref_number,status,grand_total,lead_id,event_id').eq('quotation_id',i.quotation_id).maybeSingle(); sq=r.data||null; }
+    setSrcQuote(sq);
+    // Source lead — prefer the invoice's own lead_id, else the quote's lead_id
+    const leadId=(i&&i.lead_id)||(sq&&sq.lead_id)||null;
+    if(leadId){ const {data:ld}=await supabase.from('leads').select('lead_id,ref_number,stage').eq('lead_id',leadId).maybeSingle(); setSrcLead(ld||null); }
+    else setSrcLead(null);
+    // Source event — prefer the invoice's own event_id, else the quote's event_id
+    const evtId=(i&&i.event_id)||(sq&&sq.event_id)||null;
+    if(evtId){ const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status').eq('event_id',evtId).maybeSingle(); setSrcEvent(ev||null); }
+    else setSrcEvent(null);
     setLoading(false);
   },[invoiceId]);
   React.useEffect(()=>{ loadAll(); },[loadAll]);
@@ -4736,9 +4764,17 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     const it=installments.find(x=>x.installment_id===payForm.installment_id);
     if(it){ const paid=(parseFloat(it.amount_paid)||0)+amt; const due=parseFloat(it.amount_due)||0; const bal=Math.max(0,due-paid); const ist=bal<=0?'paid':'partially_paid'; await supabase.from('invoice_installments').update({amount_paid:paid,balance:bal,status:ist,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id); }
     const newRec=(parseFloat(inv.total_received)||0)+amt; const newOut=Math.max(0,grand-newRec);
-    const newStatus = newRec>=grand ? 'paid' : 'partially_paid';
+    const fullyPaid = newRec>=grand;
+    const newStatus = fullyPaid ? 'paid' : 'partially_paid';
     await supabase.from('invoices').update({total_received:newRec,total_outstanding:newOut,status:newStatus,updated_at:new Date().toISOString()}).eq('invoice_id',invoiceId);
     try{ await logInvoiceActivity(invoiceId,{action:'payment',channel:payForm.mode,new_value:'₹'+amt.toLocaleString('en-IN'),reason:(payForm.reference?('Ref: '+payForm.reference):'')||'Payment recorded',revision_number:inv.revision_number||0}); }catch(e){}
+    if(fullyPaid){
+      // Reconcile every installment to fully paid (avoids the invoice-paid / installment-pending divergence)
+      await supabase.from('invoice_installments').update({balance:0,status:'paid',updated_at:new Date().toISOString()}).eq('invoice_id',invoiceId).eq('is_deleted',false);
+      // Mark the source quotation as invoiced (informational; quote keeps its history)
+      if(inv.quotation_id){ await supabase.from('quotations').update({status:'invoiced',updated_at:new Date().toISOString()}).eq('quotation_id',inv.quotation_id); }
+      try{ await logInvoiceActivity(invoiceId,{action:'paid_in_full',new_value:'₹'+grand.toLocaleString('en-IN'),reason:'Invoice fully paid — locked for edits',revision_number:inv.revision_number||0}); }catch(e){}
+    }
     setPaySaving(false); setShowPay(false);
     notify('Payment of ₹'+amt.toLocaleString('en-IN')+' recorded.','success');
     await loadAll();
@@ -4752,6 +4788,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if(a.action==='revised') return (a.field?(a.field+': '+(a.old_value||'—')+' → '+(a.new_value||'—')):'Revised')+(a.reason?(' — '+a.reason):'');
     if(a.action==='auto_refresh') return 'Auto-refreshed from the confirmed quote'+(a.reason?(' — '+a.reason):'');
     if(a.action==='payment') return 'Payment received '+(a.new_value||'')+(a.channel?(' via '+String(a.channel).toUpperCase()):'')+(a.reason&&a.reason!=='Payment recorded'?(' — '+a.reason):'');
+    if(a.action==='paid_in_full') return 'Invoice fully paid — locked for edits';
     if(a.action==='created') return 'Invoice created';
     if(a.action==='cancelled') return 'Invoice cancelled';
     return a.action||'Activity';
@@ -4775,12 +4812,19 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>
               {inv.client_name||'—'}{inv.event_name?' · '+inv.event_name:''}{inv.doc_date?' · '+fmt(inv.doc_date):''}
             </div>
-            {srcQuote&&<div style={{fontSize:12,marginTop:4}}>Source quotation: <a onClick={()=>onNavigate&&onNavigate('quotations',{quotId:srcQuote.quotation_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>{srcQuote.ref_number}</a> <span style={{color:'var(--grey-400)'}}>· {QUOT_STATUS_LABELS[srcQuote.status]||srcQuote.status} · ₹{parseFloat(srcQuote.grand_total||0).toLocaleString('en-IN')}</span></div>}
+            {(srcLead||srcQuote||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
+              <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
+              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={LEAD_STAGE_LABELS[srcLead.stage]||srcLead.stage}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
+              <span>→</span>
+              {srcQuote?<a onClick={()=>onNavigate&&onNavigate('quotations',{quotId:srcQuote.quotation_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={(QUOT_STATUS_LABELS[srcQuote.status]||srcQuote.status)+' · ₹'+parseFloat(srcQuote.grand_total||0).toLocaleString('en-IN')}>📄 {srcQuote.ref_number}</a>:<span>📄 —</span>}
+              <span>→</span>
+              {srcEvent?<a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={srcEvent.name||''}>🎪 {srcEvent.ref_number||'Event'}</a>:<span>🎪 —</span>}
+            </div>}
           </div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
             {inv.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})}>Go to event →</button>}
             {inv.status==='draft'&&<button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
-            {inv.status!=='cancelled'&&<button className="btn sm" disabled={saving} onClick={openRevise}>✏️ Revise</button>}
+            {!locked&&<button className="btn sm" disabled={saving} onClick={openRevise}>✏️ Revise</button>}
             {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('whatsapp')}>💬 WhatsApp</button>}
             {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('gmail')}>Email</button>}
             <button className="btn sm" disabled={saving} onClick={previewPdf}>👁 Preview</button>
@@ -4797,6 +4841,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       </div>
 
       {inv.status==='cancelled'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--grey-50)',color:'var(--grey-600)',borderRadius:'var(--radius-sm)',fontSize:12}}>This invoice is cancelled. To raise a new one, open the event {inv.event_id&&<a onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>(go to event →)</a>} and click <b>+ Generate invoice</b>.</div>}
+      {inv.status==='paid'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:12}}>✅ This invoice is fully paid and locked for edits. Sharing and printing remain available.</div>}
       {/* PDF options — control what the invoice PDF includes */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'10px 16px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
         <span style={{fontSize:12,fontWeight:600,color:'var(--grey-700)'}}>Include in PDF:</span>
@@ -6036,12 +6081,13 @@ const QUOT_STATUS_COLORS = {
   rejected:{bg:'#FCEBEB',color:'#A32D2D'},
   expired:{bg:'var(--grey-100)',color:'var(--grey-400)'},
   converted:{bg:'var(--pink-light)',color:'var(--pink)'},
+  invoiced:{bg:'var(--green-light)',color:'var(--green)'},
 };
 const QUOT_STATUS_LABELS = {
   draft:'Draft', sent:'Sent', approved:'Approved',
   revision_requested:'Revision Requested', revised:'Revised',
   superseded:'Superseded', rejected:'Rejected',
-  expired:'Expired', converted:'Converted',
+  expired:'Expired', converted:'Converted', invoiced:'Invoiced',
 };
 
 // P0-4: ref numbers come from an atomic Postgres function (next_counter) so
