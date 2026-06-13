@@ -2655,7 +2655,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               {activeQuote
                 ? (invoiceIssued
                     ? <span style={{fontSize:11,color:'var(--grey-400)',display:'inline-flex',alignItems:'center',gap:4}} title="An invoice has already been issued for this event. To change scope or pricing, revise the invoice instead — revising the quote now would diverge from the issued invoice.">🔒 Invoice issued — revise the invoice</span>
-                    : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(activeQuote.quotation_id)} title="Revise the active quotation">✏️ Revise</button>)
+                    : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:activeQuote.quotation_id})} title="Open the quotation to revise/send">📄 Open quote →</button>)
                 : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>}
             </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
@@ -3715,33 +3715,13 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
                 <button className="btn sm" style={{background:'#F3E5F5',color:'#6A1B9A',border:'1px solid #CE93D8'}}
                   onClick={()=>setShowQuoteWizard(true)}>📋 Generate quote</button>
               )}
-              {lead.stage==='quote_generation_in_progress'&&(
-                <button className="btn sm" style={{background:'#F3E5F5',color:'#6A1B9A',border:'1px solid #CE93D8'}}
-                  onClick={()=>setShowQuoteWizard(true)}>📋 Continue quote</button>
-              )}
-              {lead.stage==='quote_sent'&&(<>
-                <button className="btn sm" style={{background:'#FCEBEB',color:'#A32D2D',border:'1px solid #FFCDD2'}}
-                  onClick={()=>handleStageChange('quote_revision_pending')}>🔄 Revision requested</button>
-                <button className="btn sm" style={{background:'var(--green-light)',color:'var(--green)',border:'1px solid #86EFAC'}}
-                  onClick={()=>handleStageChange('quote_confirmed')}>✅ Quote confirmed</button>
-              </>)}
-              {lead.stage==='quote_revision_pending'&&(
-                <button className="btn sm" style={{background:'#FFF8E1',color:'#F57F17',border:'1px solid #FFE082'}}
-                  onClick={()=>setShowQuoteWizard(true)}>📋 Generate revised quote</button>
-              )}
-              {lead.stage==='revised_quote_sent'&&(<>
-                <button className="btn sm" style={{background:'#FCEBEB',color:'#A32D2D',border:'1px solid #FFCDD2'}}
-                  onClick={()=>handleStageChange('quote_revision_pending')}>🔄 Revision requested</button>
-                <button className="btn sm" style={{background:'var(--green-light)',color:'var(--green)',border:'1px solid #86EFAC'}}
-                  onClick={()=>handleStageChange('quote_confirmed')}>✅ Quote confirmed</button>
-              </>)}
-              {lead.stage==='quote_confirmed'&&(
-                <button className="btn sm" style={{background:'var(--green)',color:'white',border:'none'}}
-                  onClick={()=>setShowConvert(true)}>🎉 Convert to event</button>
+              {/* Once a quote exists, all quote work lives on the quote page — the lead just links to it. */}
+              {['quote_generation_in_progress','quote_sent','quote_revision_pending','revised_quote_sent','quote_confirmed'].includes(lead.stage)&&lead.active_quotation_id&&(
+                <button className="btn sm primary" onClick={()=>onNavigate&&onNavigate('quotations',{quotId:lead.active_quotation_id})}>📄 Open active quote →</button>
               )}
               <button className="btn sm" style={{color:'#A32D2D',border:'1px solid #FCEBEB'}}
                 onClick={()=>setShowLoss(true)}>✕ Lost</button>
-              <button className="btn sm primary" onClick={()=>setMode('edit')}>✏️ Edit</button>
+              <button className="btn sm" onClick={()=>setMode('edit')}>✏️ Edit</button>
             </>
           )}
           {isConverted&&<button className="btn sm" onClick={()=>setMode('edit')}>✏️ Edit</button>}
@@ -4500,6 +4480,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:true});
   const [showWizard, setShowWizard] = React.useState(false);
   const [wizardCtx, setWizardCtx] = React.useState(null);
+  const [showConvert, setShowConvert] = React.useState(false);
+  const [convertLead, setConvertLead] = React.useState(null);
   const setDO=(k,v)=>setDisplayOpts(o=>({...o,[k]:v}));
   const applyPreset=(p)=>{
     if(p==='full') setDisplayOpts(o=>({...o,prices:true,qty:true,grouping:true,schedule:true,discount:true}));
@@ -4555,13 +4537,40 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   };
   const doConfirmQuote = async () => {
     if(confirming||!quot) return;
+    // Event-origin: just approve + create the draft invoice (event already exists).
+    if(quot.event_id){
+      setConfirming(true);
+      const {error}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id);
+      if(error){ notify('Could not confirm the quote: '+(error.message||'Please try again.'),'error'); setConfirming(false); return; }
+      const inv = await createInvoiceFromQuote(quot.quotation_id,{eventId:quot.event_id});
+      setConfirming(false);
+      if(inv){ onNavigate&&onNavigate('events',{eventId:quot.event_id}); }
+      else { setQuot(q=>({...q,status:'approved'})); }
+      return;
+    }
+    // Lead-origin: open the convert dialog → creates the event from this quote.
+    if(quot.lead_id){
+      const {data:l}=await supabase.from('leads').select('*').eq('lead_id',quot.lead_id).single();
+      if(!l){ notify('Could not load the lead to convert.','error'); return; }
+      setConvertLead(l); setShowConvert(true);
+      return;
+    }
+    notify('This quote is not linked to a lead or event.','error');
+  };
+  // Lead-origin confirm → create the event from this quote (reuses the shared conversion helper).
+  const doConvertFromQuote = async () => {
+    if(!convertLead||confirming) return;
     setConfirming(true);
-    const {error}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id);
-    if(error){ notify('Could not confirm the quote: '+(error.message||'Please try again.'),'error'); setConfirming(false); return; }
-    const inv = await createInvoiceFromQuote(quot.quotation_id,{eventId:quot.event_id});
-    setConfirming(false);
-    if(inv){ onNavigate&&onNavigate('events',{eventId:quot.event_id}); }
-    else { setQuot(q=>({...q,status:'approved'})); }
+    try {
+      if(quot.status!=='approved'){ const {error}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id); if(error) throw error; }
+      const res = await createEventFromQuote(convertLead, {quot, forcedClientId: quot.client_id||convertLead.client_id||undefined});
+      setShowConvert(false); setConfirming(false);
+      onNavigate&&onNavigate('events',{eventId:res.eventId});
+    } catch(err){
+      console.error('[Isheeka ERP] convert-from-quote failed:', err);
+      notify('Could not create the event: '+(err&&err.message?err.message:'Please try again.'),'error');
+      setConfirming(false);
+    }
   };
   // Reconstruct the wizard context (lead vs event origin) and open it to edit/revise this quote.
   const launchEdit = async () => {
@@ -4593,11 +4602,16 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const sc = QUOT_STATUS_COLORS[quot.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
   const statusLabel = QUOT_STATUS_LABELS[quot.status]||quot.status;
   const editable = !['converted','rejected','expired','superseded'].includes(quot.status) && !invoiceIssued;
-  const canConfirm = quot.event_id && !['approved','converted','rejected','expired','superseded'].includes(quot.status);
+  // Event-origin: confirm available until approved (then the invoice exists). Lead-origin: confirm
+  // (= create the event) available until converted, including 'approved' (idempotent re-convert).
+  const canConfirm = (quot.event_id
+    ? !['approved','converted','rejected','expired','superseded'].includes(quot.status)
+    : (!!quot.lead_id && !['converted','rejected','expired','superseded'].includes(quot.status))) && !invoiceIssued;
 
   return (
     <div>
       {showWizard&&wizardCtx&&<QuoteGenerationWizard lead={wizardCtx.lead} leadSubEvents={[]} isRevision={wizardCtx.isRevision} isContinuation={!wizardCtx.isRevision} existingQuotationId={quot.quotation_id} originEvent={wizardCtx.origin||undefined} onComplete={async(newQ)=>{ setShowWizard(false); setWizardCtx(null); if(newQ&&newQ.quotation_id&&newQ.quotation_id!==quot.quotation_id){ onNavigate&&onNavigate('quotations',{quotId:newQ.quotation_id}); } else { await loadAll(); } }} onCancel={()=>{ setShowWizard(false); setWizardCtx(null); }}/>}
+      {showConvert&&convertLead&&<ConvertLeadModal lead={convertLead} onConfirm={doConvertFromQuote} onCancel={()=>{setShowConvert(false);setConvertLead(null);}}/>}
 
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,fontSize:13}}>
         <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'var(--pink)',fontSize:13,padding:0,fontFamily:'Inter,sans-serif'}}>← Quotations</button>
@@ -4622,7 +4636,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
           {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
-          {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':'✅ Confirm & create invoice'}</button>}
+          {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
           {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id})}>Go to event →</button>}
         </div>
       </div>
