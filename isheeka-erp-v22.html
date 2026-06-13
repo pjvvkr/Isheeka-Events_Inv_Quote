@@ -6166,7 +6166,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
               <div style={{width:64,height:64,borderRadius:'50%',background:'var(--green-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,margin:'0 auto 14px'}}>{'\u2705'}</div>
               <div style={{fontSize:16,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{isRevision?'Revised quotation created!':'Quotation created!'}</div>
               <div style={{fontSize:14,color:'var(--grey-400)',marginBottom:6}}>{createdQuot.ref_number} — Rs.{parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')}</div>
-              <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:24}}>Share with {lead.first_name}, then mark as sent to update the lead stage.</div>
+              <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:24}}>Share with {lead.first_name}, then mark it as sent.{originEvent?'':' This updates the lead stage.'}</div>
               <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'14px 16px',marginBottom:16,textAlign:'left'}}>
                 <div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>What the client sees</div>
                 <div style={{display:'flex',gap:6,marginBottom:12}}>
@@ -6222,7 +6222,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
                 </button>
               </div>
               <button className="btn primary" style={{width:'100%',maxWidth:420,padding:'12px'}} onClick={handleMarkSent}>
-                Mark as sent — update lead stage
+                {originEvent ? 'Mark quotation as sent' : 'Mark as sent — update lead stage'}
               </button>
             </div>
           )}
