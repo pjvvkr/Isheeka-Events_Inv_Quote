@@ -2519,7 +2519,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               const is={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'},overdue:{bg:'var(--red-light)',color:'var(--red)'},cancelled:{bg:'var(--grey-100)',color:'var(--grey-400)'}};
               const s=is[inv.status?.toLowerCase()]||is.draft;
               const recvd=parseFloat(inv.total_received||0); const tot=parseFloat(inv.grand_total||0);
-              return <div key={inv.invoice_id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6}}>
+              return <div key={inv.invoice_id} onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:inv.invoice_id})} title="View invoice" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer'}}>
                 <div><div style={{fontSize:13,fontWeight:500}}>{inv.ref_number}{inv.revision_number>0?' · Rev '+inv.revision_number:''}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{tot.toLocaleString('en-IN')}{recvd>0?' · ₹'+recvd.toLocaleString('en-IN')+' received':''}</div></div>
                 <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{(inv.status||'').replace('_',' ')}</span>
               </div>;
@@ -4120,6 +4120,15 @@ const EVENT_STATUS_COLORS = {
   completed:{bg:'#E1F5EE',color:'#0F6E56',dot:'#0F6E56'},
   cancelled:{bg:'#FCEBEB',color:'#A32D2D',dot:'#A32D2D'},
 };
+const INVOICE_STATUS_COLORS = {
+  draft:{bg:'#F1EFE8',color:'#5F5E5A',dot:'#888780'},
+  sent:{bg:'#E6F1FB',color:'#185FA5',dot:'#185FA5'},
+  partially_paid:{bg:'#FAEEDA',color:'#854F0B',dot:'#c87d2a'},
+  paid:{bg:'#E1F5EE',color:'#0F6E56',dot:'#0F6E56'},
+  overdue:{bg:'#FCEBEB',color:'#A32D2D',dot:'#A32D2D'},
+  cancelled:{bg:'#F1EFE8',color:'#888780',dot:'#B4B2A9'},
+};
+const INVOICE_STATUS_LABELS = {draft:'Draft',sent:'Sent',partially_paid:'Partly paid',paid:'Paid',overdue:'Overdue',cancelled:'Cancelled'};
 const EVENT_TYPES = ['Wedding','Corporate','Birthday','Anniversary','Other'];
 const BUDGET_RANGES = [
   {label:'All budgets',value:''},
@@ -4302,6 +4311,286 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
   );
 }
 
+// ── Invoices Module (Phase 3a) ────────────────────────────────────────────────
+function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
+  const [view, setView] = React.useState('list'); // list | detail
+  const [invoices, setInvoices] = React.useState([]);
+  const [selectedId, setSelectedId] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [search, setSearch] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState('');
+
+  const loadInvoices = React.useCallback(async () => {
+    setLoading(true);
+    const {data} = await supabase.from('invoices').select('*').eq('is_deleted',false).order('doc_date',{ascending:false});
+    if(data) setInvoices(data);
+    setLoading(false);
+  },[]);
+  React.useEffect(()=>{ loadInvoices(); },[loadInvoices]);
+  React.useEffect(()=>{ if(initialInvoiceId){ setSelectedId(initialInvoiceId); setView('detail'); onConsumed&&onConsumed(); } },[initialInvoiceId]);
+
+  const filtered = invoices.filter(i=>{
+    const q=search.toLowerCase();
+    const matchSearch=!q||`${i.ref_number} ${i.client_name||''} ${i.event_name||''}`.toLowerCase().includes(q);
+    const matchStatus=!statusFilter||i.status===statusFilter;
+    return matchSearch&&matchStatus;
+  });
+  const sumOutstanding = invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.total_outstanding)||0),0);
+  const sumReceived = invoices.reduce((s,i)=>s+(parseFloat(i.total_received)||0),0);
+  const overdueCount = invoices.filter(i=>i.status==='overdue').length;
+
+  if(view==='detail') return <InvoiceDetail invoiceId={selectedId} onBack={()=>{setView('list');setSelectedId(null);loadInvoices();}} onNavigate={onNavigate}/>;
+
+  return (
+    <div>
+      <div className="metrics-grid" style={{marginBottom:20}}>
+        <div className="metric-card pink"><div className="metric-icon">🧾</div><div className="metric-value">{invoices.length}</div><div className="metric-label">Total invoices</div></div>
+        <div className="metric-card orange"><div className="metric-icon">⏳</div><div className="metric-value">₹{sumOutstanding.toLocaleString('en-IN')}</div><div className="metric-label">Outstanding</div></div>
+        <div className="metric-card green"><div className="metric-icon">✅</div><div className="metric-value">₹{sumReceived.toLocaleString('en-IN')}</div><div className="metric-label">Received</div></div>
+        <div className="metric-card pink"><div className="metric-icon">⚠️</div><div className="metric-value">{overdueCount}</div><div className="metric-label">Overdue</div></div>
+      </div>
+
+      <div style={{display:'flex',gap:10,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <div style={{flex:1,minWidth:200,position:'relative'}}>
+          <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,color:'var(--grey-400)',pointerEvents:'none'}}>🔍</span>
+          <input className="field-input" style={{paddingLeft:36}} placeholder="Search by ref, client, event..." value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
+        <select className="field-input" style={{width:160}} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          {Object.keys(INVOICE_STATUS_LABELS).map(s=><option key={s} value={s}>{INVOICE_STATUS_LABELS[s]}</option>)}
+        </select>
+      </div>
+
+      {loading ? (
+        <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>
+      ) : filtered.length===0 ? (
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:60,textAlign:'center',border:'1px solid var(--grey-100)'}}>
+          <div style={{fontSize:48,marginBottom:12}}>🧾</div>
+          <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>{search||statusFilter?'No invoices found':'No invoices yet'}</div>
+          <div style={{fontSize:13,color:'var(--grey-400)'}}>{search||statusFilter?'Try adjusting your search or filter':'Invoices are created automatically when a quotation is confirmed.'}</div>
+        </div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          {filtered.map(inv=>{
+            const sc=INVOICE_STATUS_COLORS[inv.status]||INVOICE_STATUS_COLORS.draft;
+            const recvd=parseFloat(inv.total_received)||0; const out=parseFloat(inv.total_outstanding)||0;
+            return (
+              <div key={inv.invoice_id} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer'}}
+                onMouseEnter={ev=>ev.currentTarget.style.borderColor='var(--grey-200)'}
+                onMouseLeave={ev=>ev.currentTarget.style.borderColor='var(--grey-100)'}
+                onClick={()=>{setSelectedId(inv.invoice_id);setView('detail');}}>
+                <div style={{display:'grid',gridTemplateColumns:'6px 1fr auto auto',alignItems:'stretch'}}>
+                  <div style={{background:sc.dot,borderRadius:'var(--radius-lg) 0 0 var(--radius-lg)'}}></div>
+                  <div style={{padding:'14px 16px'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                      <span style={{fontSize:14,fontWeight:500,color:'var(--pink)'}}>{inv.ref_number}</span>
+                      {inv.revision_number>0&&<span style={{fontSize:11,color:'var(--grey-400)'}}>Rev {inv.revision_number}</span>}
+                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{INVOICE_STATUS_LABELS[inv.status]||inv.status}</span>
+                    </div>
+                    <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
+                      {inv.client_name&&<span>👤 {inv.client_name}</span>}
+                      {inv.event_name&&<span>🎪 {inv.event_name}</span>}
+                      {inv.doc_date&&<span>📅 {new Date(inv.doc_date).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</span>}
+                    </div>
+                  </div>
+                  <div style={{padding:'14px 16px',display:'flex',flexDirection:'column',alignItems:'flex-end',justifyContent:'center',gap:2}}>
+                    <div style={{fontSize:14,fontWeight:600,color:'var(--grey-800)'}}>₹{parseFloat(inv.grand_total||0).toLocaleString('en-IN')}</div>
+                    <div style={{fontSize:11,color:out>0?'var(--red)':'var(--green)'}}>{out>0?'₹'+out.toLocaleString('en-IN')+' due':'Settled'}{recvd>0&&out>0?' · ₹'+recvd.toLocaleString('en-IN')+' rec':''}</div>
+                  </div>
+                  <div style={{padding:'0 12px',display:'flex',alignItems:'center'}}><span style={{color:'var(--grey-400)',fontSize:18}}>›</span></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InvoiceDetail({invoiceId, onBack, onNavigate}) {
+  const [inv, setInv] = React.useState(null);
+  const [items, setItems] = React.useState([]);
+  const [installments, setInstallments] = React.useState([]);
+  const [settings, setSettings] = React.useState({});
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+
+  const loadAll = React.useCallback(async () => {
+    setLoading(true);
+    const [{data:i},{data:li},{data:inst},{data:s}] = await Promise.all([
+      supabase.from('invoices').select('*').eq('invoice_id',invoiceId).single(),
+      supabase.from('invoice_line_items').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('sort_order'),
+      supabase.from('invoice_installments').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('installment_number'),
+      supabase.from('settings').select('gst_pct,default_invoice_due_days').single(),
+    ]);
+    setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{});
+    setLoading(false);
+  },[invoiceId]);
+  React.useEffect(()=>{ loadAll(); },[loadAll]);
+
+  if(loading) return <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>;
+  if(!inv) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>Invoice not found. <button className="btn sm" onClick={onBack}>← Back</button></div>;
+
+  const sc=INVOICE_STATUS_COLORS[inv.status]||INVOICE_STATUS_COLORS.draft;
+  const subtotal=parseFloat(inv.subtotal)||0;
+  const discount=parseFloat(inv.discount_amount)||0;
+  const taxable=Math.max(0,subtotal-discount);
+  const gstPct=parseFloat(inv.gst_applicable?(inv.gst_pct||settings.gst_pct||0):0)||0;
+  const tax=inv.gst_applicable?Math.round(taxable*gstPct/100):0;
+  const grand=taxable+tax;
+  const received=parseFloat(inv.total_received)||0;
+  const outstanding=parseFloat(inv.total_outstanding!=null?inv.total_outstanding:(grand-received))||0;
+  const variance=grand-(parseFloat(inv.source_quote_total)||0);
+  const locked=['paid','cancelled'].includes(inv.status);
+
+  // GST toggle: persist gst flag + recomputed tax/grand/outstanding, and rescale installments to the new grand.
+  const toggleGst = async (on) => {
+    if(saving||locked) return;
+    setSaving(true);
+    const rate=on?(parseFloat(settings.gst_pct)||0):0;
+    const newTax=on?Math.round(taxable*rate/100):0;
+    const newGrand=taxable+newTax;
+    const newOutstanding=Math.max(0,newGrand-received);
+    const {error}=await supabase.from('invoices').update({gst_applicable:on,gst_pct:rate,tax_amount:newTax,grand_total:newGrand,total_outstanding:newOutstanding,updated_at:new Date().toISOString()}).eq('invoice_id',invoiceId);
+    if(error){ notify('Could not update GST: '+(error.message||''),'error'); setSaving(false); return; }
+    // rescale installments by their stored percentage against the new grand
+    for(const it of installments){
+      if(it.percentage==null) continue;
+      const due=Math.round(newGrand*(parseFloat(it.percentage)||0)/100);
+      const bal=Math.max(0,due-(parseFloat(it.amount_paid)||0));
+      await supabase.from('invoice_installments').update({amount_due:due,balance:bal,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id);
+    }
+    notify(on?'GST applied ('+rate+'%).':'GST removed.','success');
+    setSaving(false);
+    await loadAll();
+  };
+
+  const markSent = async () => {
+    if(saving||inv.status!=='draft') return;
+    setSaving(true);
+    const patch={status:'sent',updated_at:new Date().toISOString()};
+    if(!inv.due_date && settings.default_invoice_due_days){ const d=new Date(); d.setDate(d.getDate()+parseInt(settings.default_invoice_due_days)); patch.due_date=d.toISOString().split('T')[0]; }
+    const {error}=await supabase.from('invoices').update(patch).eq('invoice_id',invoiceId);
+    if(error){ notify('Could not mark as sent: '+(error.message||''),'error'); setSaving(false); return; }
+    notify('Invoice '+inv.ref_number+' marked as sent.','success'); setSaving(false); await loadAll();
+  };
+
+  const cancelInvoice = async () => {
+    if(saving||locked) return;
+    if(received>0){ notify('This invoice has payments recorded — it can\'t be cancelled.','error'); return; }
+    setSaving(true);
+    const {error}=await supabase.from('invoices').update({status:'cancelled',updated_at:new Date().toISOString()}).eq('invoice_id',invoiceId);
+    if(error){ notify('Could not cancel: '+(error.message||''),'error'); setSaving(false); return; }
+    notify('Invoice cancelled.','info'); setSaving(false); await loadAll();
+  };
+
+  const groups={}; items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
+  const fmt=(d)=> d? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):'—';
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16,fontSize:13}}>
+        <button className="btn sm" onClick={onBack}>← Invoices</button>
+      </div>
+
+      {/* Header card */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:20,fontWeight:600,color:'var(--grey-800)'}}>{inv.ref_number}</span>
+              {inv.revision_number>0&&<span style={{fontSize:12,color:'var(--grey-400)'}}>Rev {inv.revision_number}</span>}
+              <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{INVOICE_STATUS_LABELS[inv.status]||inv.status}</span>
+            </div>
+            <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>
+              {inv.client_name||'—'}{inv.event_name?' · '+inv.event_name:''}{inv.doc_date?' · '+fmt(inv.doc_date):''}
+            </div>
+          </div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+            {inv.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})}>Go to event →</button>}
+            {inv.status==='draft'&&<button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
+            <button className="btn" disabled title="Invoice PDF — coming in a later phase">⬇ PDF</button>
+            {!locked&&<button className="btn sm" disabled={saving} onClick={cancelInvoice} style={{color:'var(--red)'}}>Cancel</button>}
+          </div>
+        </div>
+        {Math.abs(variance)>=1&&(parseFloat(inv.source_quote_total)||0)>0&&(
+          <div style={{marginTop:12,padding:'8px 12px',background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>
+            ⚠️ This invoice differs from the source quote by {variance>0?'+':''}₹{Math.abs(variance).toLocaleString('en-IN')} (quote ₹{(parseFloat(inv.source_quote_total)||0).toLocaleString('en-IN')} → invoice ₹{grand.toLocaleString('en-IN')}).
+          </div>
+        )}
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'1.6fr 1fr',gap:16,alignItems:'start'}}>
+        {/* Line items + totals */}
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:12}}>Line items</div>
+          {items.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No line items.</div>}
+          {Object.keys(groups).map(g=>(
+            <div key={g} style={{marginBottom:10}}>
+              {Object.keys(groups).length>1&&<div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',margin:'6px 0'}}>{g}</div>}
+              {groups[g].map(li=>(
+                <div key={li.line_item_id} style={{display:'flex',justifyContent:'space-between',gap:12,fontSize:13,padding:'5px 0',borderBottom:'1px solid var(--grey-50)'}}>
+                  <span style={{flex:1}}>{li.description}</span>
+                  <span style={{color:'var(--grey-400)',whiteSpace:'nowrap'}}>{parseFloat(li.quantity||0)} × ₹{parseFloat(li.unit_price||0).toLocaleString('en-IN')}</span>
+                  <span style={{fontWeight:500,whiteSpace:'nowrap',minWidth:80,textAlign:'right'}}>₹{parseFloat(li.amount||0).toLocaleString('en-IN')}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+          <div style={{borderTop:'1px solid var(--grey-200)',marginTop:10,paddingTop:10}}>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0',color:'var(--grey-600)'}}><span>Subtotal</span><span>₹{subtotal.toLocaleString('en-IN')}</span></div>
+            {discount>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0',color:'var(--grey-600)'}}><span>Discount</span><span>− ₹{discount.toLocaleString('en-IN')}</span></div>}
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0',color:'var(--grey-600)'}}><span>GST {inv.gst_applicable?'@ '+gstPct+'%':'(not applied)'}</span><span>₹{tax.toLocaleString('en-IN')}</span></div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:15,fontWeight:600,padding:'4px 0'}}><span>Grand total</span><span>₹{grand.toLocaleString('en-IN')}</span></div>
+          </div>
+        </div>
+
+        {/* Right column: GST + installments + totals */}
+        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'14px 18px',border:'1px solid var(--grey-100)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>GST applicable</div>
+                <div style={{fontSize:11,color:'var(--grey-400)'}}>Rate from Settings: {parseFloat(settings.gst_pct)||0}%</div>
+              </div>
+              <label style={{display:'inline-flex',alignItems:'center',cursor:locked?'not-allowed':'pointer'}}>
+                <input type="checkbox" checked={!!inv.gst_applicable} disabled={saving||locked} onChange={e=>toggleGst(e.target.checked)} style={{width:18,height:18,accentColor:'var(--pink)'}}/>
+              </label>
+            </div>
+          </div>
+
+          <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'14px 18px',border:'1px solid var(--grey-100)'}}>
+            <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Installments</div>
+            {installments.length===0&&<div style={{fontSize:12,color:'var(--grey-400)'}}>No installment schedule.</div>}
+            {installments.map(it=>{
+              const ist=INVOICE_STATUS_COLORS[it.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
+              return (
+                <div key={it.installment_id} style={{padding:'6px 0',borderBottom:'1px solid var(--grey-50)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:13}}>
+                    <span>{it.label||('Installment '+it.installment_number)}{it.percentage?' · '+parseFloat(it.percentage)+'%':''}</span>
+                    <span style={{fontWeight:500}}>₹{parseFloat(it.amount_due||0).toLocaleString('en-IN')}</span>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'var(--grey-400)',marginTop:2}}>
+                    <span>{it.when_text||(it.due_date?fmt(it.due_date):'—')}</span>
+                    <span>Bal ₹{parseFloat(it.balance!=null?it.balance:it.amount_due||0).toLocaleString('en-IN')} · <span style={{color:ist.color}}>{INVOICE_STATUS_LABELS[it.status]||it.status}</span></span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'14px 18px',border:'1px solid var(--grey-100)'}}>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0'}}><span style={{color:'var(--grey-400)'}}>Received</span><span style={{fontWeight:500,color:'var(--green)'}}>₹{received.toLocaleString('en-IN')}</span></div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0'}}><span style={{color:'var(--grey-400)'}}>Outstanding</span><span style={{fontWeight:500,color:outstanding>0?'var(--red)':'var(--green)'}}>₹{outstanding.toLocaleString('en-IN')}</span></div>
+            <div style={{fontSize:11,color:'var(--grey-400)',marginTop:8,paddingTop:8,borderTop:'1px solid var(--grey-50)'}}>Recording payments comes in the next phase.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -4458,7 +4747,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [activePage, setActivePage] = useState('dashboard');
   const [navTarget, setNavTarget] = useState(null);
-  const navigate = useCallback((page, opts={})=>{ setNavTarget((opts&&(opts.eventId||opts.leadId))?{page, eventId:opts.eventId, leadId:opts.leadId}:null); setActivePage(page); },[]);
+  const navigate = useCallback((page, opts={})=>{ setNavTarget((opts&&(opts.eventId||opts.leadId||opts.invoiceId))?{page, eventId:opts.eventId, leadId:opts.leadId, invoiceId:opts.invoiceId}:null); setActivePage(page); },[]);
   const [showWarning, setShowWarning] = useState(false);
   const lastActivity = useRef(Date.now());
   const warningTimer = useRef(null);
@@ -4551,7 +4840,8 @@ function App() {
           {activePage==='clients' && <ClientsModule/>}
           {activePage==='events' && <EventsModule initialEventId={navTarget&&navTarget.page==='events'?navTarget.eventId:null} onConsumed={()=>setNavTarget(null)} onNavigate={navigate}/>}
           {activePage==='leads' && <LeadsModule onNavigate={navigate} initialLeadId={navTarget&&navTarget.page==='leads'?navTarget.leadId:null} onConsumed={()=>setNavTarget(null)}/>}
-          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && <ComingSoon page={activePage}/>}
+          {activePage==='invoices' && <InvoicesModule onNavigate={navigate} initialInvoiceId={navTarget&&navTarget.page==='invoices'?navTarget.invoiceId:null} onConsumed={()=>setNavTarget(null)}/>}
+          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='invoices' && <ComingSoon page={activePage}/>}
         </div>
       </main>
     </div>
