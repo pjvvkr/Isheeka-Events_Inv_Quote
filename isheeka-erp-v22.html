@@ -2430,6 +2430,12 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               </table>
             </div>
           )}
+          {(subEvents.length>0||mainItemsView.length>0)&&(
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:12,paddingTop:12,borderTop:'2px solid var(--grey-200)'}}>
+              <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Total items value</div>
+              <div style={{fontSize:15,fontWeight:700,color:'var(--pink)'}}>₹{grandTotal.toLocaleString('en-IN')}</div>
+            </div>
+          )}
         </div>
 
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
@@ -4765,6 +4771,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
   const [primaryContactName, setPrimaryContactName] = useState('');
   const [secondaryContactId, setSecondaryContactId] = useState('');
   const [secondaryContactName, setSecondaryContactName] = useState('');
+  const [showClientForm, setShowClientForm] = useState(false);
 
   // Step 3 - sub events with items
   const [subEvents, setSubEvents] = useState([
@@ -4980,6 +4987,25 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
     } finally { setSaving(false); }
   };
 
+  const handleCreateClient = async (form) => {
+    const ref_number = await getNextClientRef();
+    const payload = {
+      ...form, ref_number,
+      preferred_contact: form.preferred_contact||null, source: form.source||null,
+      phone_2: form.phone_2||null, phone_3: form.phone_3||null,
+      email_2: form.email_2||null, email_3: form.email_3||null,
+      gst_number: form.gst_number||null, notes: form.notes||null,
+      created_by: form.created_by||null, updated_by: form.updated_by||null, lead_id: form.lead_id||null,
+      client_since: new Date().toISOString().split('T')[0],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    };
+    const {data,error} = await runDb(supabase.from('clients').insert(payload).select().single(),'create client');
+    if(error||!data) return;
+    setClients(cs=>[data,...cs]);
+    setSelectedClient(data);
+    setShowClientForm(false);
+    notify('Client created — selected for this event.','success');
+  };
   const steps = ['Event details','Client & contact','Sub-events & items','Review & save'];
   const filteredClients = clients.filter(c=>{
     const q=clientSearch.toLowerCase();
@@ -4989,6 +5015,13 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
 
   return (
     <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}} onClick={()=>showTplMenu&&setShowTplMenu(false)}>
+      {showClientForm&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowClientForm(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:680,boxShadow:'var(--shadow-lg)',padding:'8px 4px'}}>
+            <ClientForm title="New client" onSave={handleCreateClient} onCancel={()=>setShowClientForm(false)}/>
+          </div>
+        </div>
+      )}
       {/* Step bar */}
       <div style={{background:'var(--grey-50)',padding:'14px 24px',borderBottom:'1px solid var(--grey-100)',display:'flex',alignItems:'center',gap:0}}>
         {steps.map((s,i)=>(
@@ -5045,9 +5078,12 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
             <div style={{fontSize:14,fontWeight:600,color:'var(--grey-800)',marginBottom:16}}>Select client & event contacts</div>
             {errors.client&&<div style={{background:'var(--red-light)',color:'var(--red)',borderRadius:'var(--radius-sm)',padding:'8px 12px',fontSize:13,marginBottom:12}}>⚠ {errors.client}</div>}
             <div style={{background:'white',borderRadius:'var(--radius-md)',border:'1px solid var(--grey-100)',padding:16,marginBottom:16}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,gap:8}}>
                 <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>Select client <span style={{color:'var(--pink)'}}>*</span></div>
-                <input className="field-input" style={{width:200,fontSize:12}} placeholder="Search clients..." value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <input className="field-input" style={{width:170,fontSize:12}} placeholder="Search clients..." value={clientSearch} onChange={e=>setClientSearch(e.target.value)}/>
+                  <button className="btn sm" style={{fontSize:12,whiteSpace:'nowrap'}} onClick={()=>setShowClientForm(true)}>+ New client</button>
+                </div>
               </div>
               <div style={{maxHeight:220,overflowY:'auto',display:'flex',flexDirection:'column',gap:6}}>
                 {filteredClients.map(c=>{
@@ -5068,7 +5104,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
                     </div>
                   );
                 })}
-                {filteredClients.length===0&&<div style={{textAlign:'center',padding:20,color:'var(--grey-400)',fontSize:13}}>No clients found</div>}
+                {filteredClients.length===0&&<div style={{textAlign:'center',padding:20,color:'var(--grey-400)',fontSize:13}}>No clients found. <button className="btn sm" style={{fontSize:12,marginLeft:6}} onClick={()=>setShowClientForm(true)}>+ Create new client</button></div>}
               </div>
             </div>
 
