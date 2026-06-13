@@ -3173,9 +3173,10 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
             </div>
             {(quot.status==='converted'||quot.event_id)&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\uD83D\uDCC5'} An event has been created from this quote. For any changes, update the event.</div>}
             {quot.status==='approved'&&!quot.event_id&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\u2705'} This quote is confirmed by the client. To change it, create a revision.</div>}
-            {qActivity.length>0&&(
+            {quot.status!=='draft'&&(
               <div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)'}}>
-                <div style={{fontSize:12,fontWeight:600,color:'var(--grey-700)',marginBottom:6}}>Activity · sent {qActivity.filter(a=>a.action==='sent').length}×{qActivity.filter(a=>a.action==='sent')[0]?(' · last '+new Date(qActivity.filter(a=>a.action==='sent')[0].logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})):''}</div>
+                <div style={{fontSize:12,fontWeight:600,color:'var(--grey-700)',marginBottom:6}}>Activity{(()=>{const s=qActivity.filter(a=>a.action==='sent');return s.length>0?(' · sent '+s.length+'×'+(s[0]?(' · last '+new Date(s[0].logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})):'')):'';})()}</div>
+                {qActivity.length===0&&<div style={{fontSize:12,color:'var(--grey-400)'}}>No sends logged yet — sharing this quote via WhatsApp/Email from here will be recorded.</div>}
                 {qActivity.slice(0,8).map(a=>(
                   <div key={a.log_id} style={{fontSize:12,color:'var(--grey-500)',padding:'2px 0'}}>
                     {a.action==='sent'?('Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')))):a.action} · {new Date(a.logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}{a.logged_by&&qUserMap[a.logged_by]?(' · '+qUserMap[a.logged_by]):''}
