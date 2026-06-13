@@ -3803,10 +3803,12 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
                 <button className="btn sm" style={{background:'#FFF8E1',color:'#F57F17',border:'1px solid #FFE082'}}
                   onClick={()=>setShowQuoteWizard(true)}>📋 Generate revised quote</button>
               )}
-              {lead.stage==='revised_quote_sent'&&(
+              {lead.stage==='revised_quote_sent'&&(<>
+                <button className="btn sm" style={{background:'#FCEBEB',color:'#A32D2D',border:'1px solid #FFCDD2'}}
+                  onClick={()=>handleStageChange('quote_revision_pending')}>🔄 Revision requested</button>
                 <button className="btn sm" style={{background:'var(--green-light)',color:'var(--green)',border:'1px solid #86EFAC'}}
                   onClick={()=>handleStageChange('quote_confirmed')}>✅ Quote confirmed</button>
-              )}
+              </>)}
               {lead.stage==='quote_confirmed'&&(
                 <button className="btn sm" style={{background:'var(--green)',color:'white',border:'none'}}
                   onClick={()=>setShowConvert(true)}>🎉 Convert to event</button>
