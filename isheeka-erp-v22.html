@@ -4417,6 +4417,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
+  const [showClientEdit, setShowClientEdit] = React.useState(false);
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
@@ -4427,7 +4428,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,phone_1,email,website,company_name,cover_intro').single(),
     ]);
     setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{});
-    if(i&&i.client_id){ const {data:c}=await supabase.from('clients').select('phone_1,email_1,city').eq('client_id',i.client_id).single(); setClientInfo(c||{}); }
+    if(i&&i.client_id){ const {data:c}=await supabase.from('clients').select('*').eq('client_id',i.client_id).single(); setClientInfo(c||{}); }
     else setClientInfo({});
     setLoading(false);
   },[invoiceId]);
@@ -4505,6 +4506,25 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const pdfOpts = (action)=>({action, docType:'invoice', displayOpts:{prices:true,qty:true,grouping:true,schedule:true,discount:true,coverPage:false,bankDetails:true}, settings});
   const downloadPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('download')); }catch(e){ notify('Could not generate the PDF.','error'); } };
   const printPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('print')); }catch(e){ notify('Could not open the print view.','error'); } };
+  const previewPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('preview')); }catch(e){ notify('Could not open the preview.','error'); } };
+  // Edit the client master from here; contact fields cascade live, and a name change is synced to all the client's documents.
+  const handleSaveClient = async (form) => {
+    const {error} = await supabase.from('clients').update({...form,updated_at:new Date().toISOString()}).eq('client_id',inv.client_id);
+    if(error){ notify('Could not update client: '+(error.message||''),'error'); throw error; }
+    const newName = ((form.first_name||'')+' '+(form.last_name||'')).trim();
+    let cascaded=0;
+    if(newName && newName!==inv.client_name){
+      // Active docs only — not-yet-issued quotes/invoices (draft) and live events.
+      // Already-sent/finalised documents keep their original name as a snapshot.
+      const rq = await supabase.from('quotations').update({client_name:newName},{count:'exact'}).eq('client_id',inv.client_id).eq('status','draft');
+      const ri = await supabase.from('invoices').update({client_name:newName},{count:'exact'}).eq('client_id',inv.client_id).eq('status','draft');
+      const re = await supabase.from('events').update({client_name:newName},{count:'exact'}).eq('client_id',inv.client_id).not('status','in','("completed","cancelled")');
+      cascaded = (rq.count||0)+(ri.count||0)+(re.count||0);
+    }
+    setShowClientEdit(false);
+    notify('Client updated'+(cascaded?(' — name synced to '+cascaded+' active document'+(cascaded>1?'s':'')):'')+'.','success');
+    await loadAll();
+  };
   const canShare = ['sent','partially_paid','paid','overdue'].includes(inv.status);
   const shareInvoice = async (channel)=>{
     if(sharing) return;
@@ -4546,6 +4566,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             {inv.status==='draft'&&<button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
             {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('whatsapp')}>💬 WhatsApp</button>}
             {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('gmail')}>Email</button>}
+            <button className="btn sm" disabled={saving} onClick={previewPdf}>👁 Preview</button>
             <button className="btn sm" disabled={saving} onClick={printPdf}>Print</button>
             <button className="btn" disabled={saving} onClick={downloadPdf}>⬇ PDF</button>
             {!locked&&<button className="btn sm" disabled={saving} onClick={cancelInvoice} style={{color:'var(--red)'}}>Cancel</button>}
@@ -4559,6 +4580,28 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       </div>
 
       {inv.status==='cancelled'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--grey-50)',color:'var(--grey-600)',borderRadius:'var(--radius-sm)',fontSize:12}}>This invoice is cancelled. To raise a new one, open the event {inv.event_id&&<a onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>(go to event →)</a>} and click <b>+ Generate invoice</b>.</div>}
+      {/* Client details (Phase: client edit + cascade) */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Client details</div>
+          {inv.client_id&&<button className="btn sm" onClick={()=>setShowClientEdit(true)}>✏️ Edit client</button>}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:'10px 24px',fontSize:13}}>
+          <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Name</div><div>{inv.client_name||(((clientInfo.first_name||'')+' '+(clientInfo.last_name||'')).trim())||'—'}</div></div>
+          <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Phone</div><div>{[clientInfo.phone_1,clientInfo.phone_2].filter(Boolean).join(', ')||'—'}</div></div>
+          <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Email</div><div>{[clientInfo.email_1,clientInfo.email_2].filter(Boolean).join(', ')||'—'}</div></div>
+          <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Address</div><div>{[clientInfo.street_address,clientInfo.city,clientInfo.state,clientInfo.pincode].filter(Boolean).join(', ')||'—'}</div></div>
+          <div><div style={{fontSize:11,color:'var(--grey-400)'}}>GST no.</div><div>{clientInfo.gst_number||'—'}</div></div>
+        </div>
+        <div style={{fontSize:11,color:'var(--grey-400)',marginTop:10}}>Editing here updates the client master; contact details flow to all their documents automatically. A name change syncs to active (unsent) documents — already-sent ones keep their original name.</div>
+      </div>
+      {showClientEdit&&clientInfo.client_id&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowClientEdit(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:680,boxShadow:'var(--shadow-lg)',padding:'8px 4px'}}>
+            <ClientForm initial={clientInfo} title="Edit client" onSave={handleSaveClient} onCancel={()=>setShowClientEdit(false)}/>
+          </div>
+        </div>
+      )}
       <div style={{display:'grid',gridTemplateColumns:'1.6fr 1fr',gap:16,alignItems:'start'}}>
         {/* Line items + totals */}
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
@@ -6134,6 +6177,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   addPageNumbers();
   const fname=(isInv?'Invoice_':'Quotation_')+String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf';
   if(opts.action==='blob'){ return doc.output('blob'); }
+  if(opts.action==='preview'){ window.open(doc.output('bloburl'),'_blank'); return true; }
   if(opts.action==='print'){ try{doc.autoPrint();}catch(e){} window.open(doc.output('bloburl'),'_blank'); }
   else{ doc.save(fname); }
   return true;
