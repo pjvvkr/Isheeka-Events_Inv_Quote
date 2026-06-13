@@ -58,6 +58,16 @@ On a child-insert failure it deletes the partial invoice — good — but those 
 
 ---
 
+## G. Found during live testing (fix in the batch)
+
+**G1 · Quote-detail Activity section now collapsible.** ✅ DONE (pending push) — collapses when >1 entry, ▸ chevron to expand.
+
+**G2 · List/search ordering surfaces dead records above active ones.** In the Quotations module, searching a client shows superseded revisions *above* the live quote (e.g. Q-26-1141 "Sent · Rev 6" sits below its superseded Rev 1–5). Same risk across modules. *Fix (batch): sort lists so **active/relevant statuses come first**, dead ones (superseded / rejected / expired / cancelled) sink to the bottom, and within each group **newest first** (by doc/updated date, then revision desc). Apply consistently to **Leads, Quotations, Events, Invoices** — list view and search results.* **TO FIX.**
+
+**G3 · Surface the source quotation on the invoice detail.** The invoice stores `quotation_id` (and `event_id`) but the detail screen doesn't show a link to the originating quote — unlike how the event detail lists related documents. *Fix (batch): add a small "Source quotation" reference (ref · status · grand total) on the invoice detail, clickable to open that quote (and it pairs naturally with the existing quote-variance banner).* **TO FIX.**
+
+---
+
 ## F. Suggested test plan for when you're back (live, together)
 
 Lead→Quote→Event→Invoice happy path: create lead → quote → confirm → convert → verify auto-invoice → revise invoice (reason + change-log entry) → mark sent → share (WhatsApp/Email → activity logs) → preview/download PDF (GST line, installments, balance) → edit client (contact cascades; name cascades to active docs only) → dashboard reflects counts. Plus the cancel→regenerate path and the superseded-revision collapse.
