@@ -2102,6 +2102,9 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [quotations, setQuotations] = React.useState([]);
   const [linkedLead, setLinkedLead] = React.useState(null);
   const [viewQuotId, setViewQuotId] = React.useState(null);
+  const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
+  const [quoteWizardLead, setQuoteWizardLead] = React.useState(null);
+  const [quoteWizardSubs, setQuoteWizardSubs] = React.useState([]);
   const [invoices, setInvoices] = React.useState([]);
   const [altContacts, setAltContacts] = React.useState([]);
   const [staffList, setStaffList] = React.useState([]);
@@ -2275,6 +2278,19 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     if(dce) setChecklist(prevChecklist);
   };
 
+  // Create a quotation directly from this event (event-originated; no lead, no convert step)
+  const startQuoteFromEvent = async () => {
+    if(!event.client_id){ notify('Add a client to this event before creating a quotation.','error'); return; }
+    const {data:c} = await supabase.from('clients').select('first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',event.client_id).single();
+    const nm=(event.client_name||'').trim();
+    const built = c
+      ? {lead_id:null, client_id:event.client_id, first_name:c.first_name, last_name:c.last_name, phone:c.phone_1||'', phone_2:c.phone_2||'', email:c.email_1||'', source:c.source||'referral', event_type:event.type}
+      : {lead_id:null, client_id:event.client_id, first_name:nm.split(' ')[0]||nm, last_name:nm.split(' ').slice(1).join(' '), phone:'', phone_2:'', email:'', source:'referral', event_type:event.type};
+    setQuoteWizardLead(built);
+    setQuoteWizardSubs((subEvents||[]).map(se=>({name:se.name})));
+    setShowQuoteWizard(true);
+  };
+
   const enterEditMode = () => { setForm({...event}); setErrors({}); setSaveError(''); setMode('edit'); };
   const cancelEdit = () => { setErrors({}); setSaveError(''); setMode('view'); };
 
@@ -2329,6 +2345,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     <div>
       {header}
       {viewQuotId&&<QuotationDetailModal quotationId={viewQuotId} onClose={()=>setViewQuotId(null)} onNavigate={onNavigate}/>}
+      {showQuoteWizard&&<QuoteGenerationWizard lead={quoteWizardLead} leadSubEvents={quoteWizardSubs} isRevision={false} isContinuation={false} existingQuotationId={null} originEvent={{eventId:event.event_id, eventName:event.name}} onComplete={async()=>{ setShowQuoteWizard(false); await loadAll(); }} onCancel={()=>setShowQuoteWizard(false)}/>}
       {successMsg&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:12,border:'1px solid rgba(15,110,86,0.2)',display:'flex',alignItems:'center',gap:8}}>✅ {successMsg}</div>}
       {/* Info cards */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
@@ -2442,7 +2459,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:14}}>Documents</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
           <div>
-            <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>Quotations ({quotations.length})</div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em'}}>Quotations ({quotations.length})</div>
+              <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={startQuoteFromEvent}>+ Create</button>
+            </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
             {quotations.map(q=>{
               const qs={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},approved:{bg:'var(--green-light)',color:'var(--green)'},converted:{bg:'var(--green-light)',color:'var(--green)'},rejected:{bg:'var(--red-light)',color:'var(--red)'},expired:{bg:'var(--orange-light)',color:'var(--orange)'},revised:{bg:'var(--orange-light)',color:'var(--orange)'}};
@@ -5643,7 +5663,7 @@ function QWTemplateSelect({options, onSelect, eventType}) {
 }
 
 // ── Quote Generation Wizard ───────────────────────────────────────────────────
-function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation, existingQuotationId, onComplete, onCancel}) {
+function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation, existingQuotationId, originEvent, onComplete, onCancel}) {
   const [step, setStep] = React.useState(1);
   const [clientMode, setClientMode] = React.useState('new');
   const [existingClient, setExistingClient] = React.useState(null);
@@ -5734,6 +5754,15 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           if(q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
         }
       });
+    }
+  },[]);
+
+  // Event-originated quote: client is already known from the event — preselect it and skip the client step.
+  React.useEffect(()=>{
+    if(originEvent && lead && lead.client_id){
+      setClientMode('existing');
+      setExistingClient({client_id:lead.client_id, first_name:lead.first_name, last_name:lead.last_name});
+      setStep(2);
     }
   },[]);
 
@@ -5872,8 +5901,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       const {data:newQ,error:qe}=await supabase.from('quotations').insert({
         ref_number:refNum,status:'draft',
         client_id:clientId,client_name:clientName,
-        lead_id:lead.lead_id,
-        event_name:(lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event'),
+        lead_id:lead.lead_id||null,
+        event_id:originEvent?originEvent.eventId:null,
+        event_name:originEvent?originEvent.eventName:((lead.last_name&&lead.last_name.trim()?lead.first_name+' '+lead.last_name:lead.first_name)+'\'s '+(lead.event_type?lead.event_type.charAt(0).toUpperCase()+lead.event_type.slice(1):'Event')),
         doc_date:quotDetails.doc_date,valid_until:quotDetails.valid_until,
         subtotal,discount_pct:parseFloat(quotDetails.discount_pct)||0,
         discount_amount:discountAmt,grand_total:grandTotal,
@@ -5890,13 +5920,15 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
 
       if(lineItems.length>0){ const {error:lie}=await supabase.from('quotation_line_items').insert(lineItems.map(i=>({...i,quotation_id:newQ.quotation_id}))); if(lie) throw lie; }
 
-      const {error:lqe}=await supabase.from('leads').update({
-        active_quotation_id:newQ.quotation_id,
-        client_id:clientId||lead.client_id||null,
-        stage:'quote_generation_in_progress',
-        updated_at:new Date().toISOString()
-      }).eq('lead_id',lead.lead_id);
-      if(lqe) throw lqe;
+      if(!originEvent){
+        const {error:lqe}=await supabase.from('leads').update({
+          active_quotation_id:newQ.quotation_id,
+          client_id:clientId||lead.client_id||null,
+          stage:'quote_generation_in_progress',
+          updated_at:new Date().toISOString()
+        }).eq('lead_id',lead.lead_id);
+        if(lqe) throw lqe;
+      }
 
       setCreatedQuot(newQ);
       setStep(4);
@@ -5912,8 +5944,10 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     const newStage = isRevision ? 'revised_quote_sent' : 'quote_sent';
     const {error:qse}=await runDb(supabase.from('quotations').update({status:'sent',updated_at:new Date().toISOString()}).eq('quotation_id',createdQuot.quotation_id),'mark quotation sent');
     if(qse) return;
-    const {error:lse}=await runDb(supabase.from('leads').update({stage:newStage,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id),'update lead stage');
-    if(lse) return;
+    if(!originEvent){
+      const {error:lse}=await runDb(supabase.from('leads').update({stage:newStage,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id),'update lead stage');
+      if(lse) return;
+    }
     onComplete(createdQuot);
   };
 
