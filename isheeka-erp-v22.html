@@ -3007,6 +3007,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
   const [qSettings, setQSettings] = React.useState({});
   const [qActivity, setQActivity] = React.useState([]);
   const [qUserMap, setQUserMap] = React.useState({});
+  const [qActExpanded, setQActExpanded] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -3177,9 +3178,9 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
             {quot.status==='approved'&&!quot.event_id&&<div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:13}}>{'\u2705'} This quote is confirmed by the client. To change it, create a revision.</div>}
             {quot.status!=='draft'&&(
               <div style={{margin:'0 24px 12px',padding:'10px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)'}}>
-                <div style={{fontSize:12,fontWeight:600,color:'var(--grey-700)',marginBottom:6}}>Activity{(()=>{const s=qActivity.filter(a=>a.action==='sent');return s.length>0?(' · sent '+s.length+'×'+(s[0]?(' · last '+new Date(s[0].logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})):'')):'';})()}</div>
+                <div onClick={()=>setQActExpanded(v=>!v)} style={{fontSize:12,fontWeight:600,color:'var(--grey-700)',marginBottom:6,cursor:qActivity.length>1?'pointer':'default'}}>{qActivity.length>1?(qActExpanded?'▾ ':'▸ '):''}Activity{(()=>{const s=qActivity.filter(a=>a.action==='sent');return s.length>0?(' · sent '+s.length+'×'+(s[0]?(' · last '+new Date(s[0].logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})):'')):'';})()}</div>
                 {qActivity.length===0&&<div style={{fontSize:12,color:'var(--grey-400)'}}>No sends logged yet — sharing this quote via WhatsApp/Email from here will be recorded.</div>}
-                {qActivity.slice(0,8).map(a=>(
+                {(qActExpanded||qActivity.length<=1)&&qActivity.slice(0,8).map(a=>(
                   <div key={a.log_id} style={{fontSize:12,color:'var(--grey-500)',padding:'2px 0'}}>
                     {a.action==='sent'?('Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')))):a.action} · {new Date(a.logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}{a.logged_by&&qUserMap[a.logged_by]?(' · '+qUserMap[a.logged_by]):''}
                   </div>
