@@ -3416,8 +3416,8 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('email')}>Email</button>
               {quot.event_id&&!['approved','converted','rejected','expired','superseded'].includes(quot.status)&&<button className="btn primary" disabled={confirming} onClick={doConfirmQuote} title="Mark the quote confirmed and create the draft invoice">{confirming?'Confirming\u2026':'\u2705 Confirm & create invoice'}</button>}
               {(quot.status==='converted'||quot.event_id)&&<button className="btn sm" onClick={()=>{onClose&&onClose();onNavigate&&onNavigate('events',{eventId:quot.event_id});}}>Go to event {'\u2192'}</button>}
-              <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
-              <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
+              <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
+              <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
             </div>
           </div>
         )}
@@ -6892,7 +6892,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           const hasAmounts=ps.some(p=>parseFloat(p.amount)>0);
           // payment_terms_touched stays false on load so the terms text keeps auto-regenerating as the user
           // edits installment amounts in the revision (it only "sticks" once they hand-edit the terms box).
-          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:q.event_name||defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:false,payment_schedule_touched:hasAmounts,payment_schedule:ps.length>0?ps:f.payment_schedule}));
+          // event_name defaults to the "{Type} Event" formula (per the chosen rule), editable in step 3 —
+          // not the legacy stored name (older quotes carried the "{Client}'s {Type}" auto-name).
+          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:false,payment_schedule_touched:hasAmounts,payment_schedule:ps.length>0?ps:f.payment_schedule}));
           if(q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
         }
       });
@@ -7134,23 +7136,39 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     onComplete(createdQuot);
   };
 
-  const handleWhatsApp=()=>{
+  // Build the PDF items + settings, upload a hosted PDF, and return the share context (with the link).
+  const buildShareCtx=async()=>{
+    const pdfItems=subEventBlocks.flatMap(b=>(b.items||[]).filter(i=>i.description&&i.description.trim()).map(i=>({
+      sub_event_name:(b.name&&b.name.trim()&&b.name.trim().toLowerCase()!=='general items')?b.name.trim():null,
+      description:i.description, quantity:i.quantity, unit_price:i.unit_price,
+      amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
+    })));
+    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
+    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||''};
+    const url=await uploadQuotePdf(enrichedQuot, pdfItems, displayOpts, s||{});
+    return {s:s||{}, enrichedQuot, url};
+  };
+
+  const handleWhatsApp=async()=>{
     if(!createdQuot) return;
-    const msg='Dear '+lead.first_name+',\n\nPlease find quotation '+createdQuot.ref_number+' for your upcoming '+
-      (eventTypeLabel(lead.event_type)||'event')+'.\n\nGrand Total: Rs.'+parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')+
-      '\nValid until: '+fmtDate(createdQuot.valid_until,{day:'numeric',month:'short',year:'numeric'})+
-      '\n\nKindly confirm at your earliest convenience.\n\nWarm regards,\nTeam Isheeka Events\n+91 78423 95867';
+    notify('Preparing the quotation link\u2026','info');
+    const {s, enrichedQuot, url}=await buildShareCtx();
+    if(!url) notify('Couldn\'t attach the PDF link \u2014 sharing the message without it.','error');
+    const msg=buildQuoteShareMsg(enrichedQuot, s, url);
     openWhatsApp(lead.phone, msg);
     logQuoteSend(createdQuot.quotation_id, 'whatsapp');
   };
 
-  const handleEmailSend=(provider)=>{
+  const handleEmailSend=async(provider)=>{
     if(!createdQuot) return;
+    setEmailMenuOpen(false);
+    notify('Preparing the quotation link\u2026','info');
+    const {s, enrichedQuot, url}=await buildShareCtx();
+    if(!url) notify('Couldn\'t attach the PDF link \u2014 sharing the message without it.','error');
     const subject='Quotation '+createdQuot.ref_number+' \u2014 Isheeka Events';
-    const bodyTxt='Dear '+lead.first_name+',\n\nPlease find the quotation for your upcoming event.\n\nQuotation: '+createdQuot.ref_number+'\nGrand Total: Rs.'+parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')+'\n\nKindly confirm at your earliest convenience.\n\nWarm regards,\nTeam Isheeka Events';
+    const bodyTxt=buildQuoteShareMsg(enrichedQuot, s, url);
     openEmail(provider, lead.email||'', subject, bodyTxt);
     logQuoteSend(createdQuot.quotation_id, 'email');
-    setEmailMenuOpen(false);
   };
 
   const handleQuotePDF=async(action)=>{
@@ -7161,7 +7179,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       quantity:i.quantity, unit_price:i.unit_price,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
-    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro').single();
+    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
     const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||''};
     buildQuotationPDF(enrichedQuot,pdfItems,{action,displayOpts,settings:s||{}});
   };
@@ -7423,6 +7441,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
               </div>
               <button className="btn primary" style={{width:'100%',maxWidth:420,padding:'12px'}} onClick={handleMarkSent}>
                 {originEvent ? 'Mark quotation as sent' : 'Mark as sent — update lead stage'}
+              </button>
+              <button className="btn" style={{width:'100%',maxWidth:420,padding:'10px',marginTop:8}} onClick={()=>onComplete(createdQuot)}>
+                Close — I'll mark it sent later
               </button>
             </div>
           )}
