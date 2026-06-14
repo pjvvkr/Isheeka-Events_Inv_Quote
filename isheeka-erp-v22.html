@@ -8678,7 +8678,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           // not the legacy stored name (older quotes carried the "{Client}'s {Type}" auto-name).
           const _mAdj=(parseFloat(q.discount_amount)||0)!==0 && (!q.discount_pct||parseFloat(q.discount_pct)===0);
           const _ovPrefill=_mAdj?String(Math.round((parseFloat(q.grand_total)!=null?parseFloat(q.grand_total):((parseFloat(q.subtotal)||0)-(parseFloat(q.discount_amount)||0))))):'';
-          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,total_override:_ovPrefill,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:false,payment_schedule_touched:hasAmounts,payment_schedule:ps.length>0?ps:f.payment_schedule}));
+          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,total_override:_ovPrefill,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:false,payment_schedule_touched:false,payment_schedule:ps.length>0?ps:f.payment_schedule}));
           if(q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
         }
       });
@@ -8709,6 +8709,10 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     setQuotDetails(f=>{
       if(f.payment_schedule_touched) return f;
       const sch=f.payment_schedule||[]; if(!sch.length||grand<=0) return f;
+      // Preserve exact loaded amounts on mount (no rounding drift): only re-proportion when the schedule
+      // no longer sums to the grand total — i.e. the total actually changed (override/discount/items).
+      const allocated=sch.reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+      if(Math.abs(allocated-grand)<1) return f;
       let acc=0;
       const filled=sch.map((p,i)=>{ if(i===sch.length-1){ return {...p,amount:Math.max(0,grand-acc)}; } const a=Math.round(grand*(parseFloat(p.pct)||0)/100); acc+=a; return {...p,amount:a}; });
       return {...f, payment_schedule:filled, payment_terms: f.payment_terms_touched?f.payment_terms:buildPaymentTermsText(filled)};
