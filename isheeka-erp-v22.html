@@ -395,7 +395,8 @@ function TemplateEditor({template, onSave, onCancel}) {
     finally { setSaving(false); }
   };
 
-  const typeOpts = [{value:'wedding',label:'Wedding'},{value:'corporate',label:'Corporate'},{value:'birthday',label:'Birthday'},{value:'anniversary',label:'Anniversary'},{value:'other',label:'Other'}];
+  const eventTypes = useEventTypes();
+  const typeOpts = eventTypes.map(t=>({value:t.value,label:t.label}));
 
   if(loading) return <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>;
 
