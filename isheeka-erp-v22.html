@@ -5913,13 +5913,14 @@ function Dashboard({ user, onNavigate }) {
       supabase.from('leads').select('stage').eq('is_deleted',false),
       supabase.from('events').select('event_id,name,ref_number,main_date,status,client_name').eq('is_deleted',false),
       supabase.from('quotations').select('grand_total,doc_date,status').eq('is_deleted',false),
-      supabase.from('invoice_payments').select('amount,payment_date'),
+      supabase.from('invoice_payments').select('amount,payment_date,invoice_id'),
       supabase.from('invoices').select('invoice_id,ref_number,client_name,event_name,total_outstanding,status').eq('is_deleted',false),
     ]);
+    const cancelledInv={}; (invs||[]).forEach(i=>{ if(i.status==='cancelled') cancelledInv[i.invoice_id]=true; });
     const activeLeads=(leads||[]).filter(l=>!['lost','event_triggered'].includes(l.stage)).length;
     const up=(events||[]).filter(e=>e.main_date&&e.main_date>=todayStr&&!['completed','cancelled'].includes(e.status)).sort((a,b)=>a.main_date.localeCompare(b.main_date));
     const quotedMonth=(quotes||[]).filter(q=>q.status!=='superseded'&&q.doc_date&&q.doc_date.slice(0,7)===monthStr).reduce((s,q)=>s+(parseFloat(q.grand_total)||0),0);
-    const collectedMonth=(pays||[]).filter(p=>p.payment_date&&p.payment_date.slice(0,7)===monthStr).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+    const collectedMonth=(pays||[]).filter(p=>p.payment_date&&p.payment_date.slice(0,7)===monthStr&&!cancelledInv[p.invoice_id]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
     const out=(invs||[]).filter(i=>!['paid','cancelled'].includes(i.status)&&(parseFloat(i.total_outstanding)||0)>0).sort((a,b)=>(parseFloat(b.total_outstanding)||0)-(parseFloat(a.total_outstanding)||0));
     setStats({activeLeads,upcomingCount:up.length,quotedMonth,collectedMonth});
     setUpcoming(up.slice(0,5)); setOutstanding(out.slice(0,5)); setLoading(false);
