@@ -2250,7 +2250,6 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [checklist, setChecklist] = React.useState([]);
   const [quotations, setQuotations] = React.useState([]);
   const [linkedLead, setLinkedLead] = React.useState(null);
-  const [viewQuotId, setViewQuotId] = React.useState(null);
   const [showOldQuotes, setShowOldQuotes] = React.useState(false);
   const [genInv, setGenInv] = React.useState(false);
   const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
@@ -3312,82 +3311,8 @@ function LeadSELocInput({value,onChange}) {
   return <input className="field-input" style={{width:160}} value={value||''} onChange={e=>onChange(e.target.value)} placeholder="Location"/>;
 }
 
-// ── Client Match Modal ────────────────────────────────────────────────────────
-function ClientMatchModal({matches, lead, onLink, onCreateNew, onCancel}) {
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:"white",borderRadius:"var(--radius-xl)",width:"100%",maxWidth:480,boxShadow:"var(--shadow-lg)",overflow:"hidden"}}>
-        <div style={{padding:"18px 24px",borderBottom:"1px solid var(--grey-100)"}}>
-          <div style={{fontSize:15,fontWeight:600,color:"var(--grey-800)",marginBottom:4}}>Existing client{matches.length>1?"s":""} found</div>
-          <div style={{fontSize:13,color:"var(--grey-400)"}}>A client with phone <strong>{lead.phone}</strong> already exists. Link this event to them, or create a new client record.</div>
-        </div>
-        <div style={{padding:"16px 24px",maxHeight:280,overflowY:"auto"}}>
-          {matches.map(c=>(
-            <div key={c.client_id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderRadius:"var(--radius-md)",border:"1px solid var(--grey-100)",marginBottom:8}}>
-              <div>
-                <div style={{fontSize:13,fontWeight:500,color:"var(--grey-800)"}}>{c.first_name} {c.last_name}{c.ref_number&&<span style={{fontSize:11,color:"var(--grey-400)",marginLeft:6}}>{c.ref_number}</span>}</div>
-                <div style={{fontSize:12,color:"var(--grey-400)",marginTop:2}}>{c.phone_1}{c.email_1?" · "+c.email_1:""}</div>
-              </div>
-              <button className="btn sm" style={{background:"var(--pink)",color:"white",border:"none",flexShrink:0}} onClick={()=>onLink(c.client_id)}>Link to this client</button>
-            </div>
-          ))}
-        </div>
-        <div style={{padding:"14px 24px",borderTop:"1px solid var(--grey-100)",display:"flex",justifyContent:"space-between",gap:8}}>
-          <button className="btn" onClick={onCancel}>Cancel</button>
-          <button className="btn" onClick={onCreateNew}>Create new client instead</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Quotation Detail Modal (item 6) ──────────────────────────────────────────
-function QuotationDetailModal({quotationId, onClose, onNavigate}) {
-  const [quot, setQuot] = React.useState(null);
-  const [items, setItems] = React.useState([]);
-  const [qSettings, setQSettings] = React.useState({});
-  const [qActivity, setQActivity] = React.useState([]);
-  const [qUserMap, setQUserMap] = React.useState({});
-  const [qActExpanded, setQActExpanded] = React.useState(false);
-  const [sharing, setSharing] = React.useState(false);
-  const [confirming, setConfirming] = React.useState(false);
-  const [loading, setLoading] = React.useState(true);
-  const [modalDisplayOpts, setModalDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false});
-  const setMDO=(k,v)=>setModalDisplayOpts(o=>({...o,[k]:v}));
-  const applyModalPreset=(p)=>{
-    if(p==='full') setModalDisplayOpts({prices:true,qty:true,grouping:true,schedule:true,discount:true});
-    else if(p==='items') setModalDisplayOpts({prices:false,qty:true,grouping:true,schedule:true,discount:false});
-    else if(p==='summary') setModalDisplayOpts({prices:false,qty:false,grouping:true,schedule:false,discount:false});
-  };
-  const doShare = async (channel) => {
-    if(sharing||!quot) return;
-    if(channel==='whatsapp' && !validClientPhone(quot.client_phone)){ notify("This client's phone number looks invalid — please update it before sharing on WhatsApp.",'error'); return; }
-    if((channel==='gmail'||channel==='email') && !quot.client_email){ notify('This client has no email address on file.','error'); return; }
-    setSharing(true);
-    notify('Preparing the quotation PDF…','info',2500);
-    const url = await uploadQuotePdf(quot, items, modalDisplayOpts, qSettings);
-    if(!url) notify('Couldn\'t attach the PDF link — sharing the message; you can attach the downloaded PDF manually.','error');
-    const msg = buildQuoteShareMsg(quot, qSettings, url);
-    if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
-    else openEmail(channel==='gmail'?'gmail':'default', quot.client_email, 'Quotation '+quot.ref_number+' — Isheeka Events', msg);
-    await logQuoteSend(quot.quotation_id, channel==='whatsapp'?'whatsapp':'email');
-    const {data:qact}=await supabase.from('quotation_activity_log').select('*').eq('quotation_id',quot.quotation_id).order('logged_at',{ascending:false});
-    setQActivity(qact||[]);
-    setSharing(false);
-  };
-  // Path B — confirm an event-origin quote: mark approved + auto-create the draft invoice,
-  // then jump to the event so the new invoice is visible. (Lead-origin quotes confirm on
-  // the lead and invoice at conversion instead.)
-  const doConfirmQuote = async () => {
-    if(confirming||!quot) return;
-    setConfirming(true);
-    const {error}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id);
-    if(error){ notify('Could not confirm the quote: '+(error.message||'Please try again.'),'error'); setConfirming(false); return; }
-    const inv = await createInvoiceFromQuote(quot.quotation_id,{eventId:quot.event_id});
-    setConfirming(false);
-    if(inv){ onClose&&onClose(); onNavigate&&onNavigate('events',{eventId:quot.event_id}); }
-    else { setQuot(q=>({...q,status:'approved'})); }
-  };
+// ── Quotation Detail Modal (item 6) — REMOVED (dead code; replaced by QuotationDetail page) ──
+function QuotationDetailModal(){ return null; /* dead code removed — superseded by QuotationDetail page
   React.useEffect(()=>{
     let alive=true;
     (async()=>{
@@ -3539,11 +3464,7 @@ function QuotationDetailModal({quotationId, onClose, onNavigate}) {
               <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
             </div>
           </div>
-        )}
-      </div>
-    </div>
-  );
-}
+*/ }
 
 // ── Lead Detail ───────────────────────────────────────────────────────────────
 function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavigate}) {
@@ -3553,12 +3474,9 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   const [mode, setMode] = React.useState('view');
   const [saving, setSaving] = React.useState(false);
   const [showLoss, setShowLoss] = React.useState(false);
-  const [showConvert, setShowConvert] = React.useState(false);
   const [showWelcome, setShowWelcome] = React.useState(false);
   const [convertedEventId, setConvertedEventId] = React.useState(null);
-  const [viewQuotId, setViewQuotId] = React.useState(null);
   const [showOldQuotes, setShowOldQuotes] = React.useState(false);
-  const [clientMatches, setClientMatches] = React.useState(null);
   const [convertClientOutcome, setConvertClientOutcome] = React.useState(null); // {type:'created'|'reused', name:string}
   const [showLostConfirm, setShowLostConfirm] = React.useState(false);
   const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
@@ -3718,33 +3636,8 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   // Phone normalization for client dedup
   const normPhone = (s) => (s||'').replace(/\D/g,'').replace(/^91(\d{10})$/,'$1');
 
-  // Step 1 of convert: check for phone matches, show modal if needed
-  const handleConvertInitiate = async () => {
-    setShowConvert(false);
-    // If lead already has a client_id, skip match check
-    if(lead.client_id){ await handleConvert(lead.client_id); return; }
-    if(!lead.phone){ await handleConvert(null); return; }
-    const normalized = normPhone(lead.phone);
-    const {data:allClients} = await supabase.from('clients').select('client_id,first_name,last_name,phone_1,email_1,ref_number').eq('is_deleted',false).neq('status','inactive');
-    const matches = (allClients||[]).filter(c=>normPhone(c.phone_1)===normalized);
-    if(matches.length===0){ await handleConvert(null); return; }
-    setClientMatches(matches); // show match modal
-  };
-
-  const handleConvert = async (forcedClientId) => {
-    setClientMatches(null);
-    try {
-      const res = await createEventFromQuote(lead, {forcedClientId});
-      setConvertedEventId(res.eventId);
-      setConvertClientOutcome({type:res.clientOutcome, name:res.clientName});
-      setShowConvert(false);
-      setShowWelcome(true);
-      await loadLead();
-    } catch(err){
-      console.error('[Isheeka ERP] lead conversion failed:', err);
-      notify('Could not convert lead: '+(err&&err.message?err.message:'Please try again.'),'error');
-    }
-  };
+  // (lead-origin conversion now lives on the quote page via createEventFromQuote; the
+  //  in-lead convert flow + its ConvertLeadModal/ClientMatchModal mounts were removed.)
 
   if(loading) return <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>;
   if(!lead) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>Lead not found.</div>;
@@ -3787,8 +3680,6 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
         onComplete={async()=>{ setShowQuoteWizard(false); await loadLead(); }}
         onCancel={()=>setShowQuoteWizard(false)}
       />}
-      {showConvert&&<ConvertLeadModal lead={lead} onConfirm={handleConvertInitiate} onCancel={()=>setShowConvert(false)}/>}
-      {clientMatches&&clientMatches.length>0&&<ClientMatchModal matches={clientMatches} lead={lead} onLink={(cid)=>handleConvert(cid)} onCreateNew={()=>handleConvert(null)} onCancel={()=>setClientMatches(null)}/>}
       {showWelcome&&<WelcomeMessageModal
         lead={lead}
         quotRef={(leadQuotations.find(q=>q.quotation_id===lead.active_quotation_id)||{}).ref_number}
