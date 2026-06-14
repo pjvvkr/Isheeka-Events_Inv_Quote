@@ -6887,15 +6887,15 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     const clh=104, clw=clh*LAR; try{ doc.addImage(LOGO,'PNG',(W-clw)/2,66,clw,clh); }catch(e){}
     let y=206;
     script(46); setText(PINK); doc.text('Isheeka Events', W/2, y, {align:'center'}); y+=22;
-    sans('italic',12); setText(MUTED); doc.text('Making Every Event Memorable', W/2, y, {align:'center'}); y+=16;
+    sans('italic',12); setText(MUTED); doc.text('Making Every Event Memorable', W/2, y, {align:'center'}); y+=27;
     script(15); setText(PINK); doc.text('Since 2017', W/2, y, {align:'center'}); y+=28;
     setDraw(PINK); doc.setLineWidth(1.4); doc.line(W/2-45,y,W/2+45,y); y+=36;
     sans('bold',11); setText(PINK);
     const pillTxt=label+'  ·  '+(quot.ref_number||''); const pw=doc.getTextWidth(pillTxt)+36;
     setDraw(PINK); doc.setLineWidth(1.2); doc.roundedRect((W-pw)/2,y,pw,24,12,12,'S');
     doc.text(pillTxt, W/2, y+16, {align:'center'}); y+=58;
-    sans('bold',9); setText(PINK); doc.text('PREPARED FOR', W/2, y, {align:'center'}); y+=16;
-    sans('bold',16); setText(INK); doc.text(String(quot.event_name||''), W/2, y, {align:'center'}); y+=16;
+    sans('bold',9); setText(PINK); doc.text('PREPARED FOR', W/2, y, {align:'center'}); y+=25;
+    sans('bold',16); setText(PINK); doc.text(String(quot.event_name||''), W/2, y, {align:'center'}); y+=16;
     sans('normal',11); setText(MUTED);
     doc.text(fmt(quot.doc_date), W/2, y, {align:'center'}); y+=36;
     const introTpl = settings.cover_intro || 'Thank you for choosing Isheeka Events to be part of your celebration. Every occasion tells a story, and it is our privilege to help bring yours to life with care, creativity, and attention to the smallest detail.\n\nThe pages that follow set out the details, prepared thoughtfully for {event}. Should you wish to adjust anything, we would be delighted to tailor it to your vision.';
@@ -6918,7 +6918,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   let y=HDR_BOTTOM+8;
   const gap=14, cardW=(W-2*M-gap)/2, cardH=68;
   const card=(x,lbl,name,lines)=>{
-    setDraw(LINE); doc.setLineWidth(0.8); doc.roundedRect(x,y,cardW,cardH,6,6,'S');
+    setDraw(PINK); doc.setLineWidth(0.8); doc.roundedRect(x,y,cardW,cardH,6,6,'S');
     sans('bold',8); setText(PINK); doc.text(lbl, x+12, y+16);
     sans('bold',12); setText(INK); doc.text(doc.splitTextToSize(String(name||'--'),cardW-24)[0], x+12, y+32);
     sans('normal',9); setText(MUTED);
@@ -6946,9 +6946,17 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   const colStyles={0:{cellWidth:'auto'}};
   let ci=1; if(showQty){ colStyles[ci]={halign:'right',cellWidth:55}; ci++; }
   if(showPrices){ colStyles[ci]={halign:'right',cellWidth:95}; ci++; colStyles[ci]={halign:'right',cellWidth:95}; }
+  const sub=parseFloat(quot.subtotal)||0, disc=parseFloat(quot.discount_amount)||0;
+  const grand=parseFloat(quot.grand_total)||(sub-disc);
+  let ps=quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} } ps=Array.isArray(ps)?ps:[];
+  // Reserve room at the page bottom so the pricing summary + schedule never land alone atop a fresh page —
+  // autotable then breaks earlier and pulls the last item rows onto the page that carries the summary.
+  const schedH=(dOpts.schedule&&ps.length)?(16+26*ps.length):0;
+  let sumH=16+40; if(showPrices){ sumH+=15+((dOpts.discount&&disc>0)?15:0)+((isInv&&quot.gst_applicable)?15:0)+2; } if(isInv){ sumH+=32; }
+  const blockH=Math.max(schedH,sumH)+26;
   doc.autoTable({
-    head:[head], body:body, startY:y, margin:{left:M,right:M,top:HDR_BOTTOM-2,bottom:58},
-    theme:'grid',
+    head:[head], body:body, startY:y, margin:{left:M,right:M,top:HDR_BOTTOM-2,bottom:58+blockH+24},
+    theme:'grid', tableLineColor:PINK, tableLineWidth:0.8,
     styles:{fontSize:9,cellPadding:7,lineColor:LINE,lineWidth:0.4,textColor:INK},
     headStyles:{fillColor:PINK,textColor:[255,255,255],fontSize:9,halign:'left'},
     alternateRowStyles:{fillColor:[252,252,252]},
@@ -6958,11 +6966,8 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   });
   y=doc.lastAutoTable.finalY+24;
 
-  // Totals + schedule
-  const sub=parseFloat(quot.subtotal)||0, disc=parseFloat(quot.discount_amount)||0;
-  const grand=parseFloat(quot.grand_total)|| (sub-disc);
-  let ps=quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} } ps=Array.isArray(ps)?ps:[];
-  const needH=130; if(H-58-y < needH){ doc.addPage(); drawFrame(); drawHeaderBand(); y=HDR_BOTTOM+8; }
+  // Totals + schedule — sub/disc/grand/ps/blockH computed above (drives the bottom reserve). Safety net only.
+  if(H-58-y < blockH){ doc.addPage(); drawFrame(); drawHeaderBand(); y=HDR_BOTTOM+8; }
   const colY=y, leftX=M, rightX=W/2+14, rr=W-M;
   // schedule (left)
   let sy=colY;
