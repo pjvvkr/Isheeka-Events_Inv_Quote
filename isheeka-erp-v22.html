@@ -755,7 +755,8 @@ function EventTypesTab() {
     if(!newLabel.trim()){setAddError('Label is required');return;}
     const val = newLabel.trim().toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
     if(!val){setAddError('Enter a valid label');return;}
-    if(types.some(t=>t.value===val)){setAddError('That event type already exists');return;}
+    const dup = types.find(t=>t.value===val || (t.label||'').trim().toLowerCase()===newLabel.trim().toLowerCase());
+    if(dup){ setAddError('"'+(dup.label||val)+'" already exists'+(dup.is_active?'.':' but is inactive — reactivate it below instead of re-adding.')); return; }
     setSaving(true);
     const {error:eie}=await runDb(supabase.from('event_types').insert({
       label:newLabel.trim(), value:val,
