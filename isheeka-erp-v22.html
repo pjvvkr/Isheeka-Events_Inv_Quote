@@ -3345,6 +3345,22 @@ const LEAD_LOSS_REASONS = [
   {value:'out_of_service_area',label:'Out of service area'},
   {value:'other',label:'Other'},
 ];
+// Reasons for closing a quote as "not proceeding", split by who walked away.
+const REJECT_REASONS = {
+  client: [{value:'price_too_high',label:'Price too high'},{value:'went_with_competitor',label:'Went with competitor'},{value:'event_postponed',label:'Event postponed'},{value:'no_response',label:'No response / went quiet'},{value:'changed_plans',label:'Changed plans'},{value:'other',label:'Other'}],
+  us: [{value:'scheduling_conflict',label:'Scheduling conflict'},{value:'capacity',label:'No capacity / overbooked'},{value:'out_of_service_area',label:'Out of service area'},{value:'other',label:'Other'}]
+};
+function mapLostReason(outcome, reason){ if(outcome==='us'){ return reason==='out_of_service_area'?'out_of_service_area':'other'; } const ok=['price_too_high','went_with_competitor','event_postponed','no_response','other']; return ok.includes(reason)?reason:'other'; }
+// Close a quote as not-proceeding: quote→rejected, log the reason, and (lead-origin) mark the lead lost.
+async function closeQuoteNotProceeding(quot, opts){
+  const outcome=(opts&&opts.outcome)||'client', reason=(opts&&opts.reason)||'other', notes=((opts&&opts.notes)||'').trim();
+  const list=REJECT_REASONS[outcome]||REJECT_REASONS.client; const rLabel=(list.find(r=>r.value===reason)||{}).label||reason;
+  const who=outcome==='us'?'We withdrew':'Client declined'; const summary=who+' — '+rLabel+(notes?(': '+notes):'');
+  const {error}=await supabase.from('quotations').update({status:'rejected',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id); if(error) throw error;
+  try{ await supabase.from('quotation_activity_log').insert({quotation_id:quot.quotation_id, action:'rejected', notes:summary, logged_by:await _currentUid()}); }catch(e){}
+  if(quot.lead_id){ try{ await supabase.from('leads').update({stage:'lost', lost_reason:mapLostReason(outcome,reason), lost_notes:summary, updated_at:new Date().toISOString()}).eq('lead_id',quot.lead_id); }catch(e){} }
+  return summary;
+}
 const LEAD_SOURCES_DEFAULT = [
   {value:'phone',label:'Phone call'},
   {value:'whatsapp',label:'WhatsApp'},
@@ -4044,9 +4060,16 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       lost_at:new Date().toISOString(),updated_at:new Date().toISOString()
     }).eq('lead_id',leadId),'mark lead as lost');
     if(lle) return;
+    // Sync: reject the lead's active quote so quote + lead don't diverge.
+    const activeQ=(leadQuotations||[]).find(q=>!['superseded','rejected','expired','converted','invoiced'].includes(q.status));
+    if(activeQ){
+      const rl=(LEAD_LOSS_REASONS.find(r=>r.value===reason)||{}).label||reason;
+      await supabase.from('quotations').update({status:'rejected',updated_at:new Date().toISOString()}).eq('quotation_id',activeQ.quotation_id);
+      try{ await supabase.from('quotation_activity_log').insert({quotation_id:activeQ.quotation_id, action:'rejected', notes:'Lead marked lost — '+rl+(notes?(': '+notes):''), logged_by:await _currentUid()}); }catch(e){}
+    }
     setShowLoss(false);
     await loadLead();
-    setSuccessMsg('Lead marked as lost.');
+    setSuccessMsg('Lead marked as lost.'+(activeQ?' Active quote '+activeQ.ref_number+' rejected.':''));
     setTimeout(()=>setSuccessMsg(''),4000);
   };
 
@@ -4908,6 +4931,15 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:true});
   const [revHistory, setRevHistory] = React.useState([]);
   const [includeRevHistory, setIncludeRevHistory] = React.useState(true);
+  const [showClose, setShowClose] = React.useState(false);
+  const [closeForm, setCloseForm] = React.useState({outcome:'client',reason:'',notes:''});
+  const [closing, setClosing] = React.useState(false);
+  const doCloseQuote = async () => {
+    if(!closeForm.reason){ notify('Pick a reason.','error'); return; }
+    setClosing(true);
+    try{ await closeQuoteNotProceeding(quot,closeForm); setShowClose(false); setClosing(false); notify('Quote closed as not proceeding.','success'); loadAll(); }
+    catch(err){ setClosing(false); notify('Could not close the quote: '+(err&&err.message?err.message:'try again'),'error'); }
+  };
   const [showWizard, setShowWizard] = React.useState(false);
   const [wizardCtx, setWizardCtx] = React.useState(null);
   const [showConvert, setShowConvert] = React.useState(false);
@@ -5078,10 +5110,12 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
           {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
           {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id})}>Go to event →</button>}
+          {!quot.event_id&&!['rejected','converted','expired','superseded'].includes(quot.status)&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={()=>{setCloseForm({outcome:'client',reason:'',notes:''});setShowClose(true);}} title="Client declined or we can't fulfil — close this quote">✕ Close — not proceeding</button>}
         </div>
       </div>
 
       {/* Status banners */}
+      {quot.status==='rejected'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--red-light)',color:'var(--red)',borderRadius:'var(--radius-sm)',fontSize:12}}>✕ <b>This quote was closed — not proceeding.</b>{(()=>{const r=(qActivity||[]).find(a=>a.action==='rejected'&&a.notes);return r?(' '+r.notes):'';})()} To pursue again, revise or generate a new quote.</div>}
       {srcEvent&&(srcEvent.status||'').toLowerCase()==='cancelled'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--red-light)',color:'var(--red)',borderRadius:'var(--radius-sm)',fontSize:12}}>⛔ The event created from this quote (<b>{srcEvent.ref_number}</b>) has been cancelled. This quote is kept for record only.</div>}
       {(quot.status==='converted'||quot.event_id)&&!invoiceIssued&&(!srcEvent||(srcEvent.status||'').toLowerCase()!=='cancelled')&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:12}}>📅 An event has been created from this quote. Changes flow through the event.</div>}
       {invoiceIssued&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>🔒 An invoice has been issued — this quote is locked. To change scope or pricing, revise the invoice.</div>}
@@ -5169,6 +5203,26 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
               {a.action==='sent'?('Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')))):a.action} · {new Date(a.logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}{a.logged_by&&qUserMap[a.logged_by]?(' · '+qUserMap[a.logged_by]):''}
             </div>
           ))}
+        </div>
+      )}
+      {showClose&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1300,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'50px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget)setShowClose(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:460}}>
+            <div style={{padding:'14px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Close quote — not proceeding <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {quot.ref_number}</span></div>
+            <div style={{padding:20}}>
+              <div style={{fontSize:12,color:'var(--grey-500)',marginBottom:10}}>Marks this quote <b>Rejected</b>{quot.lead_id?' and the source lead Lost':''}. Terminal — to pursue again, revise or create a new quote.</div>
+              <label className="field-label">What happened?</label>
+              <div style={{display:'flex',gap:6,marginBottom:12}}>
+                <button className={'btn sm'+(closeForm.outcome==='client'?' primary':'')} style={{flex:1}} onClick={()=>setCloseForm(f=>({...f,outcome:'client',reason:''}))}>Client declined</button>
+                <button className={'btn sm'+(closeForm.outcome==='us'?' primary':'')} style={{flex:1}} onClick={()=>setCloseForm(f=>({...f,outcome:'us',reason:''}))}>We withdrew / can't fulfil</button>
+              </div>
+              <label className="field-label">Reason <span style={{color:'var(--pink)'}}>*</span></label>
+              <select className="field-input" value={closeForm.reason} onChange={e=>setCloseForm(f=>({...f,reason:e.target.value}))}><option value="">Select a reason…</option>{(REJECT_REASONS[closeForm.outcome]||[]).map(r=><option key={r.value} value={r.value}>{r.label}</option>)}</select>
+              <label className="field-label" style={{marginTop:10}}>Notes</label>
+              <textarea className="field-textarea" rows={2} value={closeForm.notes} onChange={e=>setCloseForm(f=>({...f,notes:e.target.value}))} placeholder="Optional context"/>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setShowClose(false)}>Cancel</button><button className="btn primary" disabled={closing||!closeForm.reason} style={{background:'var(--red)',borderColor:'var(--red)'}} onClick={doCloseQuote}>{closing?'Closing…':'Close quote'}</button></div>
+          </div>
         </div>
       )}
     </div>
