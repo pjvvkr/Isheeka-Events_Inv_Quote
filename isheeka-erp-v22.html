@@ -8122,7 +8122,9 @@ async function createInvoiceFromQuote(quotationId, opts={}) {
     // Draft + unpaid → refresh it in place from the newly-confirmed quote (decision #12).
     // Preserve invoice-level settings (GST toggle/%, discount); refresh quote-derived items + installments; keep same ref; don't bump revision_number.
     const {data:qitems} = await supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order');
-    const rSub=parseFloat(quot.subtotal||0), rDisc=parseFloat(existing.discount_amount||0);
+    // Pull subtotal AND the signed adjustment from the (revised) QUOTE so the invoice tracks total changes;
+    // keep the invoice's own GST toggle/% and add GST on top. (Bug fix: previously used the invoice's stale discount.)
+    const rSub=parseFloat(quot.subtotal||0), rDisc=parseFloat(quot.discount_amount||0);
     const rTaxable=Math.max(0,rSub-rDisc);
     const rTax=existing.gst_applicable?Math.round(rTaxable*(parseFloat(existing.gst_pct)||0)/100):0;
     const rGrand=rTaxable+rTax;
@@ -8131,7 +8133,7 @@ async function createInvoiceFromQuote(quotationId, opts={}) {
     await supabase.from('invoice_installments').update({is_deleted:true}).eq('invoice_id',existing.invoice_id);
     let rps=quot.payment_schedule; if(typeof rps==='string'){ try{rps=JSON.parse(rps||'[]');}catch(e){rps=[];} } rps=Array.isArray(rps)?rps:[];
     if(rps.length){ await supabase.from('invoice_installments').insert(rps.map((p,idx)=>{ const pct=parseFloat(p.pct)||0; const amt=(parseFloat(p.amount)>0)?Math.round(parseFloat(p.amount)):Math.round(rGrand*pct/100); return {invoice_id:existing.invoice_id,installment_number:idx+1,percentage:pct,label:p.label||('Installment '+(idx+1)),when_text:p.when||'',amount_due:amt,amount_paid:0,balance:amt,status:'pending'}; })); }
-    const {error:rue}=await supabase.from('invoices').update({quotation_id:quotationId,event_name:quot.event_name||null,client_name:quot.client_name||null,subtotal:rSub,tax_amount:rTax,grand_total:rGrand,total_outstanding:rGrand,source_quote_total:parseFloat(quot.grand_total||0),updated_at:new Date().toISOString()}).eq('invoice_id',existing.invoice_id);
+    const {error:rue}=await supabase.from('invoices').update({quotation_id:quotationId,event_name:quot.event_name||null,client_name:quot.client_name||null,subtotal:rSub,discount_amount:rDisc,tax_amount:rTax,grand_total:rGrand,total_outstanding:rGrand,source_quote_total:parseFloat(quot.grand_total||0),updated_at:new Date().toISOString()}).eq('invoice_id',existing.invoice_id);
     if(rue){ notify('Could not refresh the draft invoice: '+(rue.message||''),'error'); return existing; }
     try{ await logInvoiceActivity(existing.invoice_id,{action:'auto_refresh',field:'grand_total',old_value:'₹'+(parseFloat(existing.grand_total)||0).toLocaleString('en-IN'),new_value:'₹'+rGrand.toLocaleString('en-IN'),reason:'Synced to confirmed quote '+(quot.ref_number||''),revision_number:existing.revision_number||0}); }catch(e){}
     notify('Draft invoice '+existing.ref_number+' refreshed from the updated quote.','success');
@@ -8922,6 +8924,22 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
         // Revising a quote that already has an event (lead-origin, post-conversion): keep the lead pointing
         // at the newest revision so it doesn't surface the superseded original. Stage is left as-is (converted).
         try{ await supabase.from('leads').update({active_quotation_id:newQ.quotation_id,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id); }catch(e){ console.error('[Isheeka ERP] lead active-quote repoint failed:', e); }
+      }
+
+      // Auto-sync the draft invoice to this revision (with a confirm popup). Safe while the invoice is a
+      // draft — nothing has been sent to the client. Declining leaves the manual "Confirm" path + banner.
+      if(isRevision && originEvent && originEvent.eventId){
+        try{
+          const {data:exInv}=await supabase.from('invoices').select('invoice_id,ref_number,status,total_received').eq('event_id',originEvent.eventId).eq('is_deleted',false).neq('status','cancelled').limit(1);
+          const di=exInv&&exInv[0];
+          if(di && (di.status||'').toLowerCase()==='draft' && (parseFloat(di.total_received)||0)<=0){
+            if(window.confirm('Update draft invoice '+di.ref_number+' to match this revision (₹'+Math.round(grandTotal).toLocaleString('en-IN')+')?\n\nThis refreshes its items, totals and schedule. The invoice is still a draft — nothing has been sent to the client.')){
+              await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',newQ.quotation_id);
+              newQ.status='approved';
+              await createInvoiceFromQuote(newQ.quotation_id,{eventId:originEvent.eventId});
+            }
+          }
+        }catch(e){ console.error('[Isheeka ERP] revision invoice auto-sync failed:', e); }
       }
 
       setCreatedQuot(newQ);
