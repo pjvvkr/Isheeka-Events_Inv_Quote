@@ -2630,6 +2630,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [rebuildDismissed, setRebuildDismissed] = React.useState(false);
   const [invHandling, setInvHandling] = React.useState({}); // invoice_id -> {mode:'refund'|'retain', amount}
   const [venHandling, setVenHandling] = React.useState({}); // event_vendor_id -> {mode:'recover'|'lost', amount}
+  const [leadAction, setLeadAction] = React.useState('leave'); // leave | reopen | lost
   const cancelInvList = (invoices||[]).filter(i=>i.status!=='cancelled' && (parseFloat(i.total_received)||0)>0);
   const cancelVenList = (eventVendors||[]).filter(v=>(parseFloat(v.total_paid)||0)>0);
   const cancelChoicesComplete = cancelInvList.every(i=>invHandling[i.invoice_id]&&invHandling[i.invoice_id].mode) && cancelVenList.every(v=>venHandling[v.event_vendor_id]&&venHandling[v.event_vendor_id].mode);
@@ -2637,7 +2638,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     setCancelReason('');
     const ih={}; cancelInvList.forEach(i=>{ ih[i.invoice_id]={mode:'',amount:String(Math.round(parseFloat(i.total_received)||0))}; });
     const vh={}; cancelVenList.forEach(v=>{ vh[v.event_vendor_id]={mode:'',amount:String(Math.round(parseFloat(v.total_paid)||0))}; });
-    setInvHandling(ih); setVenHandling(vh); setShowCancel(true);
+    setInvHandling(ih); setVenHandling(vh); setLeadAction('leave'); setShowCancel(true);
     const {data}=await supabase.from('expenses').select('amount').eq('event_id',eventId).eq('is_deleted',false);
     setExpTotal((data||[]).reduce((s,x)=>s+(parseFloat(x.amount)||0),0));
   };
@@ -2665,7 +2666,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       }
       if(linkedLead&&linkedLead.lead_id){
         const note='[Event '+(event.ref_number||'')+' cancelled '+todayLocalStr()+': '+cancelReason.trim()+']';
-        await supabase.from('leads').update({notes:(linkedLead.notes?(linkedLead.notes+'\n'+note):note),updated_at:new Date().toISOString()}).eq('lead_id',linkedLead.lead_id);
+        const patch={notes:(linkedLead.notes?(linkedLead.notes+'\n'+note):note),updated_at:new Date().toISOString()};
+        if(leadAction==='reopen'){ patch.stage='contacted'; }
+        else if(leadAction==='lost'){ patch.stage='lost'; patch.lost_reason='event_cancelled'; patch.lost_notes=cancelReason.trim(); }
+        await supabase.from('leads').update(patch).eq('lead_id',linkedLead.lead_id);
       }
       setEvent(ev=>({...ev,status:'cancelled',cancellation_reason:cancelReason.trim(),cancelled_at:new Date().toISOString()}));
       setInvoices(prev=>prev.map(i=>({...i,status:'cancelled'})));
@@ -3214,8 +3218,16 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                 {unpaidCount>0&&<div>• Void {unpaidCount} unpaid invoice{unpaidCount===1?'':'s'} → cancelled</div>}
                 {dueInst>0&&<div>• Cancel {dueInst} unpaid vendor installment{dueInst===1?'':'s'} (stops overdue alerts)</div>}
                 <div>• Keep {inr(expTotal)} expenses as records (sunk cost in Reports)</div>
-                {linkedLead&&<div>• Add a note to lead {linkedLead.ref_number||''} (lead left open)</div>}
+                {linkedLead&&<div>• Add a dated note to lead {linkedLead.ref_number||''}</div>}
               </div>
+              {linkedLead&&<div style={{marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:6}}>Source lead {linkedLead.ref_number||''}</div>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                  {[['leave','Leave as-is'],['reopen','Reopen → Contacted'],['lost','Mark Lost']].map(([v,l])=>(
+                    <button key={v} className={'btn sm'+(leadAction===v?' primary':'')} style={{fontSize:11,padding:'3px 10px'}} onClick={()=>setLeadAction(v)}>{l}</button>
+                  ))}
+                </div>
+              </div>}
               <label className="field-label">Reason for cancellation <span style={{color:'var(--pink)'}}>*</span></label>
               <textarea className="field-textarea" rows={2} value={cancelReason} onChange={e=>setCancelReason(e.target.value)} placeholder="e.g. Client postponed indefinitely; date clash; budget withdrawn."/>
             </div>
@@ -8337,7 +8349,7 @@ function QWTemplateSelect({options, onSelect, eventType}) {
           onMouseLeave={()=>setOpen(false)}>
           {empty&&(
             <div style={{padding:'12px 14px',fontSize:12,color:'var(--grey-400)',lineHeight:1.5}}>
-              No templates {eventType?('for '+eventType):''} yet.
+              No templates with items yet.
               <div style={{marginTop:4,color:'var(--pink)',fontWeight:500}}>Create one in Settings &#8594; Templates</div>
             </div>
           )}
@@ -8351,7 +8363,7 @@ function QWTemplateSelect({options, onSelect, eventType}) {
             ))}
           </>}
           {others.length>0&&<>
-            <div style={{padding:'4px 10px',fontSize:10,fontWeight:700,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',background:'var(--grey-50)'}}>{eventType?(eventType+' templates'):'All templates'}</div>
+            <div style={{padding:'4px 10px',fontSize:10,fontWeight:700,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',background:'var(--grey-50)'}}>{priority.length>0?'Other templates':'All templates'}</div>
             {others.map((o,i)=>(
               <div key={i} onMouseDown={()=>{onSelect(o.templateId,o.subEventName);setOpen(false);}}
                 style={{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'var(--grey-800)',borderBottom:'1px solid var(--grey-100)'}}
@@ -8527,31 +8539,32 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   const getTemplateOptions = (blockName) => {
     const lt=(lead.event_type||'').toLowerCase();
     const bn=(blockName||'').trim().toLowerCase();
-    // Pool: templates matching the lead's event type (fall back to all if lead has no type)
-    const pool = templates.filter(t=> !lt || (t.event_type||'').toLowerCase()===lt);
+    // Show ALL active templates so any preconfigured template can be pulled in; the lead's
+    // event-type matches (and sub-event-name matches) are surfaced first as "Matching".
     const opts=[];
-    // Priority: sub-event name matches (exact first, then partial), templates with items only
-    pool.forEach(t=>{
+    // Priority: type-matching templates whose sub-event name matches the block (exact, then partial).
+    templates.forEach(t=>{
+      if(lt && (t.event_type||'').toLowerCase()!==lt) return; // priority section = matching type only
       const items=templateItems[t.template_id]||{};
       const keys=Object.keys(items);
       let matchKey=null, matchType=null;
       if(bn){
         matchKey=keys.find(k=>k.toLowerCase()===bn);
         if(matchKey) matchType='exact';
-        if(!matchKey){
-          matchKey=keys.find(k=>{const kl=k.toLowerCase();return kl.includes(bn)||bn.includes(kl);});
-          if(matchKey) matchType='partial';
-        }
+        if(!matchKey){ matchKey=keys.find(k=>{const kl=k.toLowerCase();return kl.includes(bn)||bn.includes(kl);}); if(matchKey) matchType='partial'; }
       }
       if(matchKey && items[matchKey] && items[matchKey].length>0){
         opts.push({label:t.name+' \u2192 '+matchKey+' ('+items[matchKey].length+' items)'+(matchType==='partial'?' \u00b7 similar':''),templateId:t.template_id,subEventName:matchKey,priority:true});
       }
     });
-    // All-items options for the pool, excluding empty templates
-    pool.forEach(t=>{
+    // "All items" option for every non-empty template; type-matching ones are flagged priority.
+    templates.forEach(t=>{
       const items=templateItems[t.template_id]||{};
       const total=Object.values(items).reduce((s,arr)=>s+arr.length,0);
-      if(total>0) opts.push({label:t.name+' \u2192 All items ('+total+')',templateId:t.template_id,subEventName:null,priority:false});
+      if(total<=0) return;
+      const typeMatch = lt && (t.event_type||'').toLowerCase()===lt;
+      const tag = t.event_type? (' ['+eventTypeLabel(t.event_type)+']') : ' [General]';
+      opts.push({label:t.name+tag+' \u2192 All items ('+total+')',templateId:t.template_id,subEventName:null,priority:!!typeMatch});
     });
     return opts;
   };
