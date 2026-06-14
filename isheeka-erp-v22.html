@@ -2922,6 +2922,11 @@ function isInvoiceOverdue(i){ return !!(i && ['sent','partially_paid'].includes(
 // Collapsed lead-stage label for the chip (the quote owns its own sub-states now).
 function leadStageDisplay(stage){ if(['quote_generation_in_progress','quote_sent','quote_revision_pending','revised_quote_sent','quote_confirmed'].includes(stage)) return 'Quoting'; return (LEAD_STAGE_LABELS[stage]||stage); }
 
+// Cormorant Garamond (bold-italic) for the PDF cover — fetched once from CDN, base64 cached for jsPDF.
+// Falls back to Times-italic in buildQuotationPDF if this hasn't loaded (e.g. offline).
+let _CG_B64=null;
+(function(){ try{ fetch('https://cdn.jsdelivr.net/gh/google/fonts/ofl/cormorantgaramond/CormorantGaramond-BoldItalic.ttf').then(r=>r.ok?r.arrayBuffer():null).then(buf=>{ if(!buf) return; const bytes=new Uint8Array(buf); let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]); _CG_B64=btoa(bin); }).catch(()=>{}); }catch(e){} })();
+
 // Timezone-safe date formatter. A bare 'YYYY-MM-DD' is built from its parts as a
 // LOCAL date (avoids new Date('YYYY-MM-DD') being parsed as UTC and shifting a day
 // in non-UTC timezones). Full timestamps fall through to normal parsing.
@@ -6844,10 +6849,13 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   const LAR=0.781; // logo width/height
   let SCRIPT_OK=false;
   try{ doc.addFileToVFS('GreatVibes.ttf', GV_FONT); doc.addFont('GreatVibes.ttf','GreatVibes','normal'); SCRIPT_OK=true; }catch(e){ SCRIPT_OK=false; }
+  let CG_OK=false;
+  try{ if(_CG_B64){ doc.addFileToVFS('Cormorant.ttf', _CG_B64); doc.addFont('Cormorant.ttf','Cormorant','italic'); CG_OK=true; } }catch(e){ CG_OK=false; }
   const fmt=d=>d?fmtDate(d):'--';
   const money=n=>'Rs.'+parseFloat(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
   const sans=(style,sz)=>{ doc.setFont('helvetica',style); doc.setFontSize(sz); };
   const script=(sz)=>{ doc.setFont(SCRIPT_OK?'GreatVibes':'times', SCRIPT_OK?'normal':'italic'); doc.setFontSize(sz); };
+  const cormorant=(sz)=>{ doc.setFont(CG_OK?'Cormorant':'times','italic'); doc.setFontSize(sz); };
   const setFill=c=>doc.setFillColor(c[0],c[1],c[2]);
   const setText=c=>doc.setTextColor(c[0],c[1],c[2]);
   const setDraw=c=>doc.setDrawColor(c[0],c[1],c[2]);
@@ -6887,7 +6895,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     const clh=104, clw=clh*LAR; try{ doc.addImage(LOGO,'PNG',(W-clw)/2,66,clw,clh); }catch(e){}
     let y=206;
     script(46); setText(PINK); doc.text('Isheeka Events', W/2, y, {align:'center'}); y+=22;
-    sans('italic',12); setText(MUTED); doc.text('Making Every Event Memorable', W/2, y, {align:'center'}); y+=27;
+    cormorant(14); setText(PINK); doc.text('Making Every Event Memorable', W/2, y, {align:'center'}); y+=27;
     script(15); setText(PINK); doc.text('Since 2017', W/2, y, {align:'center'}); y+=28;
     setDraw(PINK); doc.setLineWidth(1.4); doc.line(W/2-45,y,W/2+45,y); y+=36;
     sans('bold',11); setText(PINK);
@@ -6896,17 +6904,17 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     doc.text(pillTxt, W/2, y+16, {align:'center'}); y+=58;
     sans('bold',9); setText(PINK); doc.text('PREPARED FOR', W/2, y, {align:'center'}); y+=25;
     sans('bold',16); setText(PINK); doc.text(String(quot.event_name||''), W/2, y, {align:'center'}); y+=16;
-    sans('normal',11); setText(MUTED);
+    cormorant(13); setText(PINK);
     doc.text(fmt(quot.doc_date), W/2, y, {align:'center'}); y+=36;
     const introTpl = settings.cover_intro || 'Thank you for choosing Isheeka Events to be part of your celebration. Every occasion tells a story, and it is our privilege to help bring yours to life with care, creativity, and attention to the smallest detail.\n\nThe pages that follow set out the details, prepared thoughtfully for {event}. Should you wish to adjust anything, we would be delighted to tailor it to your vision.';
     const introBody = introTpl.replace(/\{client\}/g, quot.client_name||'').replace(/\{event\}/g, quot.event_name||'your event');
     const bx=M+60, bw=W-2*(M+60);
-    script(22); setText(PINK); doc.text('Dear '+(quot.client_name||'')+',', bx, y); y+=24;
-    sans('normal',11); setText([68,68,68]);
-    introBody.split('\n').forEach(par=>{ if(!par.trim()){ y+=8; return; } const lines=doc.splitTextToSize(par.trim(), bw); doc.text(lines, bx, y); y+=lines.length*15+10; });
-    y+=8; sans('normal',11); setText([68,68,68]); doc.text('With warm regards,', bx, y); y+=22;
-    script(24); setText(PINK); doc.text('Swathi', bx, y); y+=14;
-    sans('italic',9); setText(MUTED); doc.text('Founder & CEO, Isheeka Events', bx, y);
+    cormorant(20); setText(PINK); doc.text('Dear '+(quot.client_name||'')+',', bx, y); y+=26;
+    cormorant(15); setText(PINK);
+    introBody.split('\n').forEach(par=>{ if(!par.trim()){ y+=8; return; } const lines=doc.splitTextToSize(par.trim(), bw); doc.text(lines, bx, y); y+=lines.length*16+10; });
+    y+=8; cormorant(14); setText(PINK); doc.text('With warm regards,', bx, y); y+=22;
+    cormorant(20); setText(PINK); doc.text('Swathi', bx, y); y+=16;
+    cormorant(12); setText(PINK); doc.text('Founder & CEO, Isheeka Events', bx, y);
     doc.addPage();
   }
 
@@ -6916,7 +6924,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
 
   // Client + Event cards
   let y=HDR_BOTTOM+8;
-  const gap=14, cardW=(W-2*M-gap)/2, cardH=68;
+  const gap=14, cardW=(W-2*M-gap)/2, cardH=76;
   const card=(x,lbl,name,lines)=>{
     setDraw(PINK); doc.setLineWidth(0.8); doc.roundedRect(x,y,cardW,cardH,6,6,'S');
     sans('bold',8); setText(PINK); doc.text(lbl, x+12, y+16);
@@ -6925,7 +6933,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     let ly=y+45; lines.filter(Boolean).slice(0,3).forEach(l=>{ doc.text(doc.splitTextToSize(String(l),cardW-24)[0], x+12, ly); ly+=11; });
   };
   const addr=[quot.client_city, quot.client_state].filter(Boolean).join(', ');
-  card(M,'CLIENT',quot.client_name,[quot.client_phone, quot.client_email, addr]);
+  card(M,'CLIENT',quot.client_name,[[quot.client_phone, quot.client_email].filter(Boolean).join('   |   '), addr]);
   card(M+cardW+gap,'EVENT',quot.event_name,[ quot.event_ref?('Ref: '+quot.event_ref):null, quot.event_city||null, (isInv&&quot.quotation_ref)?('From quote: '+quot.quotation_ref):null ].filter(Boolean));
   y+=cardH+22;
 
