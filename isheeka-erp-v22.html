@@ -2652,6 +2652,11 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       const {error:ee}=await runDb(supabase.from('events').update({status:'cancelled',cancellation_reason:cancelReason.trim(),cancelled_at:new Date().toISOString(),cancelled_by:uid,updated_at:new Date().toISOString()}).eq('event_id',eventId),'cancel event'); if(ee) throw ee;
       // 1) cancel all the event's open invoices, then post client refunds (preserving cancelled status)
       await supabase.from('invoices').update({status:'cancelled',updated_at:new Date().toISOString()}).eq('event_id',eventId).eq('is_deleted',false).neq('status','cancelled');
+      // Close the event's quote(s) as terminal (Rejected) so they're no longer revisable; historical PDFs stay printable.
+      { const {data:eqs}=await supabase.from('quotations').select('quotation_id,status').eq('event_id',eventId).eq('is_deleted',false);
+        const qIds=(eqs||[]).filter(q=>!['rejected','superseded','expired'].includes(q.status)).map(q=>q.quotation_id);
+        if(qIds.length){ await supabase.from('quotations').update({status:'rejected',updated_at:new Date().toISOString()}).in('quotation_id',qIds);
+          for(const qid of qIds){ try{ await supabase.from('quotation_activity_log').insert({quotation_id:qid, action:'rejected', notes:'Event '+(event.ref_number||'')+' cancelled — '+cancelReason.trim(), logged_by:uid}); }catch(e){} } } }
       for(const i of cancelInvList){ const h=invHandling[i.invoice_id]; if(h&&h.mode==='refund'){ const amt=Math.min(parseFloat(h.amount)||0,parseFloat(i.total_received)||0); if(amt>0) await recordClientRefund({...i,status:'cancelled'},{amount:amt,reason,date:todayLocalStr()}); } }
       // 2) vendor refunds (recovered amounts) before installment cleanup
       for(const v of cancelVenList){ const h=venHandling[v.event_vendor_id]; if(h&&h.mode==='recover'){ const amt=Math.min(parseFloat(h.amount)||0,parseFloat(v.total_paid)||0); if(amt>0) await recordVendorRefund(v,{amount:amt,reason,date:todayLocalStr()}); } }
@@ -5073,12 +5078,13 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   let ps = quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} } ps=Array.isArray(ps)?ps:[];
   const sc = QUOT_STATUS_COLORS[quot.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
   const statusLabel = QUOT_STATUS_LABELS[quot.status]||quot.status;
-  const editable = !['converted','rejected','expired','superseded'].includes(quot.status) && !invoiceIssued;
+  const eventCancelled = !!(srcEvent && (srcEvent.status||'').toLowerCase()==='cancelled');
+  const editable = !['converted','rejected','expired','superseded'].includes(quot.status) && !invoiceIssued && !eventCancelled;
   // Event-origin: confirm available until approved (then the invoice exists). Lead-origin: confirm
   // (= create the event) available until converted, including 'approved' (idempotent re-convert).
   const canConfirm = (quot.event_id
     ? !['approved','converted','rejected','expired','superseded'].includes(quot.status)
-    : (!!quot.lead_id && !['converted','rejected','expired','superseded'].includes(quot.status))) && !invoiceIssued;
+    : (!!quot.lead_id && !['converted','rejected','expired','superseded'].includes(quot.status))) && !invoiceIssued && !eventCancelled;
 
   return (
     <div>
@@ -6089,14 +6095,15 @@ function Dashboard({ user, onNavigate }) {
     const [{data:leads},{data:events},{data:quotes},{data:pays},{data:invs}] = await Promise.all([
       supabase.from('leads').select('stage').eq('is_deleted',false),
       supabase.from('events').select('event_id,name,ref_number,main_date,status,client_name').eq('is_deleted',false),
-      supabase.from('quotations').select('grand_total,doc_date,status').eq('is_deleted',false),
+      supabase.from('quotations').select('grand_total,doc_date,status,event_id').eq('is_deleted',false),
       supabase.from('invoice_payments').select('amount,payment_date,invoice_id'),
       supabase.from('invoices').select('invoice_id,ref_number,client_name,event_name,total_outstanding,status').eq('is_deleted',false),
     ]);
     const cancelledInv={}; (invs||[]).forEach(i=>{ if(i.status==='cancelled') cancelledInv[i.invoice_id]=true; });
+    const cancelledEvt={}; (events||[]).forEach(e=>{ if((e.status||'').toLowerCase()==='cancelled') cancelledEvt[e.event_id]=true; });
     const activeLeads=(leads||[]).filter(l=>!['lost','event_triggered'].includes(l.stage)).length;
     const up=(events||[]).filter(e=>e.main_date&&e.main_date>=todayStr&&!['completed','cancelled'].includes(e.status)).sort((a,b)=>a.main_date.localeCompare(b.main_date));
-    const quotedMonth=(quotes||[]).filter(q=>q.status!=='superseded'&&q.doc_date&&q.doc_date.slice(0,7)===monthStr).reduce((s,q)=>s+(parseFloat(q.grand_total)||0),0);
+    const quotedMonth=(quotes||[]).filter(q=>!['superseded','rejected'].includes(q.status)&&!(q.event_id&&cancelledEvt[q.event_id])&&q.doc_date&&q.doc_date.slice(0,7)===monthStr).reduce((s,q)=>s+(parseFloat(q.grand_total)||0),0);
     const collectedMonth=(pays||[]).filter(p=>p.payment_date&&p.payment_date.slice(0,7)===monthStr&&!cancelledInv[p.invoice_id]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
     const out=(invs||[]).filter(i=>!['paid','cancelled'].includes(i.status)&&(parseFloat(i.total_outstanding)||0)>0).sort((a,b)=>(parseFloat(b.total_outstanding)||0)-(parseFloat(a.total_outstanding)||0));
     setStats({activeLeads,upcomingCount:up.length,quotedMonth,collectedMonth});
