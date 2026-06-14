@@ -4894,6 +4894,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [confirming, setConfirming] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:true});
+  const [revHistory, setRevHistory] = React.useState([]);
+  const [includeRevHistory, setIncludeRevHistory] = React.useState(true);
   const [showWizard, setShowWizard] = React.useState(false);
   const [wizardCtx, setWizardCtx] = React.useState(null);
   const [showConvert, setShowConvert] = React.useState(false);
@@ -4931,6 +4933,13 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       setInvoiceIssued((invs||[]).some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase())));
     } else { setSrcEvent(null); setInvoiceIssued(false); }
     if(_evd) setQuot(prev=>prev?{...prev,event_date:_evd}:prev);
+    if(q&&(q.revision_number||0)>0){
+      let qy=supabase.from('quotations').select('revision_number,doc_date,grand_total,created_at').eq('is_deleted',false);
+      qy = q.lead_id ? qy.eq('lead_id',q.lead_id) : (q.event_id ? qy.eq('event_id',q.event_id) : qy.eq('quotation_id',q.quotation_id));
+      const {data:chain}=await qy;
+      const rows=(chain||[]).sort((a,b)=>(a.revision_number||0)-(b.revision_number||0)||String(a.created_at||'').localeCompare(b.created_at||'')).map(r=>({label:(r.revision_number||0)===0?'Original':'Rev '+r.revision_number, date:fmtDate(r.doc_date||r.created_at,{day:'numeric',month:'short',year:'numeric'}), change:'Grand total ₹'+Math.round(parseFloat(r.grand_total)||0).toLocaleString('en-IN')}));
+      setRevHistory(rows);
+    } else setRevHistory([]);
     setLoading(false);
   },[quotationId]);
   React.useEffect(()=>{ loadAll(); },[loadAll]);
@@ -4941,7 +4950,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     if((channel==='gmail'||channel==='email') && !quot.client_email){ notify('This client has no email address on file.','error'); return; }
     setSharing(true);
     notify('Preparing the quotation PDF…','info',2500);
-    const url = await uploadQuotePdf(quot, items, displayOpts, qSettings);
+    const url = await uploadQuotePdf(quot, items, displayOpts, qSettings, {showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
     if(!url) notify("Couldn't attach the PDF link — sharing the message; you can attach the downloaded PDF manually.",'error');
     const msg = buildQuoteShareMsg(quot, qSettings, url);
     if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
@@ -4952,7 +4961,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   };
   const doExport = async (action) => {
     if(!quot) return;
-    buildQuotationPDF(quot, items, {action, displayOpts, settings:qSettings});
+    buildQuotationPDF(quot, items, {action, displayOpts, settings:qSettings, showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
   };
   const doConfirmQuote = async () => {
     if(confirming||!quot) return;
@@ -5080,6 +5089,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
               <input type="checkbox" checked={!!displayOpts[k]} onChange={e=>setDO(k,e.target.checked)} style={{accentColor:'var(--pink)'}}/>{l}
             </label>
           ))}
+          {(quot.revision_number||0)>0&&<label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}><input type="checkbox" checked={includeRevHistory} onChange={e=>setIncludeRevHistory(e.target.checked)} style={{accentColor:'var(--pink)'}}/>Revision history</label>}
         </div>
         <div style={{borderTop:'1px solid var(--grey-200)',paddingTop:12,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
           <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>Share / export (uses the toggles above):</span>
@@ -5363,6 +5373,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [srcLead, setSrcLead] = React.useState(null);
   const [srcEvent, setSrcEvent] = React.useState(null);
   const [pdfDisplay, setPdfDisplay] = React.useState({prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true});
+  const [includeRevHistory, setIncludeRevHistory] = React.useState(true);
   const [evtName, setEvtName] = React.useState('');
   React.useEffect(()=>{ if(inv) setEvtName(inv.event_name||''); },[inv&&inv.event_name]);
   const saveEventName = async () => {
@@ -5496,7 +5507,9 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
         +((parseFloat(it.balance)||0)>0 && (parseFloat(it.balance)||0)!==(parseFloat(it.amount_due)||0)?(' (bal Rs.'+(parseFloat(it.balance)||0).toLocaleString('en-IN')+')'):'')
     }))
   });
-  const pdfOpts = (action)=>({action, docType:'invoice', displayOpts:{...pdfDisplay,grouping:true}, settings});
+  const revRows = (()=>{ const log=(activity||[]).filter(a=>a.action==='revised').sort((x,y)=>(x.revision_number||0)-(y.revision_number||0)); if(!log.length) return []; const rows=[{label:'Original',date:fmtDate(log[0].changed_at,{day:'numeric',month:'short',year:'numeric'}),change:(log[0].old_value||'')}]; log.forEach(a=>rows.push({label:'Rev '+(a.revision_number||''),date:fmtDate(a.changed_at,{day:'numeric',month:'short',year:'numeric'}),change:(a.old_value||'')+' → '+(a.new_value||''),reason:a.reason||''})); return rows; })();
+  const revOpts = ()=>({showRevisionHistory: includeRevHistory && (inv.revision_number||0)>0, revisionHistory: revRows});
+  const pdfOpts = (action)=>({action, docType:'invoice', displayOpts:{...pdfDisplay,grouping:true}, settings, ...revOpts()});
   const downloadPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('download')); }catch(e){ notify('Could not generate the PDF.','error'); } };
   const printPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('print')); }catch(e){ notify('Could not open the print view.','error'); } };
   const previewPdf = ()=>{ try{ buildQuotationPDF(invForPdf(), items, pdfOpts('preview')); }catch(e){ notify('Could not open the preview.','error'); } };
@@ -5566,7 +5579,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if((channel==='gmail'||channel==='email') && !clientInfo.email_1){ notify('This client has no email address on file.','error'); return; }
     setSharing(true);
     notify('Preparing the invoice PDF…','info',2500);
-    const url = await uploadInvoicePdf(invForPdf(), items, settings, pdfDisplay);
+    const url = await uploadInvoicePdf(invForPdf(), items, settings, pdfDisplay, revOpts());
     if(!url) notify("Couldn't attach the PDF link — sharing the message; you can attach the downloaded PDF manually.",'error');
     const msg = buildInvoiceShareMsg(inv, settings, url);
     if(channel==='whatsapp') openWhatsApp(clientInfo.phone_1, msg);
@@ -5696,6 +5709,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             <input type="checkbox" checked={!!pdfDisplay[k]} onChange={e=>setPdfDisplay(o=>({...o,[k]:e.target.checked}))} style={{accentColor:'var(--pink)'}}/>{l}
           </label>
         ))}
+        {(inv.revision_number||0)>0&&<label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}><input type="checkbox" checked={includeRevHistory} onChange={e=>setIncludeRevHistory(e.target.checked)} style={{accentColor:'var(--pink)'}}/>Revision history</label>}
       </div>
       {/* Client details (Phase: client edit + cascade) */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
@@ -7995,9 +8009,9 @@ function openEmail(provider, to, subject, body){
 
 // ── Quotation share helpers: professional message + hosted PDF link ───────────
 function validClientPhone(p){ const n=(p||'').replace(/\D/g,''); return n.length===10 || (n.length===12 && n.slice(0,2)==='91'); }
-async function uploadQuotePdf(quot, items, displayOpts, settings){
+async function uploadQuotePdf(quot, items, displayOpts, settings, extra){
   try{
-    const blob = buildQuotationPDF(quot, items, {action:'blob', displayOpts, settings});
+    const blob = buildQuotationPDF(quot, items, {action:'blob', displayOpts, settings, ...(extra||{})});
     if(!blob || !blob.size) return null;
     const _ref = String(quot.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'');
     const _rev = (quot.revision_number && quot.revision_number>0) ? ('-r'+quot.revision_number) : '';
@@ -8031,9 +8045,9 @@ function buildQuoteShareMsg(quot, settings, url){
 }
 
 // Phase 5: upload an invoice PDF to Storage and return a public URL (mirrors uploadQuotePdf)
-async function uploadInvoicePdf(inv, items, settings, displayOpts){
+async function uploadInvoicePdf(inv, items, settings, displayOpts, extra){
   try{
-    const blob = buildQuotationPDF(inv, items, {action:'blob', docType:'invoice', displayOpts:{...(displayOpts||{prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true}),grouping:true}, settings});
+    const blob = buildQuotationPDF(inv, items, {action:'blob', docType:'invoice', displayOpts:{...(displayOpts||{prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true}),grouping:true}, settings, ...(extra||{})});
     if(!blob || !blob.size) return null;
     const _ref = String(inv.ref_number||'draft').replace(/[^A-Za-z0-9_-]/g,'');
     const _rev = (inv.revision_number && inv.revision_number>0) ? ('-r'+inv.revision_number) : '';
@@ -8277,6 +8291,20 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     quot.additional_terms.split('\n').filter(l=>l.trim()).forEach(l=>{ const wl=doc.splitTextToSize('- '+l.trim(), W-2*M); doc.text(wl, M, y); y+=wl.length*12+2; });
   }
 
+  // Revision history (only on revised docs, when the sender opts to include it)
+  if(opts.showRevisionHistory && Array.isArray(opts.revisionHistory) && opts.revisionHistory.length){
+    if(H-58-y<60){ doc.addPage(); drawFrame(); drawHeaderBand(); y=HDR_BOTTOM+8; } else { y+=12; }
+    sans('bold',8.5); setText(PINK); doc.text('REVISION HISTORY', M, y); y+=6;
+    setDraw(PINK); doc.setLineWidth(1); doc.line(M,y,W-M,y); y+=14;
+    sans('normal',9);
+    opts.revisionHistory.forEach(r=>{
+      const line=[r.label,r.date,r.change].filter(Boolean).join('   ·   ')+(r.reason?('   —   '+r.reason):'');
+      const wl=doc.splitTextToSize(line, W-2*M);
+      if(H-58-y < wl.length*12+4){ doc.addPage(); drawFrame(); drawHeaderBand(); y=HDR_BOTTOM+8; }
+      setText(INK); doc.text(wl, M, y); y+=wl.length*12+5;
+    });
+  }
+
   // Footer + page numbers
   const pc=doc.internal.getNumberOfPages();
   for(let i=1;i<=pc;i++){ doc.setPage(i); if(!(dOpts.coverPage && i===1)) drawFooter(i,pc); }
@@ -8371,10 +8399,11 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   const today = new Date().toISOString().split('T')[0];
   const [quotDetails, setQuotDetails] = React.useState({
     doc_date:today, valid_until:'',
-    event_name:'',
+    event_name:'', event_date:'',
     discount_pct:0, discount_amount:0,
     additional_notes:'', payment_terms:'', additional_terms:'',
     payment_terms_touched: false,
+    valid_until_touched: false,
     payment_schedule_touched: false,
     // pct = default ratio used to auto-fill amounts until the user types an amount; amount is the source of truth.
     payment_schedule:[
@@ -8393,15 +8422,26 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     return 'Payment schedule: '+schedule.map((p,i)=>{ const w=(p.when||'').trim(); const wl=w?(w.charAt(0).toLowerCase()+w.slice(1)):'—'; return `${inr(p.amount)} (${p.label||'Installment '+(i+1)}) due ${wl}`; }).join('; ')+'.';
   };
 
+  // Valid-until rule: quotation date + 2 days; if that's after the planned event date, use event date − 1 day; never earlier than the quotation date.
+  const computeValidUntil=(docDate,eventDate)=>{
+    if(!docDate) return '';
+    const _p=n=>String(n).padStart(2,'0'), fmtD=d=>d.getFullYear()+'-'+_p(d.getMonth()+1)+'-'+_p(d.getDate());
+    const doc=new Date(docDate+'T00:00:00'); let vu=new Date(doc); vu.setDate(vu.getDate()+2);
+    if(eventDate){ const evm1=new Date(eventDate+'T00:00:00'); evm1.setDate(evm1.getDate()-1); if(vu>evm1) vu=evm1; }
+    if(vu<doc) vu=doc;
+    return fmtD(vu);
+  };
   React.useEffect(()=>{
     // Default the editable event name to "{Event Type} Event" for new quotes (revisions load the prior name below).
     if(!(isRevision||isContinuation)){ setQuotDetails(f=>({...f,event_name:defaultEventName(lead.event_type)})); }
+    // Seed the planned event date: lead tentative date, or the origin event's main date.
+    if(lead&&lead.tentative_date){ setQuotDetails(f=>({...f,event_date:f.event_date||lead.tentative_date})); }
+    if(originEvent&&originEvent.eventId){ supabase.from('events').select('main_date').eq('event_id',originEvent.eventId).maybeSingle().then(({data})=>{ if(data&&data.main_date) setQuotDetails(f=>({...f,event_date:data.main_date})); }); }
     supabase.from('clients').select('client_id,first_name,last_name,phone_1,status').eq('is_deleted',false).neq('status','inactive').order('first_name').then(({data})=>{ if(data) setClients(data); });
     if(lead.phone) supabase.from('clients').select('*').eq('phone_1',lead.phone).eq('is_deleted',false).neq('status','inactive').single().then(({data})=>{ if(data) setDupClient(data); });
     supabase.from('settings').select('default_terms,default_validity_days').single().then(({data})=>{
       if(data){
-        const d=new Date(); d.setDate(d.getDate()+(parseInt(data.default_validity_days)||7));
-        setQuotDetails(f=>({...f,valid_until:d.toISOString().split('T')[0],additional_terms:data.default_terms||'',payment_terms:buildPaymentTermsText(f.payment_schedule)}));
+        setQuotDetails(f=>({...f,additional_terms:data.default_terms||'',payment_terms:buildPaymentTermsText(f.payment_schedule)}));
       }
     });
     supabase.from('event_templates').select('*').eq('is_active',true).eq('is_deleted',false).order('sort_order').then(({data:tmps})=>{
@@ -8456,6 +8496,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       setStep(2);
     }
   },[]);
+
+  // Auto-populate Valid until from quotation date + event date (per rule), until the user edits it manually.
+  React.useEffect(()=>{ setQuotDetails(f=> f.valid_until_touched ? f : {...f, valid_until: computeValidUntil(f.doc_date, f.event_date)}); },[quotDetails.doc_date, quotDetails.event_date]);
 
   // Auto-fill installment AMOUNTS from their default ratios whenever the grand total changes —
   // until the user manually edits an amount (payment_schedule_touched). Last row absorbs rounding so the sum is exact.
@@ -8520,6 +8563,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       next.payment_schedule_touched=true;
       if(!f.payment_terms_touched) next.payment_terms=buildPaymentTermsText(val);
     }
+    if(field==='valid_until') next.valid_until_touched=true; // stop auto-recompute once edited by hand
     return next;
   });
   const allItems=subEventBlocks.flatMap(b=>b.items);
@@ -8635,6 +8679,12 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
 
       if(lineItems.length>0){ const {error:lie}=await supabase.from('quotation_line_items').insert(lineItems.map(i=>({...i,quotation_id:newQ.quotation_id}))); if(lie) throw lie; }
 
+      // Sync the planned event date back: lead's tentative date (lead-origin) and/or the event's main date (event-origin).
+      if(quotDetails.event_date){
+        if(lead&&lead.lead_id&&lead.tentative_date!==quotDetails.event_date){ try{ await supabase.from('leads').update({tentative_date:quotDetails.event_date,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id); }catch(e){} }
+        if(originEvent&&originEvent.eventId){ try{ await supabase.from('events').update({main_date:quotDetails.event_date,updated_at:new Date().toISOString()}).eq('event_id',originEvent.eventId); }catch(e){} }
+      }
+
       // Event mirrors the quote: rebuild the event's sub-events + items to match (best-effort; the quote is already saved)
       if(originEvent){
         try {
@@ -8691,7 +8741,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
     const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
-    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:lead.tentative_date||null};
+    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:quotDetails.event_date||lead.tentative_date||null};
     const url=await uploadQuotePdf(enrichedQuot, pdfItems, displayOpts, s||{});
     return {s:s||{}, enrichedQuot, url};
   };
@@ -8727,7 +8777,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
     const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
-    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:lead.tentative_date||null};
+    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:quotDetails.event_date||lead.tentative_date||null};
     buildQuotationPDF(enrichedQuot,pdfItems,{action,displayOpts,settings:s||{}});
   };
 
@@ -8860,7 +8910,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
                 <label className="field-label">Event name <span style={{fontWeight:400,color:'var(--grey-400)'}}>(shown on the quotation &amp; PDF)</span></label>
                 <input className="field-input" value={quotDetails.event_name} onChange={e=>setQD('event_name',e.target.value)} placeholder="e.g. Half Saree Event"/>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14}}>
+                <div><label className="field-label">Event date <span style={{fontWeight:400,color:'var(--grey-400)'}}>(planned)</span></label>
+                  <input type="date" className="field-input" value={quotDetails.event_date||''} onChange={e=>setQD('event_date',e.target.value)}/></div>
                 <div><label className="field-label">Quotation date</label>
                   <input type="date" className="field-input" value={quotDetails.doc_date} onChange={e=>setQD('doc_date',e.target.value)}/></div>
                 <div><label className="field-label">Valid until <span style={{color:'var(--pink)'}}>*</span></label>
