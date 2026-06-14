@@ -2610,6 +2610,60 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     setTimeout(()=>setSuccessMsg(''),6000);
   };
 
+  // ── Cancel / reopen event ──
+  const [showCancel, setShowCancel] = React.useState(false);
+  const [cancelReason, setCancelReason] = React.useState('');
+  const [cancelling, setCancelling] = React.useState(false);
+  const [expTotal, setExpTotal] = React.useState(0);
+  const [rebuildDismissed, setRebuildDismissed] = React.useState(false);
+  const openCancel = async () => {
+    setCancelReason(''); setShowCancel(true);
+    const {data}=await supabase.from('expenses').select('amount').eq('event_id',eventId).eq('is_deleted',false);
+    setExpTotal((data||[]).reduce((s,x)=>s+(parseFloat(x.amount)||0),0));
+  };
+  const doCancelEvent = async () => {
+    if(!cancelReason.trim()){ notify('Enter a reason for cancellation.','error'); return; }
+    setCancelling(true);
+    try{
+      const uid=await _currentUid();
+      const {error:ee}=await runDb(supabase.from('events').update({status:'cancelled',cancellation_reason:cancelReason.trim(),cancelled_at:new Date().toISOString(),cancelled_by:uid,updated_at:new Date().toISOString()}).eq('event_id',eventId),'cancel event'); if(ee) throw ee;
+      await supabase.from('invoices').update({status:'cancelled',updated_at:new Date().toISOString()}).eq('event_id',eventId).eq('is_deleted',false).neq('status','cancelled');
+      const evIds=eventVendors.map(v=>v.event_vendor_id);
+      if(evIds.length){
+        const {data:insts}=await supabase.from('vendor_installments').select('installment_id,amount_paid').in('event_vendor_id',evIds);
+        const unpaid=(insts||[]).filter(i=>(parseFloat(i.amount_paid)||0)<=0).map(i=>i.installment_id);
+        const partly=(insts||[]).filter(i=>(parseFloat(i.amount_paid)||0)>0).map(i=>i.installment_id);
+        if(unpaid.length) await supabase.from('vendor_installments').delete().in('installment_id',unpaid);
+        if(partly.length) await supabase.from('vendor_installments').update({due_date:null,updated_at:new Date().toISOString()}).in('installment_id',partly);
+      }
+      if(linkedLead&&linkedLead.lead_id){
+        const note='[Event '+(event.ref_number||'')+' cancelled '+todayLocalStr()+': '+cancelReason.trim()+']';
+        await supabase.from('leads').update({notes:(linkedLead.notes?(linkedLead.notes+'\n'+note):note),updated_at:new Date().toISOString()}).eq('lead_id',linkedLead.lead_id);
+      }
+      setEvent(ev=>({...ev,status:'cancelled',cancellation_reason:cancelReason.trim(),cancelled_at:new Date().toISOString()}));
+      setInvoices(prev=>prev.map(i=>({...i,status:'cancelled'})));
+      setShowCancel(false); setCancelling(false);
+      notify('Event cancelled.','success');
+      await loadEventVendors();
+    }catch(err){ setCancelling(false); notify('Could not cancel the event: '+(err&&err.message?err.message:'try again'),'error'); }
+  };
+  const doReopenEvent = async () => {
+    if(!window.confirm('Reopen this event to Planning?\n\nVoided invoices and cleared vendor schedules are NOT auto-restored — you can regenerate them from the banner after reopening.')) return;
+    const {error}=await runDb(supabase.from('events').update({status:'planning',updated_at:new Date().toISOString()}).eq('event_id',eventId),'reopen event'); if(error) return;
+    setEvent(ev=>({...ev,status:'planning'})); setRebuildDismissed(false);
+    notify('Event reopened to Planning. Use the banner to regenerate what you need.','success');
+  };
+  const rebuildRegenInvoice = async () => {
+    const q=(quotations||[]).find(x=>['approved','converted','invoiced','sent'].includes(x.status))||(quotations||[])[0];
+    if(!q){ notify('No source quotation to regenerate from.','error'); return; }
+    const inv=await createInvoiceFromQuote(q.quotation_id,{eventId});
+    if(inv){ notify('Draft invoice regenerated.','success'); setInvoices(prev=>[...prev.filter(i=>i.invoice_id!==inv.invoice_id),inv]); }
+  };
+  const rebuildVendorSchedule = async (v) => {
+    try{ await _ensureVendorInstallment(v.event_vendor_id, v.agreed_amount); notify('Schedule re-added for '+(v.vendor_name||'vendor')+'. Set due dates in the vendor row.','success'); await loadEventVendors(); }
+    catch(err){ notify('Could not re-add schedule: '+(err&&err.message?err.message:''),'error'); }
+  };
+
   const handleChangeClient = async (newClient) => {
     const {error:ecc}=await runDb(supabase.from('events').update({
       client_id:newClient.client_id,
@@ -2718,6 +2772,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               {EVENT_STATUS_LABELS[event.status?.toLowerCase()]||event.status}
             </span>
             {!['completed','cancelled'].includes(event.status?.toLowerCase())&&<button className="btn sm" onClick={markEventCompleted} title="Marks the event delivered and closes the source lead">✅ Mark completed</button>}
+            {event.status?.toLowerCase()!=='cancelled'&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={openCancel} title="Cancel this event and reconcile its invoices, vendors and schedules">⛔ Cancel event</button>}
+            {event.status?.toLowerCase()==='cancelled'&&<button className="btn sm" onClick={doReopenEvent} title="Reopen to Planning (status only)">↩ Reopen event</button>}
             <button className="btn sm" onClick={()=>onUseAsReference(event)}>📋 Use as reference</button>
             <button className="btn sm primary" onClick={enterEditMode}>✏️ Edit</button>
           </>}
@@ -2737,6 +2793,22 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       {header}
       {showQuoteWizard&&<QuoteGenerationWizard lead={quoteWizardLead} leadSubEvents={quoteWizardSubs} isRevision={!!reviseQuoteId} isContinuation={false} existingQuotationId={reviseQuoteId} originEvent={{eventId:event.event_id, eventName:event.name}} onComplete={async()=>{ setShowQuoteWizard(false); setReviseQuoteId(null); await loadAll(); }} onCancel={()=>{ setShowQuoteWizard(false); setReviseQuoteId(null); }}/>}
       {successMsg&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:12,border:'1px solid rgba(15,110,86,0.2)',display:'flex',alignItems:'center',gap:8}}>✅ {successMsg}</div>}
+      {event.status?.toLowerCase()==='cancelled'&&<div style={{background:'var(--red-light)',border:'1px solid rgba(163,45,45,0.25)',borderRadius:'var(--radius-md)',padding:'10px 14px',fontSize:13,marginBottom:12,color:'var(--red)'}}>⛔ <b>This event is cancelled.</b>{event.cancellation_reason?(' Reason: '+event.cancellation_reason):''}{event.cancelled_at?(' · '+fmtDate(event.cancelled_at,{day:'numeric',month:'short',year:'numeric'})):''} <span style={{color:'var(--grey-500)'}}>— invoices were voided; unpaid vendor schedules cleared. Use Reopen to restore.</span></div>}
+      {(()=>{ if(!event.cancelled_at || event.status?.toLowerCase()==='cancelled' || rebuildDismissed) return null;
+        const hasActiveInv=(invoices||[]).some(i=>i.status!=='cancelled');
+        const srcQuote=(quotations||[]).find(x=>['approved','converted','invoiced','sent'].includes(x.status))||(quotations||[])[0];
+        const vendorsMissing=(eventVendors||[]).filter(v=>(parseFloat(v.agreed_amount)||0)>0 && ((eventInstallments[v.event_vendor_id]||[]).length===0));
+        const needInvoice=!hasActiveInv && srcQuote;
+        if(!needInvoice && vendorsMissing.length===0) return null;
+        return <div style={{background:'var(--orange-light)',border:'1px solid rgba(230,81,0,0.3)',borderRadius:'var(--radius-md)',padding:'12px 14px',marginBottom:12}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}><div style={{fontSize:13,fontWeight:600,color:'var(--orange)'}}>↩ Reopened — finish rebuilding</div><button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>setRebuildDismissed(true)}>Dismiss</button></div>
+          <div style={{fontSize:12,color:'var(--grey-500)',marginBottom:8}}>The cancellation voided invoices and cleared vendor schedules. Recreate what you need:</div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {needInvoice&&<button className="btn sm primary" onClick={rebuildRegenInvoice}>↻ Regenerate invoice from quote</button>}
+            {vendorsMissing.map(v=><button key={v.event_vendor_id} className="btn sm" onClick={()=>rebuildVendorSchedule(v)}>↻ Re-add schedule · {v.vendor_name||'vendor'}</button>)}
+          </div>
+        </div>;
+      })()}
       {/* Info cards */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:16}}>
         {[
@@ -3049,6 +3121,47 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           </div>
         </div>
       )}
+      {showCancel&&(()=>{
+        const activeInv=(invoices||[]).filter(i=>i.status!=='cancelled');
+        const billed=activeInv.reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0);
+        const collected=activeInv.reduce((s,i)=>s+(parseFloat(i.total_received)||0),0);
+        const unpaidCount=activeInv.filter(i=>(parseFloat(i.total_received)||0)<=0).length;
+        const paidCount=activeInv.length-unpaidCount;
+        const vAgreed=(eventVendors||[]).reduce((s,v)=>s+(parseFloat(v.agreed_amount)||0),0);
+        const vPaid=(eventVendors||[]).reduce((s,v)=>s+(parseFloat(v.total_paid)||0),0);
+        const dueInst=Object.values(eventInstallments||{}).reduce((s,arr)=>s+arr.filter(it=>vendorInstBalance(it)>0.5).length,0);
+        const inr=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
+        return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1300,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget)setShowCancel(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:580}}>
+            <div style={{padding:'14px 20px',borderBottom:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}><div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>⛔ Cancel event — {event.ref_number} · {event.name}</div><button className="btn sm" onClick={()=>setShowCancel(false)}>✕</button></div>
+            <div style={{padding:'16px 20px'}}>
+              {collected>0&&<div style={{background:'var(--red-light)',border:'1px solid rgba(163,45,45,0.25)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12,color:'var(--red)',marginBottom:14}}>⚠ {inr(collected)} has been collected on this event. Cancelling keeps the paid invoice as a record and flags a refund to arrange offline — the app does not move money.</div>}
+              <div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:8}}>What will be affected</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
+                <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12.5}}><div style={{color:'var(--grey-400)',fontSize:12}}>🧾 Invoices</div>{activeInv.length} · {inr(billed)} billed · <span style={{color:'var(--green)'}}>{inr(collected)} collected</span></div>
+                <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12.5}}><div style={{color:'var(--grey-400)',fontSize:12}}>🔧 Vendors</div>{(eventVendors||[]).length} · {inr(vPaid)} paid · {dueInst} due installment{dueInst===1?'':'s'}</div>
+                <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12.5}}><div style={{color:'var(--grey-400)',fontSize:12}}>💰 Expenses</div>{inr(expTotal)} (kept as sunk cost)</div>
+                <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12.5}}><div style={{color:'var(--grey-400)',fontSize:12}}>🎪 Sub-events · Lead</div>{(subEvents||[]).length} sub-event{(subEvents||[]).length===1?'':'s'}{linkedLead?(' · '+(linkedLead.ref_number||'lead')):''}</div>
+              </div>
+              <div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:6}}>On confirm</div>
+              <div style={{fontSize:12.5,lineHeight:1.8,marginBottom:14,color:'var(--grey-700)'}}>
+                {unpaidCount>0&&<div>✓ Void {unpaidCount} unpaid invoice{unpaidCount===1?'':'s'} → cancelled</div>}
+                {paidCount>0&&<div style={{color:'#854F0B'}}>⚠ Keep {paidCount} paid/partly-paid invoice{paidCount===1?'':'s'} as record — refund {inr(collected)} offline</div>}
+                {dueInst>0&&<div>✓ Cancel {dueInst} unpaid vendor installment{dueInst===1?'':'s'} (stops overdue alerts)</div>}
+                <div style={{color:'var(--grey-400)'}}>• Keep {inr(vPaid)} vendor payments &amp; {inr(expTotal)} expenses as records (sunk cost in Reports)</div>
+                {linkedLead&&<div style={{color:'var(--grey-400)'}}>• Add a note to lead {linkedLead.ref_number||''} (lead left open)</div>}
+              </div>
+              <label className="field-label">Reason for cancellation <span style={{color:'var(--pink)'}}>*</span></label>
+              <textarea className="field-textarea" rows={2} value={cancelReason} onChange={e=>setCancelReason(e.target.value)} placeholder="e.g. Client postponed indefinitely; date clash; budget withdrawn."/>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+              <span style={{fontSize:11,color:'var(--grey-400)'}}>Reversible — you can reopen later (status only)</span>
+              <div style={{display:'flex',gap:8}}><button className="btn" onClick={()=>setShowCancel(false)}>Keep event</button><button className="btn primary" disabled={cancelling} style={{background:'var(--red)',borderColor:'var(--red)'}} onClick={doCancelEvent}>{cancelling?'Cancelling…':'Cancel this event'}</button></div>
+            </div>
+          </div>
+        </div>
+        ); })()}
     </div>
   );
 
@@ -6632,7 +6745,7 @@ function ReportsModule({onNavigate}){
             <div>Event</div><div style={{textAlign:'right'}}>Fee</div><div style={{textAlign:'right'}}>Expenses</div><div style={{textAlign:'right'}}>Vendors</div><div style={{textAlign:'right'}}>Profit</div><div style={{textAlign:'right'}}>Margin</div>
           </div>
           {perEvent.map(e=><div key={e.event_id} onClick={()=>setPopupEvent(e.event_id)} style={{display:'grid',gridTemplateColumns:'1.6fr 90px 90px 90px 90px 70px',gap:6,padding:'10px 18px',borderTop:'1px solid var(--grey-100)',fontSize:12.5,cursor:'pointer'}}>
-            <div><span style={{color:'var(--pink)',fontWeight:500}}>{e.ref_number}</span> · {e.name}<div style={{fontSize:11,color:'var(--grey-400)'}}>{e.main_date?fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'}):'—'}{e.client_name?(' · '+e.client_name):''}</div></div>
+            <div><span style={{color:'var(--pink)',fontWeight:500}}>{e.ref_number}</span> · {e.name}{(e.status||'').toLowerCase()==='cancelled'&&<span style={{marginLeft:6,fontSize:9,padding:'1px 6px',borderRadius:8,background:'var(--red-light)',color:'var(--red)'}}>CANCELLED</span>}<div style={{fontSize:11,color:'var(--grey-400)'}}>{e.main_date?fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'}):'—'}{e.client_name?(' · '+e.client_name):''}</div></div>
             <div style={{textAlign:'right'}}>{inr(e.fee)}</div>
             <div style={{textAlign:'right'}}>{inr(e.ex)}</div>
             <div style={{textAlign:'right'}}>{inr(e.vn)}</div>
