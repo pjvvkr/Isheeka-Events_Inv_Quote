@@ -6224,6 +6224,95 @@ function ReportsModule({onNavigate}){
   const card={background:'white',border:'1px solid var(--grey-100)',borderRadius:'var(--radius-lg)',padding:'16px 18px'};
   const cardTitle={fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:12};
 
+  // ---- exports (Phase 4) ----
+  const [exporting,setExporting]=React.useState(false);
+  const evRefMap={}; events.forEach(e=>{ evRefMap[e.event_id]=(e.ref_number||'')+(e.name?(' · '+e.name):''); });
+  const rangeExpenses=expenses.filter(x=>range==='all'||inRange(x.date));
+  const rangeVpays=vpays.filter(x=>range==='all'||inRange(x.payment_date));
+  const stamp=todayLocalStr();
+  const safeRange=({month:'Month',quarter:'Quarter',year:'Year',all:'AllTime'}[range]);
+
+  const doExportExcel=async()=>{
+    if(typeof XLSX==='undefined'){ notify('Excel library not loaded. Please refresh.','error'); return; }
+    setExporting(true);
+    try{
+      const {data:s}=await supabase.from('settings').select('company_name').single();
+      const co=(s&&s.company_name)||'Isheeka Events';
+      const wb=XLSX.utils.book_new();
+      // Summary
+      const sum=[[co+' — Performance Report'],[rangeLabel+'  (generated '+stamp+')'],[],
+        ['KPI','Amount (₹)'],
+        ['Billed (fee)',Math.round(billed)],
+        ['Collected',Math.round(collected)],
+        ['Outstanding (current, all open)',Math.round(outstanding)],
+        ['Expenses',Math.round(totExp)],
+        ['Vendor payments',Math.round(totVend)],
+        ['Event profit (sum)',Math.round(sumEventProfit)],
+        ['General/overhead expenses',Math.round(genExpRange)],
+        ['Net profit (period)',Math.round(periodProfit)],
+      ];
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sum),'Summary');
+      // Per-event P&L
+      const pnl=[['Event ref','Event','Date','Client','Fee','Expenses','Vendors','Profit','Margin %']];
+      perEvent.forEach(e=>pnl.push([e.ref_number||'',e.name||'',e.main_date||'',e.client_name||'',Math.round(e.fee),Math.round(e.ex),Math.round(e.vn),Math.round(e.profit),e.fee>0?Math.round(e.margin):'']));
+      pnl.push(['','TOTAL ('+perEvent.length+' events)','','',Math.round(perEvent.reduce((s,e)=>s+e.fee,0)),Math.round(perEvent.reduce((s,e)=>s+e.ex,0)),Math.round(perEvent.reduce((s,e)=>s+e.vn,0)),Math.round(sumEventProfit),'']);
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(pnl),'Per-Event P&L');
+      // Expenses ledger
+      const exl=[['Date','Category','Event','Amount']];
+      rangeExpenses.slice().sort((a,b)=>String(b.date||'').localeCompare(a.date||'')).forEach(x=>exl.push([x.date||'',x.category||'',x.event_id?(evRefMap[x.event_id]||x.event_id):'General',Math.round(parseFloat(x.amount)||0)]));
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(exl),'Expenses');
+      // Vendor payments ledger
+      const vpl=[['Date','Event','Amount']];
+      rangeVpays.slice().sort((a,b)=>String(b.payment_date||'').localeCompare(a.payment_date||'')).forEach(x=>vpl.push([x.payment_date||'',x.event_id?(evRefMap[x.event_id]||x.event_id):'—',Math.round(parseFloat(x.amount)||0)]));
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(vpl),'Vendor Payments');
+      XLSX.writeFile(wb,'Isheeka_Report_'+safeRange+'_'+stamp+'.xlsx');
+      notify('Excel report downloaded.','success');
+    }catch(err){ console.error('[Isheeka ERP] excel export failed:',err); notify('Could not export Excel: '+(err&&err.message?err.message:'try again'),'error'); }
+    setExporting(false);
+  };
+
+  const doExportPDF=async()=>{
+    const jsPDFctor=window.jspdf&&window.jspdf.jsPDF;
+    if(!jsPDFctor){ notify('PDF library not loaded. Please refresh.','error'); return; }
+    setExporting(true);
+    try{
+      const {data:s}=await supabase.from('settings').select('company_name,phone_1,email,website').single();
+      const co=(s&&s.company_name)||'Isheeka Events';
+      const doc=new jsPDFctor({unit:'pt',format:'a4'});
+      const PINK=[232,24,90], INK=[40,40,40], MUTED=[140,140,140];
+      const W=doc.internal.pageSize.getWidth(), M=42; let y=0;
+      doc.setFillColor(PINK[0],PINK[1],PINK[2]); doc.rect(0,0,W,70,'F');
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.text(co,M,38);
+      doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.text('Performance Report',M,56);
+      doc.setFontSize(10); doc.text(rangeLabel+'   ·   generated '+stamp, W-M, 56, {align:'right'});
+      y=98;
+      // KPI summary
+      doc.setTextColor(INK[0],INK[1],INK[2]); doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.text('Summary',M,y); y+=8;
+      const kpis=[['Billed (fee)',billed],['Collected',collected],['Outstanding',outstanding],['Expenses',totExp],['Vendor payments',totVend],['Net profit (period)',periodProfit]];
+      const colW=(W-2*M)/3; let kx=M, ky=y+18;
+      kpis.forEach((k,i)=>{ const cx=M+(i%3)*colW, cy=ky+Math.floor(i/3)*46;
+        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]); doc.text(k[0],cx,cy);
+        doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(INK[0],INK[1],INK[2]); doc.text('₹'+Math.round(k[1]||0).toLocaleString('en-IN'),cx,cy+16);
+      });
+      y=ky+2*46+14;
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
+      doc.text('Net profit = event fees − event expenses − vendor payments (events by event date) − general overhead (₹'+Math.round(genExpRange).toLocaleString('en-IN')+'). Outstanding is current across all open invoices.',M,y,{maxWidth:W-2*M}); y+=18;
+      // per-event table
+      const body=perEvent.map(e=>[e.ref_number||'',e.name||'',e.main_date||'','₹'+Math.round(e.fee).toLocaleString('en-IN'),'₹'+Math.round(e.ex).toLocaleString('en-IN'),'₹'+Math.round(e.vn).toLocaleString('en-IN'),'₹'+Math.round(e.profit).toLocaleString('en-IN'),e.fee>0?Math.round(e.margin)+'%':'—']);
+      body.push(['','TOTAL ('+perEvent.length+')','','₹'+Math.round(perEvent.reduce((a,e)=>a+e.fee,0)).toLocaleString('en-IN'),'₹'+Math.round(perEvent.reduce((a,e)=>a+e.ex,0)).toLocaleString('en-IN'),'₹'+Math.round(perEvent.reduce((a,e)=>a+e.vn,0)).toLocaleString('en-IN'),'₹'+Math.round(sumEventProfit).toLocaleString('en-IN'),'']);
+      doc.autoTable({
+        startY:y, head:[['Ref','Event','Date','Fee','Expenses','Vendors','Profit','Margin']], body,
+        styles:{fontSize:8,cellPadding:4}, headStyles:{fillColor:PINK,textColor:255,fontStyle:'bold'},
+        columnStyles:{3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},6:{halign:'right'},7:{halign:'right'}},
+        theme:'grid', tableLineColor:PINK, tableLineWidth:0.4, margin:{left:M,right:M},
+        didParseCell:(d)=>{ if(d.row.index===body.length-1){ d.cell.styles.fontStyle='bold'; d.cell.styles.fillColor=[251,234,240]; } }
+      });
+      doc.save('Isheeka_Report_'+safeRange+'_'+stamp+'.pdf');
+      notify('PDF report downloaded.','success');
+    }catch(err){ console.error('[Isheeka ERP] pdf export failed:',err); notify('Could not export PDF: '+(err&&err.message?err.message:'try again'),'error'); }
+    setExporting(false);
+  };
+
   if(loading) return <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>;
 
   return (
@@ -6231,8 +6320,12 @@ function ReportsModule({onNavigate}){
       {popupEvent&&<EventQuickView eventId={popupEvent} onClose={()=>setPopupEvent(null)} onNavigate={onNavigate}/>}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:10}}>
         <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>Reports</div>
-        <div style={{display:'flex',gap:4,background:'var(--grey-100)',padding:3,borderRadius:'var(--radius-md)'}}>
-          {[['month','Month'],['quarter','Quarter'],['year','Year'],['all','All']].map(([k,l])=><button key={k} onClick={()=>setRange(k)} style={{border:'none',cursor:'pointer',fontSize:12,padding:'5px 12px',borderRadius:'var(--radius-sm)',background:range===k?'white':'transparent',color:range===k?'var(--pink)':'var(--grey-400)',fontWeight:range===k?600:400,boxShadow:range===k?'0 1px 2px rgba(0,0,0,0.08)':'none'}}>{l}</button>)}
+        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          <div style={{display:'flex',gap:4,background:'var(--grey-100)',padding:3,borderRadius:'var(--radius-md)'}}>
+            {[['month','Month'],['quarter','Quarter'],['year','Year'],['all','All']].map(([k,l])=><button key={k} onClick={()=>setRange(k)} style={{border:'none',cursor:'pointer',fontSize:12,padding:'5px 12px',borderRadius:'var(--radius-sm)',background:range===k?'white':'transparent',color:range===k?'var(--pink)':'var(--grey-400)',fontWeight:range===k?600:400,boxShadow:range===k?'0 1px 2px rgba(0,0,0,0.08)':'none'}}>{l}</button>)}
+          </div>
+          <button className="btn sm" disabled={exporting} onClick={doExportExcel} title="Export to Excel">{exporting?'…':'⬇ Excel'}</button>
+          <button className="btn sm" disabled={exporting} onClick={doExportPDF} title="Export to PDF">{exporting?'…':'⬇ PDF'}</button>
         </div>
       </div>
 
