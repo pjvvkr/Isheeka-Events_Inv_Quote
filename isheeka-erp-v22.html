@@ -274,7 +274,7 @@ function TplNameInput({value, onChange}) {
     </div>
   );
 }
-function TplDescInput({value, onChange}) {
+function TplDescInput({value, onChange, onPaste}) {
   const [suggestions, setSuggestions] = React.useState([]);
   const [filtered, setFiltered] = React.useState([]);
   const [open, setOpen] = React.useState(false);
@@ -297,7 +297,7 @@ function TplDescInput({value, onChange}) {
   return (
     <div style={{position:'relative',width:'100%'}}>
       <input style={{border:'none',background:'transparent',fontSize:13,width:'100%',outline:'none',color:'var(--grey-800)'}}
-        value={value} onChange={e=>handleChange(e.target.value)}
+        value={value} onChange={e=>handleChange(e.target.value)} onPaste={onPaste}
         onFocus={handleFocus} onBlur={()=>setTimeout(()=>setOpen(false),150)}
         placeholder="Item description"/>
       {open && filtered.length>0 && (
@@ -353,6 +353,55 @@ function TemplateEditor({template, onSave, onCancel}) {
   const addItem = (seId) => setSubEvents(s=>s.map(se=>se.id===seId?{...se,items:[...se.items,{id:'i-'+Date.now(),description:'',default_quantity:1,sort_order:se.items.length}]}:se));
   const removeItem = (seId,iId) => setSubEvents(s=>s.map(se=>se.id===seId?{...se,items:se.items.filter(i=>i.id!==iId)}:se));
   const updateItem = (seId,iId,field,val) => setSubEvents(s=>s.map(se=>se.id===seId?{...se,items:se.items.map(i=>i.id===iId?{...i,[field]:val}:i)}:se));
+  // ── Bulk paste from Excel ──
+  const [pasteFor, setPasteFor] = React.useState(null); // sub-event id or '__all__'
+  const [pasteText, setPasteText] = React.useState('');
+  const uid6 = () => Math.random().toString(36).slice(2,8);
+  const parsePasted = (text, force2) => {
+    const lines = String(text||'').replace(/\r/g,'').split('\n').filter(l=>l.trim()!=='');
+    let maxc=1; lines.forEach(l=>{ const c=l.split('\t').length; if(c>maxc) maxc=c; });
+    const mode = force2 ? 2 : (maxc>=3?3:(maxc===2?2:1));
+    const rows = lines.map(l=>{ const p=l.split('\t');
+      if(mode>=3) return {subEvent:(p[0]||'').trim(), description:(p[1]||'').trim(), qty:parseFloat(p[2])||1};
+      return {description:(p[0]||'').trim(), qty:(mode===2?(parseFloat(p[1])||1):1)};
+    }).filter(r=>r.description);
+    return {mode, rows};
+  };
+  const pasteParsed = pasteText.trim()?parsePasted(pasteText):{mode:0,rows:[]};
+  const applyBulkPaste = () => {
+    const {mode, rows} = pasteParsed;
+    if(rows.length===0){ notify('No rows detected to add.','error'); return; }
+    if(mode>=3){
+      setSubEvents(prev=>{
+        const byKey={}, order=[];
+        prev.forEach(se=>{ const k=(se.name||'').trim().toLowerCase(); byKey[k]={...se,items:[...se.items]}; order.push(k); });
+        rows.forEach(r=>{ const nm=r.subEvent||'Main Event', k=nm.trim().toLowerCase();
+          if(!byKey[k]){ byKey[k]={id:'se-'+Date.now()+uid6(),name:nm,items:[]}; order.push(k); }
+          byKey[k].items.push({id:'i-'+Date.now()+uid6(),description:r.description,default_quantity:r.qty,sort_order:byKey[k].items.length});
+        });
+        return order.map(k=>byKey[k]);
+      });
+    } else {
+      const seId=pasteFor;
+      setSubEvents(prev=>prev.map(se=> se.id===seId ? {...se, items:[...se.items, ...rows.map((r,k)=>({id:'i-'+Date.now()+uid6()+k,description:r.description,default_quantity:r.qty,sort_order:se.items.length+k}))]} : se));
+    }
+    notify('Added '+rows.length+' item'+(rows.length>1?'s':'')+'.','success');
+    setPasteFor(null); setPasteText('');
+  };
+  const handleCellPaste = (seId, itemId, e) => {
+    const text=((e.clipboardData||window.clipboardData)||{}).getData ? (e.clipboardData||window.clipboardData).getData('text') : '';
+    if(!text || !/[\n\t]/.test(text)) return; // single value → let it paste normally
+    e.preventDefault();
+    const {rows}=parsePasted(text, true); // cell paste = 2-col semantics into this sub-event
+    if(rows.length===0) return;
+    setSubEvents(prev=>prev.map(se=>{ if(se.id!==seId) return se;
+      const items=[...se.items]; const idx=items.findIndex(i=>i.id===itemId);
+      const mapped=rows.map(r=>({id:'i-'+Date.now()+uid6(),description:r.description,default_quantity:r.qty,sort_order:0}));
+      if(idx>=0) items.splice(idx,1,...mapped); else items.push(...mapped);
+      return {...se, items:items.map((it,n)=>({...it,sort_order:n}))};
+    }));
+    notify('Pasted '+rows.length+' row'+(rows.length>1?'s':'')+'.','success');
+  };
 
   const moveSE = (idx, dir) => {
     const s=[...subEvents];
@@ -436,14 +485,18 @@ function TemplateEditor({template, onSave, onCancel}) {
             <tbody>
               {se.items.map((item,ii)=>(
                 <tr key={item.id} style={{borderBottom:'1px solid var(--grey-100)'}}>
-                  <td style={{padding:'6px 8px'}}><TplDescInput value={item.description} onChange={v=>updateItem(se.id,item.id,'description',v)}/></td>
+                  <td style={{padding:'6px 8px'}}><TplDescInput value={item.description} onChange={v=>updateItem(se.id,item.id,'description',v)} onPaste={e=>handleCellPaste(se.id,item.id,e)}/></td>
                   <td style={{padding:'6px 8px'}}><TplQtyInput value={item.default_quantity} onChange={v=>updateItem(se.id,item.id,'default_quantity',v)}/></td>
                   <td style={{padding:'6px 8px',textAlign:'center'}}><button style={{background:'none',border:'none',cursor:'pointer',color:'var(--grey-400)',fontSize:13}} onClick={()=>removeItem(se.id,item.id)}>✕</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <button className="btn sm" style={{marginTop:8,border:'1px dashed var(--grey-200)',color:'var(--grey-400)'}} onClick={()=>addItem(se.id)}>+ Add item</button>
+          <div style={{marginTop:8,display:'flex',gap:8,alignItems:'center'}}>
+            <button className="btn sm" style={{border:'1px dashed var(--grey-200)',color:'var(--grey-400)'}} onClick={()=>addItem(se.id)}>+ Add item</button>
+            <button className="btn sm" style={{border:'1px dashed var(--pink-mid)',color:'var(--pink-dark)'}} onClick={()=>{setPasteFor(se.id);setPasteText('');}}>⎘ Paste from Excel</button>
+            <span style={{fontSize:11,color:'var(--grey-400)'}}>tip: you can also paste a column straight into a description cell</span>
+          </div>
         </div>
       ))}
 
@@ -455,6 +508,20 @@ function TemplateEditor({template, onSave, onCancel}) {
         <button className="btn" onClick={onCancel}>Cancel</button>
         <button className="btn primary" onClick={handleSave} disabled={saving}>{saving?'⏳ Saving...':'💾 Save template'}</button>
       </div>
+
+      {pasteFor&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1300,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget)setPasteFor(null);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:560}}>
+            <div style={{padding:'14px 20px',borderBottom:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}><div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Paste items from Excel</div><button className="btn sm" onClick={()=>setPasteFor(null)}>✕</button></div>
+            <div style={{padding:'16px 20px'}}>
+              <div style={{fontSize:12,color:'var(--grey-500)',marginBottom:8,lineHeight:1.6}}>Copy cells from Excel and paste below. Columns are auto-detected:<br/><b>2 columns</b> = Description &nbsp;⇥&nbsp; Qty → added to <b>{(subEvents.find(s=>s.id===pasteFor)||{}).name||'this sub-event'}</b>. &nbsp; <b>3 columns</b> = Sub-event &nbsp;⇥&nbsp; Description &nbsp;⇥&nbsp; Qty → builds/merges all sub-events. Qty optional (defaults to 1).</div>
+              <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} rows={9} style={{width:'100%',fontFamily:'monospace',fontSize:12,padding:'8px 10px',border:'1px solid var(--grey-200)',borderRadius:'var(--radius-md)',resize:'vertical'}} placeholder={"Stage Decoration\t1\nEntrance Arch\t1\nPathway\t2\nWelcome Girls\t4"}/>
+              <div style={{fontSize:12,color:pasteParsed.rows.length?'var(--green)':'var(--grey-400)',marginTop:8}}>{pasteParsed.rows.length?('✓ '+pasteParsed.rows.length+' row'+(pasteParsed.rows.length>1?'s':'')+' detected · '+(pasteParsed.mode>=3?'3 columns (builds sub-events)':(pasteParsed.mode===2?'2 columns':'1 column'))):'Nothing detected yet — paste rows above.'}</div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setPasteFor(null)}>Cancel</button><button className="btn primary" disabled={!pasteParsed.rows.length} onClick={applyBulkPaste}>{pasteParsed.rows.length?('Add '+pasteParsed.rows.length+' item'+(pasteParsed.rows.length>1?'s':'')):'Add items'}</button></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
