@@ -2326,6 +2326,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [quoteWizardSubs, setQuoteWizardSubs] = React.useState([]);
   const [reviseQuoteId, setReviseQuoteId] = React.useState(null);
   const [invoices, setInvoices] = React.useState([]);
+  const [invInstallments, setInvInstallments] = React.useState([]);
   const [eventVendors, setEventVendors] = React.useState([]);
   const [showAddVendor, setShowAddVendor] = React.useState(false);
   const [vForm, setVForm] = React.useState({mode:'existing',vendorId:'',vendorName:'',category:'other',service:'',agreed:''});
@@ -2540,6 +2541,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     if(chk) setChecklist(chk);
     if(quotes) setQuotations(quotes);
     if(invs) setInvoices(invs);
+    if(invs&&invs.length){ const {data:iin}=await supabase.from('invoice_installments').select('invoice_id,balance,is_deleted').in('invoice_id',invs.map(i=>i.invoice_id)).eq('is_deleted',false); setInvInstallments(iin||[]); } else { setInvInstallments([]); }
     if(staff) setStaffList(staff);
     setLoading(false);
   };
@@ -2609,8 +2611,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   };
 
   const markEventCompleted = async () => {
+    if(!funnel.canComplete){ notify('Can’t complete yet — '+(funnel.blocker||'the client invoice isn’t fully paid.'),'error'); return; }
     const leadNote = linkedLead ? ('\n\nThis will also close the source lead '+(linkedLead.ref_number||'')+'.') : '';
-    if(!window.confirm('Mark this event as completed?'+leadNote+'\n\nUse this once the event has been delivered.')) return;
+    const vNote = funnel.vendorBalance>0 ? ('\n\nNote: ₹'+Math.round(funnel.vendorBalance).toLocaleString('en-IN')+' is still owed to vendors for this event. That won’t be blocked — settle it from the vendor section when ready.') : '';
+    if(!window.confirm('Mark this event as completed?'+leadNote+vNote+'\n\nUse this once the event has been delivered.')) return;
     const {error:ese}=await runDb(supabase.from('events').update({status:'completed',updated_at:new Date().toISOString()}).eq('event_id',eventId),'mark event completed');
     if(ese) return;
     setEvent(ev=>({...ev,status:'completed'}));
@@ -2780,6 +2784,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   // would silently diverge from the document the client received/paid against. Draft invoices still
   // auto-refresh from the quote, so revising is fine while the only invoice is a draft.
   const invoiceIssued = invoices.some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase()));
+  // Derived funnel — drives the progress badge + the Mark-completed gate.
+  const vendorOutstandingTotal = eventVendors.reduce((s,v)=>s+(parseFloat(v.outstanding)||0),0);
+  const hasApprovedQuote = quotations.some(q=>['approved','converted','invoiced'].includes((q.status||'').toLowerCase()));
+  const funnel = eventFunnel({invoices, installments:invInstallments, vendorOutstanding:vendorOutstandingTotal, hasApprovedQuote});
   const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name}));
   const typeOpts = eventTypes.map(t=>({value:t.value,label:t.label}));
   const statusOpts = EVENT_STATUS_ORDER.map(s=>({value:s,label:EVENT_STATUS_LABELS[s]}));
@@ -2807,7 +2815,12 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
             <span style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,background:sc.bg,color:sc.color}}>
               {EVENT_STATUS_LABELS[event.status?.toLowerCase()]||event.status}
             </span>
-            {!['completed','cancelled'].includes(event.status?.toLowerCase())&&<button className="btn sm" onClick={markEventCompleted} title="Marks the event delivered and closes the source lead">✅ Mark completed</button>}
+            {!['cancelled'].includes(event.status?.toLowerCase())&&<EventFunnelBadge funnel={event.status?.toLowerCase()==='completed'?{...funnel,label:null}:funnel}/>}
+            {!['completed','cancelled'].includes(event.status?.toLowerCase())&&(
+              funnel.canComplete
+                ? <button className="btn sm" onClick={markEventCompleted} title="Client invoice fully paid — marks the event delivered and closes the source lead">✅ Mark completed</button>
+                : <button className="btn sm" disabled style={{opacity:0.5,cursor:'not-allowed'}} title={'Can’t complete yet — '+(funnel.blocker||'client invoice not fully paid.')+(funnel.vendorBalance>0?' (Vendor balance ₹'+Math.round(funnel.vendorBalance).toLocaleString('en-IN')+' can be settled later — it doesn’t block.)':'')}>✅ Mark completed</button>
+            )}
             {event.status?.toLowerCase()!=='cancelled'&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={openCancel} title="Cancel this event and reconcile its invoices, vendors and schedules">⛔ Cancel event</button>}
             {event.status?.toLowerCase()==='cancelled'&&<button className="btn sm" onClick={doReopenEvent} title="Reopen to Planning (status only)">↩ Reopen event</button>}
             <button className="btn sm" onClick={()=>onUseAsReference(event)}>📋 Use as reference</button>
@@ -2975,11 +2988,11 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
               <div style={{fontSize:11,color:'var(--grey-400)',fontWeight:500,textTransform:'uppercase',letterSpacing:'.04em'}}>Quotations ({quotations.length})</div>
-              {activeQuote
-                ? (invoiceIssued
-                    ? <span style={{fontSize:11,color:'var(--grey-400)',display:'inline-flex',alignItems:'center',gap:4}} title="An invoice has already been issued for this event. To change scope or pricing, revise the invoice instead — revising the quote now would diverge from the issued invoice.">🔒 Invoice issued — revise the invoice</span>
-                    : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:activeQuote.quotation_id})} title="Open the quotation to revise/send">📄 Open quote →</button>)
-                : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>}
+              {quotations.length===0
+                ? <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>
+                : invoiceIssued
+                  ? <span style={{fontSize:11,color:'var(--grey-400)',display:'inline-flex',alignItems:'center',gap:4}} title="An invoice has already been issued for this event. To change scope or pricing, revise the invoice instead — revising the quote now would diverge from the issued invoice.">🔒 Invoice issued — revise the invoice</span>
+                  : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:(activeQuote||quotations[0]).quotation_id})} title="Open the quotation">📄 Open quote →</button>}
             </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
             {(()=>{
@@ -4735,6 +4748,60 @@ const INVOICE_STATUS_COLORS = {
   cancelled:{bg:'#F1EFE8',color:'#888780',dot:'#B4B2A9'},
 };
 const INVOICE_STATUS_LABELS = {draft:'Draft',sent:'Sent',partially_paid:'Partly paid',paid:'Paid',overdue:'Overdue',cancelled:'Cancelled'};
+// ── Derived event funnel (client ladder + vendor balance) ─────────────────────
+// Computed LIVE from invoices + installments + vendor dues. Nothing is stored, so
+// it can never drift out of sync. Drives the progress sub-badge AND the
+// Mark-completed gate. Client side is the gate; vendor balance is a visible flag
+// that never blocks (vendors are often paid on post-event terms).
+function eventFunnel({invoices, installments, vendorOutstanding, hasApprovedQuote}={}){
+  const active=(invoices||[]).filter(i=>(i.status||'').toLowerCase()!=='cancelled');
+  const issued=active.filter(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase()));
+  const grand=active.reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0);
+  const received=active.reduce((s,i)=>s+(parseFloat(i.total_received)||0),0);
+  const outstanding=active.reduce((s,i)=>s+((parseFloat(i.total_outstanding!=null?i.total_outstanding:((parseFloat(i.grand_total)||0)-(parseFloat(i.total_received)||0)))||0)),0);
+  const vBal=Math.max(0,parseFloat(vendorOutstanding)||0);
+  const insts=(installments||[]).filter(x=>!x.is_deleted);
+  let stage='pre', label=null, clientPaid=false;
+  if(issued.length===0){
+    if(hasApprovedQuote){ stage='quote_approved'; label='Quote approved'; }
+  } else if(received<=0.5){
+    stage='invoice_issued'; label='Invoice issued';
+  } else if(outstanding>0.5){
+    stage='partly_paid';
+    const paidN=insts.filter(x=>(parseFloat(x.balance)||0)<=0.5).length;
+    label=(insts.length>0)
+      ? paidN+' of '+insts.length+' installment'+(insts.length>1?'s':'')+' received'
+      : 'Part-paid · ₹'+Math.round(received).toLocaleString('en-IN')+' of ₹'+Math.round(grand).toLocaleString('en-IN');
+  } else {
+    stage='paid'; label='Invoice fully paid'; clientPaid=true;
+  }
+  let blocker=null;
+  if(!clientPaid){
+    if(issued.length===0) blocker = hasApprovedQuote ? 'Issue an invoice and collect payment before completing.' : 'Approve a quote and issue an invoice before completing.';
+    else if(received<=0.5) blocker='Invoice issued, but no client payment received yet.';
+    else blocker='₹'+Math.round(outstanding).toLocaleString('en-IN')+' still outstanding from the client.';
+  }
+  return {stage,label,vendorBalance:vBal,clientPaid,canComplete:clientPaid,blocker,received,grand,outstanding};
+}
+const EVENT_STAGE_COLORS={
+  quote_approved:{bg:'#E6F1FB',color:'#185FA5'},
+  invoice_issued:{bg:'#FAEEDA',color:'#854F0B'},
+  partly_paid:{bg:'#FAEEDA',color:'#854F0B'},
+  paid:{bg:'#E1F5EE',color:'#0F6E56'},
+};
+// Renders the funnel sub-badge: the client-ladder stage chip + (if any) a red
+// vendor-balance chip. `compact` trims padding for list rows.
+function EventFunnelBadge({funnel, compact}){
+  if(!funnel) return null;
+  const pad=compact?'2px 8px':'3px 10px'; const fs=compact?11:12;
+  const sc=EVENT_STAGE_COLORS[funnel.stage];
+  return (
+    <span style={{display:'inline-flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+      {funnel.label&&sc&&<span style={{padding:pad,borderRadius:20,fontSize:fs,fontWeight:500,background:sc.bg,color:sc.color}}>{funnel.label}</span>}
+      {funnel.vendorBalance>0&&<span title="Outstanding vendor dues for this event" style={{padding:pad,borderRadius:20,fontSize:fs,fontWeight:500,background:'#FCEBEB',color:'#A32D2D'}}>Vendor balance ₹{Math.round(funnel.vendorBalance).toLocaleString('en-IN')}</span>}
+    </span>
+  );
+}
 const EVENT_TYPES = ['Wedding','Corporate','Birthday','Anniversary','Other'];
 const BUDGET_RANGES = [
   {label:'All budgets',value:''},
@@ -4766,6 +4833,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
   const [budgetFilter, setBudgetFilter] = useState('');
   const [saveSuccess, setSaveSuccess] = useState('');
   const [staffList, setStaffList] = useState([]);
+  const [eventFunnels, setEventFunnels] = useState({});
 
   useEffect(()=>{ loadEvents(); loadStaff(); },[]);
 
@@ -4785,6 +4853,25 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
         return new Date(a.main_date||0)-new Date(b.main_date||0);
       });
       setEvents(sorted);
+      // Build the derived funnel badge for every row from batched aggregates (4 queries, not per-row).
+      try{
+        const [{data:invs},{data:evs},{data:qs}] = await Promise.all([
+          supabase.from('invoices').select('invoice_id,event_id,status,grand_total,total_received,total_outstanding').eq('is_deleted',false),
+          supabase.from('event_vendors').select('event_id,outstanding').eq('is_deleted',false),
+          supabase.from('quotations').select('event_id,status').eq('is_deleted',false),
+        ]);
+        const invToEvent={}; (invs||[]).forEach(i=>{ invToEvent[i.invoice_id]=i.event_id; });
+        let insts=[];
+        const invIds=(invs||[]).map(i=>i.invoice_id);
+        if(invIds.length){ const {data:iin}=await supabase.from('invoice_installments').select('invoice_id,balance,is_deleted').in('invoice_id',invIds).eq('is_deleted',false); insts=iin||[]; }
+        const invByEvent={}; (invs||[]).forEach(i=>{ (invByEvent[i.event_id]=invByEvent[i.event_id]||[]).push(i); });
+        const instByEvent={}; insts.forEach(x=>{ const eid=invToEvent[x.invoice_id]; if(eid){ (instByEvent[eid]=instByEvent[eid]||[]).push(x); } });
+        const vOutByEvent={}; (evs||[]).forEach(v=>{ vOutByEvent[v.event_id]=(vOutByEvent[v.event_id]||0)+(parseFloat(v.outstanding)||0); });
+        const apprByEvent={}; (qs||[]).forEach(q=>{ if(['approved','converted','invoiced'].includes((q.status||'').toLowerCase())) apprByEvent[q.event_id]=true; });
+        const fmap={};
+        sorted.forEach(e=>{ fmap[e.event_id]=eventFunnel({invoices:invByEvent[e.event_id]||[], installments:instByEvent[e.event_id]||[], vendorOutstanding:vOutByEvent[e.event_id]||0, hasApprovedQuote:!!apprByEvent[e.event_id]}); });
+        setEventFunnels(fmap);
+      }catch(err){ /* badge is best-effort; never block the list */ }
     }
     setLoading(false);
   },[]);
@@ -4884,9 +4971,10 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
                 <div style={{display:'grid',gridTemplateColumns:'6px 1fr auto auto',alignItems:'stretch'}}>
                   <div style={{background:sc.dot,borderRadius:'var(--radius-lg) 0 0 var(--radius-lg)'}}></div>
                   <div style={{padding:'14px 16px'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
                       <span style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{e.name}</span>
                       <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{EVENT_STATUS_LABELS[es]||es}</span>
+                      {es!=='cancelled'&&<EventFunnelBadge compact funnel={es==='completed'?{...(eventFunnels[e.event_id]||{}),label:null}:eventFunnels[e.event_id]}/>}
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {e.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{e.ref_number}</span>}
@@ -4939,6 +5027,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [showClose, setShowClose] = React.useState(false);
   const [closeForm, setCloseForm] = React.useState({outcome:'client',reason:'',notes:''});
   const [closing, setClosing] = React.useState(false);
+  const [showWelcome, setShowWelcome] = React.useState(false);
+  const [welcomeData, setWelcomeData] = React.useState(null);
   const doCloseQuote = async () => {
     if(!closeForm.reason){ notify('Pick a reason.','error'); return; }
     setClosing(true);
@@ -5042,7 +5132,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       if(quot.status!=='approved'){ const {error}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id); if(error) throw error; }
       const res = await createEventFromQuote(convertLead, {quot, forcedClientId: quot.client_id||convertLead.client_id||undefined});
       setShowConvert(false); setConfirming(false);
-      onNavigate&&onNavigate('events',{eventId:res.eventId});
+      setWelcomeData({eventId:res.eventId, clientOutcome:res.clientOutcome, leadObj:convertLead}); setShowWelcome(true);
     } catch(err){
       console.error('[Isheeka ERP] convert-from-quote failed:', err);
       notify('Could not create the event: '+(err&&err.message?err.message:'Please try again.'),'error');
@@ -5233,6 +5323,13 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           </div>
         </div>
       )}
+      {showWelcome&&welcomeData&&<WelcomeMessageModal
+        lead={welcomeData.leadObj||convertLead||{first_name:quot.client_name||'',last_name:'',event_type:''}}
+        quotRef={quot.ref_number}
+        clientOutcome={welcomeData.clientOutcome}
+        onGoToEvent={()=>{ setShowWelcome(false); onNavigate&&onNavigate('events',{eventId:welcomeData.eventId}); }}
+        onClose={()=>{ setShowWelcome(false); onNavigate&&onNavigate('events',{eventId:welcomeData.eventId}); }}
+      />}
     </div>
   );
 }
@@ -5269,9 +5366,9 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
   return (
     <div>
       <div className="metrics-grid" style={{marginBottom:20}}>
-        <div className="metric-card pink"><div className="metric-icon">📋</div><div className="metric-value">{quotes.length}</div><div className="metric-label">Total quotations</div></div>
+        <div className="metric-card pink"><div className="metric-icon">📋</div><div className="metric-value">{cnt(q=>q.status!=='superseded')}</div><div className="metric-label">Total quotations</div></div>
         <div className="metric-card orange"><div className="metric-icon">📤</div><div className="metric-value">{cnt(q=>q.status==='sent')}</div><div className="metric-label">Awaiting response</div></div>
-        <div className="metric-card green"><div className="metric-icon">✅</div><div className="metric-value">{cnt(q=>['approved','converted'].includes(q.status))}</div><div className="metric-label">Confirmed</div></div>
+        <div className="metric-card green"><div className="metric-icon">✅</div><div className="metric-value">{cnt(q=>['approved','converted','invoiced'].includes(q.status))}</div><div className="metric-label">Confirmed</div></div>
         <div className="metric-card pink"><div className="metric-icon">📝</div><div className="metric-value">{cnt(q=>q.status==='draft')}</div><div className="metric-label">Draft</div></div>
       </div>
 
@@ -6186,7 +6283,7 @@ async function recordVendorPayment(ev, pay){
 async function recordVendorRefund(ev, refund){
   const amt=parseFloat(refund.amount)||0; if(amt<=0) return;
   const instId=(refund.installmentId)||await _ensureVendorInstallment(ev.event_vendor_id, ev.agreed_amount);
-  const {error:pe}=await supabase.from('vendor_payments').insert({event_vendor_id:ev.event_vendor_id,installment_id:instId,vendor_id:ev.vendor_id,event_id:ev.event_id,amount:-amt,payment_date:refund.date||todayLocalStr(),payment_mode:'refund',reference_number:refund.reference||null,notes:('Refund: '+(refund.reason||'')),is_refund:true,recorded_by:await _currentUid(),recorded_at:new Date().toISOString()});
+  const {error:pe}=await supabase.from('vendor_payments').insert({event_vendor_id:ev.event_vendor_id,installment_id:instId,vendor_id:ev.vendor_id,event_id:ev.event_id,amount:-amt,payment_date:refund.date||todayLocalStr(),payment_mode:null,reference_number:refund.reference||null,notes:('Refund: '+(refund.reason||'')),is_refund:true,recorded_by:await _currentUid(),recorded_at:new Date().toISOString()});
   if(pe) throw pe;
   const {data:inst}=await supabase.from('vendor_installments').select('amount_due,amount_paid').eq('installment_id',instId).single();
   const ip=Math.max(0,(parseFloat(inst&&inst.amount_paid)||0)-amt), idue=parseFloat(inst&&inst.amount_due)||0, ibal=Math.max(0,idue-ip);
@@ -6199,7 +6296,7 @@ async function recordClientRefund(inv, refund){
   const amt=parseFloat(refund.amount)||0; if(amt<=0) return;
   let instId=refund.installmentId||null;
   if(!instId){ const {data:ins}=await supabase.from('invoice_installments').select('installment_id').eq('invoice_id',inv.invoice_id).eq('is_deleted',false).order('installment_number').limit(1); instId=(ins&&ins[0]&&ins[0].installment_id)||null; }
-  const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:inv.invoice_id,installment_id:instId,amount:-amt,payment_date:refund.date||todayLocalStr(),payment_mode:'refund',reference_number:refund.reference||null,notes:('Refund: '+(refund.reason||'')),is_refund:true,recorded_by:await _currentUid()});
+  const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:inv.invoice_id,installment_id:instId,amount:-amt,payment_date:refund.date||todayLocalStr(),payment_mode:null,reference_number:refund.reference||null,notes:('Refund: '+(refund.reason||'')),is_refund:true,recorded_by:await _currentUid()});
   if(pe) throw pe;
   const newRecv=Math.max(0,(parseFloat(inv.total_received)||0)-amt), grand=parseFloat(inv.grand_total)||0, out=Math.max(0,grand-newRecv);
   const st=(inv.status==='cancelled')?'cancelled':(newRecv<=0?'sent':(out<=0?'paid':'partially_paid'));
