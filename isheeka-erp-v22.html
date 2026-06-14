@@ -2262,9 +2262,21 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [vForm, setVForm] = React.useState({mode:'existing',vendorId:'',vendorName:'',category:'other',service:'',agreed:''});
   const [vendorMaster, setVendorMaster] = React.useState([]);
   const [payVendorFor, setPayVendorFor] = React.useState(null);
+  const [payInst, setPayInst] = React.useState(null);
   const [vPay, setVPay] = React.useState({amount:'',date:todayLocalStr(),mode:'upi',reference:''});
   const [vSaving, setVSaving] = React.useState(false);
-  const loadEventVendors = React.useCallback(async()=>{ const {data}=await supabase.from('event_vendors').select('*').eq('event_id',eventId).eq('is_deleted',false).order('created_at'); setEventVendors(data||[]); },[eventId]);
+  const [eventInstallments, setEventInstallments] = React.useState({});
+  const [expandedVendor, setExpandedVendor] = React.useState(null);
+  const [instFor, setInstFor] = React.useState(null);
+  const [instForm, setInstForm] = React.useState({id:null,label:'',amount:'',due_date:''});
+  const loadEventVendors = React.useCallback(async()=>{
+    const {data}=await supabase.from('event_vendors').select('*').eq('event_id',eventId).eq('is_deleted',false).order('created_at');
+    const evs=data||[]; setEventVendors(evs);
+    const ids=evs.map(v=>v.event_vendor_id);
+    let map={};
+    if(ids.length){ const {data:ii}=await supabase.from('vendor_installments').select('*').in('event_vendor_id',ids).order('installment_number'); (ii||[]).forEach(it=>{ (map[it.event_vendor_id]=map[it.event_vendor_id]||[]).push(it); }); }
+    setEventInstallments(map);
+  },[eventId]);
   React.useEffect(()=>{ loadEventVendors(); },[loadEventVendors]);
   React.useEffect(()=>{ (async()=>{ const {data}=await supabase.from('vendors').select('vendor_id,name,category').eq('is_deleted',false).eq('status','active').order('name'); setVendorMaster(data||[]); })(); },[showAddVendor]);
   const submitAddVendor=async()=>{
@@ -2285,9 +2297,35 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const submitVendorPayment=async()=>{
     const amt=parseFloat(vPay.amount)||0; if(amt<=0){ notify('Enter a valid amount.','error'); return; }
     setVSaving(true);
-    try{ await recordVendorPayment(payVendorFor, {amount:amt,date:vPay.date,mode:vPay.mode,reference:vPay.reference}); setPayVendorFor(null); setVPay({amount:'',date:todayLocalStr(),mode:'upi',reference:''}); notify('Payment recorded.','success'); await loadEventVendors(); }
+    try{ await recordVendorPayment(payVendorFor, {amount:amt,date:vPay.date,mode:vPay.mode,reference:vPay.reference,installmentId:payInst&&payInst.installment_id}); setPayVendorFor(null); setPayInst(null); setVPay({amount:'',date:todayLocalStr(),mode:'upi',reference:''}); notify('Payment recorded.','success'); await loadEventVendors(); }
     catch(err){ notify('Could not record payment: '+(err&&err.message?err.message:''),'error'); }
     setVSaving(false);
+  };
+  const openPayInstallment=(v,inst)=>{ setPayVendorFor(v); setPayInst(inst); const bal=inst?Math.max(0,(parseFloat(inst.amount_due)||0)-(parseFloat(inst.amount_paid)||0)):(parseFloat(v.outstanding)||0); setVPay({amount:bal>0?String(Math.round(bal)):'',date:todayLocalStr(),mode:'upi',reference:''}); };
+  const openInstEditor=(v,inst)=>{ setInstFor(v); setInstForm(inst?{id:inst.installment_id,label:inst.label||'',amount:String(Math.round(parseFloat(inst.amount_due)||0)),due_date:inst.due_date||''}:{id:null,label:'',amount:'',due_date:''}); };
+  const submitInstallment=async()=>{
+    const v=instFor; if(!v) return;
+    const amt=parseFloat(instForm.amount)||0; if(amt<=0){ notify('Enter the installment amount.','error'); return; }
+    setVSaving(true);
+    try{
+      if(instForm.id){
+        const existing=(eventInstallments[v.event_vendor_id]||[]).find(x=>x.installment_id===instForm.id);
+        const paid=parseFloat(existing&&existing.amount_paid)||0; const bal=Math.max(0,amt-paid);
+        const {error}=await runDb(supabase.from('vendor_installments').update({label:instForm.label||null,amount_due:amt,balance:bal,due_date:instForm.due_date||null,status:bal<=0?'paid':(paid>0?'partially_paid':'pending'),updated_at:new Date().toISOString()}).eq('installment_id',instForm.id),'update installment'); if(error) throw error;
+      } else {
+        const existing=eventInstallments[v.event_vendor_id]||[];
+        const num=existing.reduce((m,x)=>Math.max(m,x.installment_number||0),0)+1;
+        const {error}=await runDb(supabase.from('vendor_installments').insert({event_vendor_id:v.event_vendor_id,installment_number:num,label:instForm.label||null,amount_due:amt,amount_paid:0,balance:amt,due_date:instForm.due_date||null,status:'pending',created_at:new Date().toISOString()}),'add installment'); if(error) throw error;
+      }
+      setInstFor(null); notify('Schedule updated.','success'); await loadEventVendors();
+    }catch(err){ notify('Could not save installment: '+(err&&err.message?err.message:''),'error'); }
+    setVSaving(false);
+  };
+  const deleteInstallment=async(inst)=>{
+    if((parseFloat(inst.amount_paid)||0)>0){ notify('This installment has payments against it — clear them before deleting.','error'); return; }
+    if(!window.confirm('Remove this installment from the schedule?')) return;
+    const {error}=await runDb(supabase.from('vendor_installments').delete().eq('installment_id',inst.installment_id),'delete installment');
+    if(!error){ notify('Installment removed.','success'); await loadEventVendors(); }
   };
   const [altContacts, setAltContacts] = React.useState([]);
   const [staffList, setStaffList] = React.useState([]);
@@ -2779,13 +2817,31 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         </div>
         {(()=>{ const paid=eventVendors.reduce((s,v)=>s+(parseFloat(v.total_paid)||0),0); const out=eventVendors.reduce((s,v)=>s+(parseFloat(v.outstanding)||0),0); const agr=eventVendors.reduce((s,v)=>s+(parseFloat(v.agreed_amount)||0),0); return <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:12}}>Vendor cost: <b style={{color:'var(--grey-800)'}}>₹{Math.round(paid).toLocaleString('en-IN')} paid</b> · ₹{Math.round(out).toLocaleString('en-IN')} outstanding · ₹{Math.round(agr).toLocaleString('en-IN')} agreed</div>; })()}
         {eventVendors.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No vendors added yet.</div>}
-        {eventVendors.map(v=>{ const st={pending:{bg:'var(--grey-100)',color:'var(--grey-400)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'}}[v.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}; return (
-          <div key={v.event_vendor_id} style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 96px 110px',gap:8,alignItems:'center',padding:'9px 0',borderTop:'1px solid var(--grey-100)',fontSize:13}}>
-            <div><div style={{fontWeight:500}}>{v.vendor_name||'Vendor'}</div>{v.service_description&&<div style={{fontSize:12,color:'var(--grey-400)'}}>{v.service_description}</div>}</div>
-            <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.agreed_amount)||0).toLocaleString('en-IN')}</div>
-            <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.total_paid)||0).toLocaleString('en-IN')}</div>
-            <div style={{textAlign:'right',color:(parseFloat(v.outstanding)||0)>0?'var(--red)':'var(--grey-800)'}}>₹{Math.round(parseFloat(v.outstanding)||0).toLocaleString('en-IN')}</div>
-            <div style={{textAlign:'right',display:'flex',gap:6,justifyContent:'flex-end',alignItems:'center'}}><span style={{fontSize:11,padding:'2px 8px',borderRadius:12,background:st.bg,color:st.color,textTransform:'capitalize'}}>{(v.status||'').replace('_',' ')}</span>{(parseFloat(v.outstanding)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>{setPayVendorFor(v);setVPay({amount:'',date:todayLocalStr(),mode:'upi',reference:''});}}>+ Pay</button>}</div>
+        {eventVendors.map(v=>{ const st={pending:{bg:'var(--grey-100)',color:'var(--grey-400)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'}}[v.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}; const insts=(eventInstallments[v.event_vendor_id]||[]); const anyOverdue=insts.some(isVendorInstOverdue); const open=expandedVendor===v.event_vendor_id; return (
+          <div key={v.event_vendor_id} style={{borderTop:'1px solid var(--grey-100)'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 96px 110px',gap:8,alignItems:'center',padding:'9px 0',fontSize:13}}>
+              <div style={{cursor:'pointer'}} onClick={()=>setExpandedVendor(open?null:v.event_vendor_id)}><div style={{fontWeight:500}}>{insts.length>0&&<span style={{color:'var(--grey-400)',marginRight:4}}>{open?'▾':'▸'}</span>}{v.vendor_name||'Vendor'}{anyOverdue&&<span style={{marginLeft:6,fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--red)',color:'white'}}>OVERDUE</span>}</div>{v.service_description&&<div style={{fontSize:12,color:'var(--grey-400)',marginLeft:insts.length>0?16:0}}>{v.service_description}</div>}</div>
+              <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.agreed_amount)||0).toLocaleString('en-IN')}</div>
+              <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.total_paid)||0).toLocaleString('en-IN')}</div>
+              <div style={{textAlign:'right',color:(parseFloat(v.outstanding)||0)>0?'var(--red)':'var(--grey-800)'}}>₹{Math.round(parseFloat(v.outstanding)||0).toLocaleString('en-IN')}</div>
+              <div style={{textAlign:'right',display:'flex',gap:6,justifyContent:'flex-end',alignItems:'center'}}><span style={{fontSize:11,padding:'2px 8px',borderRadius:12,background:st.bg,color:st.color,textTransform:'capitalize'}}>{(v.status||'').replace('_',' ')}</span>{(parseFloat(v.outstanding)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>openPayInstallment(v,null)}>+ Pay</button>}</div>
+            </div>
+            {open&&<div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'8px 12px',margin:'0 0 8px',marginLeft:16}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}><div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em'}}>Payment schedule</div><button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>openInstEditor(v,null)}>+ Add installment</button></div>
+              {insts.length===0&&<div style={{fontSize:12,color:'var(--grey-400)',padding:'4px 0'}}>No schedule yet — add installments with due dates to track what's due.</div>}
+              {insts.map(it=>{ const bal=vendorInstBalance(it); const od=isVendorInstOverdue(it); const ds=isVendorInstDueSoon(it,5); const paidFull=bal<=0.5; return (
+                <div key={it.installment_id} style={{display:'grid',gridTemplateColumns:'1fr 84px 84px 150px',gap:8,alignItems:'center',padding:'6px 0',borderTop:'1px solid var(--grey-100)',fontSize:12.5}}>
+                  <div>{it.label||('Installment '+it.installment_number)}<div style={{fontSize:11,color:od?'var(--red)':'var(--grey-400)'}}>{it.due_date?('due '+fmtDate(it.due_date,{day:'numeric',month:'short'})):'no due date'}{od&&' · OVERDUE'}{!od&&ds&&' · due soon'}{paidFull&&' · paid'}</div></div>
+                  <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(it.amount_due)||0).toLocaleString('en-IN')}</div>
+                  <div style={{textAlign:'right',color:bal>0?'var(--red)':'var(--green)'}}>{paidFull?'paid':('₹'+Math.round(bal).toLocaleString('en-IN'))}</div>
+                  <div style={{textAlign:'right',display:'flex',gap:6,justifyContent:'flex-end',alignItems:'center'}}>
+                    {!paidFull&&<button className="btn sm" style={{fontSize:11,padding:'2px 8px',background:od?'var(--pink)':undefined,color:od?'white':undefined,borderColor:od?'var(--pink)':undefined}} onClick={()=>openPayInstallment(v,it)}>Pay</button>}
+                    <span onClick={()=>openInstEditor(v,it)} title="Edit" style={{cursor:'pointer',color:'var(--grey-400)'}}>✏️</span>
+                    {(parseFloat(it.amount_paid)||0)<=0&&<span onClick={()=>deleteInstallment(it)} title="Remove" style={{cursor:'pointer',color:'var(--grey-400)'}}>🗑</span>}
+                  </div>
+                </div>
+              ); })}
+            </div>}
           </div>
         ); })}
       </div>
@@ -2811,16 +2867,30 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         </div>
       )}
       {payVendorFor&&(
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px'}} onClick={e=>{if(e.target===e.currentTarget)setPayVendorFor(null);}}>
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px'}} onClick={e=>{if(e.target===e.currentTarget){setPayVendorFor(null);setPayInst(null);}}}>
           <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:440}}>
-            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Pay {payVendorFor.vendor_name||'vendor'} <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· balance ₹{Math.round(parseFloat(payVendorFor.outstanding)||0).toLocaleString('en-IN')}</span></div>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Pay {payVendorFor.vendor_name||'vendor'} <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {payInst?((payInst.label||('Installment '+payInst.installment_number))+' · balance ₹'+Math.round(vendorInstBalance(payInst)).toLocaleString('en-IN')):('balance ₹'+Math.round(parseFloat(payVendorFor.outstanding)||0).toLocaleString('en-IN'))}</span></div>
             <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
               <div><label className="field-label">Amount (₹) <span style={{color:'var(--pink)'}}>*</span></label><input type="number" className="field-input" value={vPay.amount} onChange={e=>setVPay(f=>({...f,amount:e.target.value}))} placeholder="0"/></div>
               <div><label className="field-label">Date</label><input type="date" className="field-input" value={vPay.date} onChange={e=>setVPay(f=>({...f,date:e.target.value}))}/></div>
               <div><label className="field-label">Mode</label><select className="field-input" value={vPay.mode} onChange={e=>setVPay(f=>({...f,mode:e.target.value}))}>{VENDOR_MODES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
               <div><label className="field-label">Reference</label><input className="field-input" value={vPay.reference} onChange={e=>setVPay(f=>({...f,reference:e.target.value}))} placeholder="optional"/></div>
             </div>
-            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setPayVendorFor(null)}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitVendorPayment}>{vSaving?'Saving…':'Record payment'}</button></div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>{setPayVendorFor(null);setPayInst(null);}}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitVendorPayment}>{vSaving?'Saving…':'Record payment'}</button></div>
+          </div>
+        </div>
+      )}
+      {instFor&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px'}} onClick={e=>{if(e.target===e.currentTarget)setInstFor(null);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:420}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>{instForm.id?'Edit installment':'Add installment'} <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {instFor.vendor_name||'vendor'}</span></div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Label</label><input className="field-input" value={instForm.label} onChange={e=>setInstForm(f=>({...f,label:e.target.value}))} placeholder="e.g. Advance, Pre-event, Final"/></div>
+              <div><label className="field-label">Amount (₹) <span style={{color:'var(--pink)'}}>*</span></label><input type="number" className="field-input" value={instForm.amount} onChange={e=>setInstForm(f=>({...f,amount:e.target.value}))} placeholder="0"/></div>
+              <div><label className="field-label">Due date</label><input type="date" className="field-input" value={instForm.due_date} onChange={e=>setInstForm(f=>({...f,due_date:e.target.value}))}/></div>
+              {(()=>{ const sched=(eventInstallments[instFor.event_vendor_id]||[]); const others=sched.filter(x=>x.installment_id!==instForm.id).reduce((s,x)=>s+(parseFloat(x.amount_due)||0),0); const tot=others+(parseFloat(instForm.amount)||0); const agreed=parseFloat(instFor.agreed_amount)||0; const diff=tot-agreed; return <div style={{gridColumn:'1 / -1',fontSize:12,color:Math.abs(diff)<1?'var(--grey-400)':'var(--orange)'}}>Scheduled total ₹{Math.round(tot).toLocaleString('en-IN')} vs agreed ₹{Math.round(agreed).toLocaleString('en-IN')}{Math.abs(diff)<1?' · matches':(diff>0?(' · ₹'+Math.round(diff).toLocaleString('en-IN')+' over'):(' · ₹'+Math.round(-diff).toLocaleString('en-IN')+' unallocated'))}</div>; })()}
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setInstFor(null)}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitInstallment}>{vSaving?'Saving…':(instForm.id?'Save':'Add')}</button></div>
           </div>
         </div>
       )}
@@ -2997,6 +3067,9 @@ function effectiveEventStatus(e){ if(!e) return ''; const s=(e.status||'').toLow
 function isQuoteExpired(q){ return !!(q && q.status==='sent' && q.valid_until && q.valid_until<todayLocalStr()); }
 // Invoice past its due date and not fully paid — drives the 'overdue' status.
 function isInvoiceOverdue(i){ return !!(i && ['sent','partially_paid'].includes((i.status||'').toLowerCase()) && i.due_date && i.due_date<todayLocalStr()); }
+function vendorInstBalance(inst){ return Math.max(0,(parseFloat(inst&&inst.amount_due)||0)-(parseFloat(inst&&inst.amount_paid)||0)); }
+function isVendorInstOverdue(inst){ return !!(inst && inst.due_date && inst.due_date<todayLocalStr() && vendorInstBalance(inst)>0.5); }
+function isVendorInstDueSoon(inst, days){ if(!inst||!inst.due_date||vendorInstBalance(inst)<=0.5) return false; const t=todayLocalStr(); if(inst.due_date<t) return false; const d=new Date(); d.setDate(d.getDate()+(days||5)); const soon=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); return inst.due_date<=soon; }
 // Collapsed lead-stage label for the chip (the quote owns its own sub-states now).
 function leadStageDisplay(stage){ if(['quote_generation_in_progress','quote_sent','quote_revision_pending','revised_quote_sent','quote_confirmed'].includes(stage)) return 'Quoting'; return (LEAD_STAGE_LABELS[stage]||stage); }
 
@@ -5640,7 +5713,7 @@ async function addEventVendor({eventId, vendorId, vendorName, category, service,
   return ev;
 }
 async function recordVendorPayment(ev, pay){
-  const instId=await _ensureVendorInstallment(ev.event_vendor_id, ev.agreed_amount);
+  const instId=(pay&&pay.installmentId)||await _ensureVendorInstallment(ev.event_vendor_id, ev.agreed_amount);
   const amt=parseFloat(pay.amount)||0;
   const {error:pe}=await supabase.from('vendor_payments').insert({event_vendor_id:ev.event_vendor_id,installment_id:instId,vendor_id:ev.vendor_id,event_id:ev.event_id,amount:amt,payment_date:pay.date,payment_mode:pay.mode||null,reference_number:pay.reference||null,notes:pay.notes||null,recorded_by:await _currentUid(),recorded_at:new Date().toISOString()});
   if(pe) throw pe;
@@ -5689,9 +5762,11 @@ function VendorsModule({onNavigate}){
   const [showForm,setShowForm]=React.useState(false);
   const [editV,setEditV]=React.useState(null);
   const [saving,setSaving]=React.useState(false);
-  const emptyV={name:'',category:'other',contact_person:'',phone_1:'',phone_2:'',phone_3:'',email_1:'',email_2:'',email_3:'',street_address:'',city:'',state:'',gst_number:'',pan_number:'',bank_name:'',account_number:'',ifsc_code:'',upi_id:'',payment_terms:'',rating:'',is_preferred:false,status:'active',notes:''};
+  const emptyV={name:'',category:'other',contact_person:'',phone_1:'+91 ',phone_2:'',phone_3:'',email_1:'',email_2:'',email_3:'',street_address:'',city:'',state:'',gst_number:'',pan_number:'',bank_name:'',account_number:'',ifsc_code:'',upi_id:'',payment_terms:'',rating:'',is_preferred:false,status:'active',notes:''};
   const [form,setForm]=React.useState(emptyV);
-  const setF=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const [dupWarn,setDupWarn]=React.useState(null);
+  const setF=(k,v)=>{ if(dupWarn) setDupWarn(null); setForm(f=>({...f,[k]:v})); };
+  const phoneDigits=p=>(p||'').replace(/\D/g,'').replace(/^91(\d{10})$/,'$1');
 
   const load=React.useCallback(async()=>{
     setLoading(true);
@@ -5710,18 +5785,26 @@ function VendorsModule({onNavigate}){
   const cnt=f=>vendors.filter(f).length;
   const stColor=s=>({active:{bg:'var(--green-light)',color:'var(--green)'},inactive:{bg:'var(--grey-100)',color:'var(--grey-400)'}}[s]||{bg:'var(--grey-100)',color:'var(--grey-400)'});
 
-  const openNew=()=>{ setEditV(null); setForm({...emptyV}); setShowForm(true); };
-  const openEdit=v=>{ setEditV(v); setForm({...emptyV,...v,rating:v.rating||'',is_preferred:!!v.is_preferred}); setShowForm(true); };
-  const save=async()=>{
+  const openNew=()=>{ setEditV(null); setDupWarn(null); setForm({...emptyV}); setShowForm(true); };
+  const openEdit=v=>{ setEditV(v); setDupWarn(null); setForm({...emptyV,...v,rating:v.rating||'',is_preferred:!!v.is_preferred,phone_1:v.phone_1||'+91 ',email_1:v.email_1||''}); setShowForm(true); };
+  const cleanEmail=e=>{ const t=(e||'').trim(); return (t===''||t==='@gmail.com')?null:t; };
+  const save=async(force)=>{
     if(!form.name.trim()){ notify('Vendor name is required.','error'); return; }
+    if(phoneDigits(form.phone_1).length!==10){ notify('Enter a valid 10-digit phone number for Phone 1.','error'); return; }
+    if(!editV && !force){
+      const np=phoneDigits(form.phone_1), nn=form.name.trim().toLowerCase();
+      const dup=vendors.find(v=> (np&&phoneDigits(v.phone_1)===np) || (v.name||'').trim().toLowerCase()===nn );
+      if(dup){ setDupWarn(dup); return; }
+    }
     setSaving(true);
-    const payload={ name:form.name.trim(), category:form.category||null, contact_person:form.contact_person||null, phone_1:form.phone_1||null, phone_2:form.phone_2||null, phone_3:form.phone_3||null, email_1:form.email_1||null, email_2:form.email_2||null, email_3:form.email_3||null, street_address:form.street_address||null, city:form.city||null, state:form.state||null, gst_number:form.gst_number||null, pan_number:form.pan_number||null, bank_name:form.bank_name||null, account_number:form.account_number||null, ifsc_code:form.ifsc_code||null, upi_id:form.upi_id||null, payment_terms:form.payment_terms||null, rating:form.rating?parseFloat(form.rating):null, is_preferred:!!form.is_preferred, status:form.status||'active', notes:form.notes||null, updated_at:new Date().toISOString() };
+    const payload={ name:form.name.trim(), category:form.category||null, contact_person:form.contact_person||null, phone_1:(form.phone_1||'').trim()||null, phone_2:form.phone_2||null, phone_3:form.phone_3||null, email_1:cleanEmail(form.email_1), email_2:cleanEmail(form.email_2), email_3:cleanEmail(form.email_3), street_address:form.street_address||null, city:form.city||null, state:form.state||null, gst_number:form.gst_number||null, pan_number:form.pan_number||null, bank_name:form.bank_name||null, account_number:form.account_number||null, ifsc_code:form.ifsc_code||null, upi_id:form.upi_id||null, payment_terms:form.payment_terms||null, rating:form.rating?parseFloat(form.rating):null, is_preferred:!!form.is_preferred, status:form.status||'active', notes:form.notes||null, updated_at:new Date().toISOString() };
     let err;
     if(editV){ const {error}=await runDb(supabase.from('vendors').update(payload).eq('vendor_id',editV.vendor_id),'update vendor'); err=error; }
     else { payload.created_at=new Date().toISOString(); payload.is_deleted=false; payload.created_by=await _currentUid(); const {error}=await runDb(supabase.from('vendors').insert(payload),'add vendor'); err=error; }
     setSaving(false); if(err) return;
-    notify(editV?'Vendor updated.':'Vendor added.','success'); setShowForm(false); load();
+    setDupWarn(null); notify(editV?'Vendor updated.':'Vendor added.','success'); setShowForm(false); load();
   };
+  const openDupVendor=()=>{ const d=dupWarn; setShowForm(false); setDupWarn(null); if(d){ setSelId(d.vendor_id); setView('detail'); } };
   const setStatus=async(v,st)=>{ if(st===v.status) return; const {error}=await runDb(supabase.from('vendors').update({status:st,updated_at:new Date().toISOString()}).eq('vendor_id',v.vendor_id),'update vendor status'); if(!error){ notify('Vendor status updated.','success'); load(); } };
   const del=async v=>{ const used=evs.filter(x=>x.vendor_id===v.vendor_id).length; if(used>0){ notify('Cannot delete — this vendor is on '+used+' event'+(used>1?'s':'')+'. Set them Inactive instead.','error'); return; } if(!window.confirm('Delete (archive) '+v.name+'? Recoverable in the database.')) return; const {error}=await runDb(supabase.from('vendors').update({is_deleted:true,updated_at:new Date().toISOString()}).eq('vendor_id',v.vendor_id),'delete vendor'); if(!error){ notify('Vendor archived.','success'); setView('list'); setSelId(null); load(); } };
 
@@ -5731,12 +5814,13 @@ function VendorsModule({onNavigate}){
       <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:620}}>
         <div style={{padding:'16px 24px',borderBottom:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}><div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>{editV?'Edit vendor':'New vendor'}</div><button className="btn sm" onClick={()=>setShowForm(false)}>✕</button></div>
         <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          {dupWarn&&<div style={{gridColumn:'1 / -1',background:'var(--orange-light)',border:'1px solid rgba(230,81,0,0.3)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:13,color:'var(--orange)'}}>⚠ A vendor <b>"{dupWarn.name}"</b>{dupWarn.phone_1?(' ('+dupWarn.phone_1+')'):''} already exists. <span onClick={openDupVendor} style={{textDecoration:'underline',cursor:'pointer',fontWeight:600}}>Open it</span>, change the details, or <span onClick={()=>save(true)} style={{textDecoration:'underline',cursor:'pointer',fontWeight:600}}>add anyway</span>.</div>}
           <div style={{gridColumn:'1 / -1'}}><label className="field-label">Vendor name <span style={{color:'var(--pink)'}}>*</span></label><input className="field-input" value={form.name} onChange={e=>setF('name',e.target.value)} placeholder="e.g. Blooms Decor"/></div>
           <div><label className="field-label">Category</label><select className="field-input" value={form.category} onChange={e=>setF('category',e.target.value)}>{VENDOR_CATS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
           <div><label className="field-label">Contact person</label><input className="field-input" value={form.contact_person} onChange={e=>setF('contact_person',e.target.value)}/></div>
-          <div><label className="field-label">Phone 1</label><input className="field-input" value={form.phone_1} onChange={e=>setF('phone_1',e.target.value)}/></div>
+          <div><label className="field-label">Phone 1 <span style={{color:'var(--pink)'}}>*</span></label><input className="field-input" value={form.phone_1} onChange={e=>setF('phone_1',e.target.value)} onFocus={e=>{const t=e.target; setTimeout(()=>{try{t.setSelectionRange(t.value.length,t.value.length);}catch(_){}}, 0);}} placeholder="+91 98765 43210"/></div>
           <div><label className="field-label">Phone 2</label><input className="field-input" value={form.phone_2} onChange={e=>setF('phone_2',e.target.value)}/></div>
-          <div><label className="field-label">Email 1</label><input className="field-input" value={form.email_1} onChange={e=>setF('email_1',e.target.value)}/></div>
+          <div><label className="field-label">Email 1</label><input className="field-input" value={form.email_1} onChange={e=>setF('email_1',e.target.value)} onFocus={e=>{const t=e.target; if(!t.value){ setF('email_1','@gmail.com'); setTimeout(()=>{try{t.setSelectionRange(0,0);}catch(_){}}, 0); }}} placeholder="name@gmail.com"/></div>
           <div><label className="field-label">Email 2</label><input className="field-input" value={form.email_2} onChange={e=>setF('email_2',e.target.value)}/></div>
           <div style={{gridColumn:'1 / -1'}}><label className="field-label">Street address</label><input className="field-input" value={form.street_address} onChange={e=>setF('street_address',e.target.value)}/></div>
           <div><label className="field-label">City</label><input className="field-input" value={form.city} onChange={e=>setF('city',e.target.value)}/></div>
@@ -5753,7 +5837,7 @@ function VendorsModule({onNavigate}){
           <div style={{display:'flex',alignItems:'center',gap:8,marginTop:22}}><input type="checkbox" checked={form.is_preferred} onChange={e=>setF('is_preferred',e.target.checked)} style={{width:16,height:16,accentColor:'var(--pink)'}}/><span style={{fontSize:13}}>Preferred vendor</span></div>
           <div style={{gridColumn:'1 / -1'}}><label className="field-label">Notes</label><textarea className="field-textarea" rows={2} value={form.notes} onChange={e=>setF('notes',e.target.value)}/></div>
         </div>
-        <div style={{padding:'14px 24px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setShowForm(false)}>Cancel</button><button className="btn primary" disabled={saving} onClick={save}>{saving?'Saving…':(editV?'Save changes':'Add vendor')}</button></div>
+        <div style={{padding:'14px 24px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setShowForm(false)}>Cancel</button><button className="btn primary" disabled={saving} onClick={()=>save()}>{saving?'Saving…':(editV?'Save changes':'Add vendor')}</button></div>
       </div>
     </div>
   );
