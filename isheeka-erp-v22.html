@@ -5079,6 +5079,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const sc = QUOT_STATUS_COLORS[quot.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
   const statusLabel = QUOT_STATUS_LABELS[quot.status]||quot.status;
   const eventCancelled = !!(srcEvent && (srcEvent.status||'').toLowerCase()==='cancelled');
+  // Historical/closed quote: no client sends (WhatsApp/Email), but Print/Download stay for records.
+  const histClosed = eventCancelled || ['rejected','expired','superseded'].includes(quot.status);
   const editable = !['converted','rejected','expired','superseded'].includes(quot.status) && !invoiceIssued && !eventCancelled;
   // Event-origin: confirm available until approved (then the invoice exists). Lead-origin: confirm
   // (= create the event) available until converted, including 'approved' (idempotent re-convert).
@@ -5144,10 +5146,10 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           {(quot.revision_number||0)>0&&<label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}><input type="checkbox" checked={includeRevHistory} onChange={e=>setIncludeRevHistory(e.target.checked)} style={{accentColor:'var(--pink)'}}/>Revision history</label>}
         </div>
         <div style={{borderTop:'1px solid var(--grey-200)',paddingTop:12,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-          <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>Share / export (uses the toggles above):</span>
-          <button className="btn sm" disabled={sharing} onClick={()=>doShare('whatsapp')}>💬 WhatsApp</button>
-          <button className="btn sm" disabled={sharing} onClick={()=>doShare('gmail')}>Gmail</button>
-          <button className="btn sm" disabled={sharing} onClick={()=>doShare('email')}>Email</button>
+          <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>{histClosed?'Closed — print/download only (sending disabled):':'Share / export (uses the toggles above):'}</span>
+          <button className="btn sm" disabled={sharing||histClosed} title={histClosed?'This quote is closed — sending is disabled':''} onClick={()=>doShare('whatsapp')}>💬 WhatsApp</button>
+          <button className="btn sm" disabled={sharing||histClosed} title={histClosed?'This quote is closed — sending is disabled':''} onClick={()=>doShare('gmail')}>Gmail</button>
+          <button className="btn sm" disabled={sharing||histClosed} title={histClosed?'This quote is closed — sending is disabled':''} onClick={()=>doShare('email')}>Email</button>
           <button className="btn sm" onClick={()=>doExport('print')}>Print</button>
           <button className="btn sm primary" onClick={()=>doExport('download')}>⬇ Download PDF</button>
         </div>
@@ -8218,7 +8220,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     sans('bold',15); setText(INK); doc.text(String(quot.ref_number||''), W-M, top+28, {align:'right'});
     sans('normal',8); setText(MUTED);
     doc.text('Date: '+fmt(quot.doc_date), W-M, top+40, {align:'right'});
-    { const _dd=isInv?quot.due_date:quot.valid_until; if(_dd) doc.text((isInv?'Due date: ':'Valid until: ')+fmt(_dd), W-M, top+51, {align:'right'}); }
+    { if(isInv && quot.due_date) doc.text('Due date: '+fmt(quot.due_date), W-M, top+51, {align:'right'}); }
     { if(_evDate){ setText(PINK); doc.text('Event date: '+fmt(_evDate), W-M, top+62, {align:'right'}); setText(MUTED); } }
     setDraw(PINK); doc.setLineWidth(1.4); doc.line(M, HDR_BOTTOM-12, W-M, HDR_BOTTOM-12);
   };
