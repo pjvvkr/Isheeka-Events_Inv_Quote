@@ -2299,6 +2299,22 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     if(evt){
       setEvent(evt);
       setForm({...evt});
+      // Auto-advance the event status (forward only; never touch completed/cancelled).
+      // Past the main date → in_progress; else an issued invoice → confirmed.
+      try{
+        const s=(evt.status||'').toLowerCase();
+        if(!['completed','cancelled'].includes(s)){
+          const issued=(invs||[]).some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase()));
+          const past = evt.main_date && evt.main_date<=todayLocalStr();
+          const rank={planning:0,confirmed:1,in_progress:2};
+          let target=s;
+          if(past) target='in_progress'; else if(issued && s==='planning') target='confirmed';
+          if((rank[target]||0)>(rank[s]||0)){
+            await supabase.from('events').update({status:target,updated_at:new Date().toISOString()}).eq('event_id',eventId);
+            setEvent(e=>e?{...e,status:target}:e);
+          }
+        }
+      }catch(e){}
       if(evt.client_id){
         const {data:ac} = await supabase.from('alternative_contacts').select('*').eq('client_id',evt.client_id).eq('is_deleted',false);
         if(ac) setAltContacts(ac);
@@ -2511,7 +2527,6 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
             <span style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,background:sc.bg,color:sc.color}}>
               {EVENT_STATUS_LABELS[event.status?.toLowerCase()]||event.status}
             </span>
-            {linkedLead&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('leads',{leadId:linkedLead.lead_id})}>← Lead {linkedLead.ref_number||''}</button>}
             {!['completed','cancelled'].includes(event.status?.toLowerCase())&&<button className="btn sm" onClick={markEventCompleted} title="Marks the event delivered and closes the source lead">✅ Mark completed</button>}
             <button className="btn sm" onClick={()=>onUseAsReference(event)}>📋 Use as reference</button>
             <button className="btn sm primary" onClick={enterEditMode}>✏️ Edit</button>
@@ -2645,9 +2660,19 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         </div>
       </div>
 
-      {/* Documents */}
+      {/* Workflow */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:14}}>Documents</div>
+        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Workflow</div>
+        {/* Lead → Quote → Event → Invoice chain */}
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',fontSize:12,color:'var(--grey-400)',marginBottom:14,paddingBottom:12,borderBottom:'1px solid var(--grey-100)'}}>
+          {linkedLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:linkedLead.lead_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {linkedLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
+          <span>→</span>
+          {quotations.length>0?<a onClick={()=>{const aq=quotations.find(q=>!['superseded','rejected','expired'].includes(q.status))||quotations[0];onNavigate&&onNavigate('quotations',{quotId:aq.quotation_id});}} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>📄 {quotations.length>1?(quotations.length+' quotes'):(quotations[0].ref_number)}</a>:<span>📄 —</span>}
+          <span>→</span>
+          <span style={{color:'var(--grey-700)',fontWeight:500}}>🎪 {event.ref_number} (this event)</span>
+          <span>→</span>
+          {invoices.length>0?<a onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:(invoices.find(i=>i.status!=='cancelled')||invoices[0]).invoice_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🧾 {invoices.length>1?(invoices.length+' invoices'):(invoices[0].ref_number)}</a>:<span>🧾 —</span>}
+        </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
@@ -2885,6 +2910,17 @@ function prettyTypeValue(v){ return String(v||'').replace(/_/g,' ').replace(/\b\
 function eventTypeLabel(v){ if(!v) return ''; return _eventTypeLabelMap[v] || prettyTypeValue(v); }
 // Default document/event name from an event-type value: "Half Saree" -> "Half Saree Event".
 function defaultEventName(typeValue){ const l=eventTypeLabel(typeValue); return l?(l+' Event'):'Event'; }
+
+// Today as a local YYYY-MM-DD string (for date-only comparisons, no UTC drift).
+function todayLocalStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+// Effective (display) event status: an event past its main date that isn't completed/cancelled reads as "in_progress".
+function effectiveEventStatus(e){ if(!e) return ''; const s=(e.status||'').toLowerCase(); if(['completed','cancelled'].includes(s)) return s; if(e.main_date && e.main_date<=todayLocalStr() && ['planning','confirmed'].includes(s)) return 'in_progress'; return s; }
+// Quote past its validity — DISPLAY flag only (does not change the stored status or block actions).
+function isQuoteExpired(q){ return !!(q && q.status==='sent' && q.valid_until && q.valid_until<todayLocalStr()); }
+// Invoice past its due date and not fully paid — drives the 'overdue' status.
+function isInvoiceOverdue(i){ return !!(i && ['sent','partially_paid'].includes((i.status||'').toLowerCase()) && i.due_date && i.due_date<todayLocalStr()); }
+// Collapsed lead-stage label for the chip (the quote owns its own sub-states now).
+function leadStageDisplay(stage){ if(['quote_generation_in_progress','quote_sent','quote_revision_pending','revised_quote_sent','quote_confirmed'].includes(stage)) return 'Quoting'; return (LEAD_STAGE_LABELS[stage]||stage); }
 
 // Timezone-safe date formatter. A bare 'YYYY-MM-DD' is built from its parts as a
 // LOCAL date (avoids new Date('YYYY-MM-DD') being parsed as UTC and shifting a day
@@ -3693,7 +3729,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
           <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:6}}>{lead.phone}{lead.email?' · '+lead.email:''}</div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             <span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>
-              {isLost?'LOST':LEAD_STAGE_LABELS[lead.stage]||lead.stage}
+              {isLost?'LOST':leadStageDisplay(lead.stage)}
             </span>
             {lead.event_type&&<span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
             {lead.source&&<span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--grey-100)',color:'var(--grey-400)',textTransform:'capitalize'}}>{lead.source.replace('_',' ')}</span>}
@@ -3702,7 +3738,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
           {/* Stage badge — always visible */}
           <span style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,background:sc.bg,color:sc.color}}>
-            {isLost?'LOST':isConverted?'CONVERTED':LEAD_STAGE_LABELS[lead.stage]||lead.stage}
+            {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
           </span>
           {!isLost&&!isConverted&&(
             <>
@@ -3983,7 +4019,7 @@ function LeadReferenceModal({onSelect, onCancel}) {
                     {typeIcons[lead.event_type]||'🎪'} {lead.first_name} {lead.last_name}
                   </div>
                   <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,flexShrink:0,marginLeft:8}}>
-                    {isLost?'Lost':isConverted?'Converted':LEAD_STAGE_LABELS[lead.stage]}
+                    {isLost?'Lost':isConverted?'Converted':leadStageDisplay(lead.stage)}
                   </span>
                 </div>
                 <div style={{display:'flex',gap:12,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
@@ -4235,7 +4271,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
                       <span style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{lead.first_name} {lead.last_name}</span>
                       {lead.ref_number&&<span style={{fontSize:11,color:'var(--grey-400)',fontWeight:400}}>{lead.ref_number}</span>}
                       <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>
-                        {isLost?'LOST':isConverted?'CONVERTED':LEAD_STAGE_LABELS[lead.stage]}
+                        {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
                       </span>
                       {lead.event_type&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
                     </div>
@@ -4419,7 +4455,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
       ) : (
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
           {filtered.map(e=>{
-            const sc=EVENT_STATUS_COLORS[e.status?.toLowerCase()]||EVENT_STATUS_COLORS.planning;
+            const es=effectiveEventStatus(e); const sc=EVENT_STATUS_COLORS[es]||EVENT_STATUS_COLORS.planning;
             return (
               <div key={e.event_id} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer',transition:'border-color .15s'}}
                 onMouseEnter={ev=>ev.currentTarget.style.borderColor='var(--grey-200)'}
@@ -4430,7 +4466,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
                   <div style={{padding:'14px 16px'}}>
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                       <span style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{e.name}</span>
-                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{EVENT_STATUS_LABELS[e.status?.toLowerCase()]||e.status}</span>
+                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{EVENT_STATUS_LABELS[es]||es}</span>
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {e.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{e.ref_number}</span>}
@@ -4623,7 +4659,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number}{quot.revision_number>0?<span style={{fontSize:12,color:'var(--grey-400)',fontWeight:400}}> · Rev {quot.revision_number}</span>:''} <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,marginLeft:6}}>{statusLabel}</span></div>
+            <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number}{quot.revision_number>0?<span style={{fontSize:12,color:'var(--grey-400)',fontWeight:400}}> · Rev {quot.revision_number}</span>:''} <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,marginLeft:6}}>{statusLabel}</span>{isQuoteExpired(quot)&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>Expired</span>}</div>
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>{quot.client_name||'—'}{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
             {(srcLead||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
@@ -4800,7 +4836,7 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                       <span style={{fontSize:14,fontWeight:500,color:'var(--pink)'}}>{q.ref_number}</span>
                       {q.revision_number>0&&<span style={{fontSize:11,color:'var(--grey-400)'}}>Rev {q.revision_number}</span>}
-                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{QUOT_STATUS_LABELS[q.status]||q.status}</span>
+                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{QUOT_STATUS_LABELS[q.status]||q.status}</span>{isQuoteExpired(q)&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)'}}>Expired</span>}
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {q.client_name&&<span>👤 {q.client_name}</span>}
@@ -4881,7 +4917,8 @@ function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
       ) : (
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
           {filtered.map(inv=>{
-            const sc=INVOICE_STATUS_COLORS[inv.status]||INVOICE_STATUS_COLORS.draft;
+            const est=isInvoiceOverdue(inv)?'overdue':inv.status;
+            const sc=INVOICE_STATUS_COLORS[est]||INVOICE_STATUS_COLORS.draft;
             const recvd=parseFloat(inv.total_received)||0; const out=parseFloat(inv.total_outstanding)||0;
             return (
               <div key={inv.invoice_id} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer'}}
@@ -4894,7 +4931,7 @@ function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                       <span style={{fontSize:14,fontWeight:500,color:'var(--pink)'}}>{inv.ref_number}</span>
                       {inv.revision_number>0&&<span style={{fontSize:11,color:'var(--grey-400)'}}>Rev {inv.revision_number}</span>}
-                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{INVOICE_STATUS_LABELS[inv.status]||inv.status}</span>
+                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{INVOICE_STATUS_LABELS[est]||est}</span>
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {inv.client_name&&<span>👤 {inv.client_name}</span>}
@@ -4966,6 +5003,8 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       supabase.from('invoice_payments').select('*').eq('invoice_id',invoiceId).order('payment_date',{ascending:false}),
     ]);
     setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{}); setActivity(act||[]); setPayments(pays||[]);
+    // Auto-flag overdue: an issued / partly-paid invoice past its due date becomes 'overdue'.
+    if(i && isInvoiceOverdue(i)){ try{ await supabase.from('invoices').update({status:'overdue',updated_at:new Date().toISOString()}).eq('invoice_id',i.invoice_id); setInv(prev=>prev?{...prev,status:'overdue'}:prev); }catch(e){} }
     const m={}; (us||[]).forEach(u=>{ m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim(); }); setUserMap(m);
     if(i&&i.client_id){ const {data:c}=await supabase.from('clients').select('*').eq('client_id',i.client_id).single(); setClientInfo(c||{}); }
     else setClientInfo({});
@@ -5028,6 +5067,8 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if(!inv.due_date && settings.default_invoice_due_days){ const d=new Date(); d.setDate(d.getDate()+parseInt(settings.default_invoice_due_days)); patch.due_date=d.toISOString().split('T')[0]; }
     const {error}=await supabase.from('invoices').update(patch).eq('invoice_id',invoiceId);
     if(error){ notify('Could not mark as sent: '+(error.message||''),'error'); setSaving(false); return; }
+    // Auto-advance the event: issuing an invoice means the event is booked → "confirmed" (only from planning).
+    if(inv.event_id){ try{ await supabase.from('events').update({status:'confirmed',updated_at:new Date().toISOString()}).eq('event_id',inv.event_id).eq('status','planning'); }catch(e){} }
     notify('Invoice '+inv.ref_number+' marked as sent.','success'); setSaving(false); await loadAll();
   };
 
