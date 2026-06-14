@@ -5791,7 +5791,7 @@ function VendorPaymentsModule({onNavigate}){
       supabase.from('vendor_payments').select('*').order('payment_date',{ascending:false}),
       supabase.from('event_vendors').select('*').eq('is_deleted',false),
       supabase.from('vendors').select('vendor_id,name').eq('is_deleted',false),
-      supabase.from('events').select('event_id,ref_number,name').eq('is_deleted',false).order('main_date',{ascending:false})
+      supabase.from('events').select('event_id,ref_number,name,main_date,client_name').eq('is_deleted',false).order('main_date',{ascending:false})
     ]);
     setPays(p||[]); setEvs(ev||[]); setVendors(vn||[]); setEvents(e||[]); setLoading(false);
   },[]);
@@ -5851,7 +5851,7 @@ function VendorPaymentsModule({onNavigate}){
           <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,color:'var(--grey-400)',pointerEvents:'none'}}>🔍</span>
           <input className="field-input" style={{paddingLeft:36}} placeholder="Search vendor, event ref/name, reference…" value={search} onChange={e=>setSearch(e.target.value)}/>
         </div>
-        <select className="field-input" style={{width:200}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}</option>)}</select>
+        <select className="field-input" style={{width:200}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name?(' · '+e.client_name):''}{e.main_date?(' · '+fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})):''}</option>)}</select>
         <select className="field-input" style={{width:130}} value={range} onChange={e=>setRange(e.target.value)}><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option></select>
       </div>
       {loading? <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>
@@ -5879,7 +5879,7 @@ function VendorPaymentsModule({onNavigate}){
               <button className="btn sm" onClick={()=>setShowRec(false)}>✕</button>
             </div>
             <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Event <span style={{color:'var(--pink)'}}>*</span></label><select className="field-input" value={rec.eventId} onChange={e=>{setR('eventId',e.target.value);setR('eventVendorId','');setR('newVendor',false);}}><option value="">Select event…</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}</option>)}</select></div>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Event <span style={{color:'var(--pink)'}}>*</span></label><select className="field-input" value={rec.eventId} onChange={e=>{setR('eventId',e.target.value);setR('eventVendorId','');setR('newVendor',false);}}><option value="">Select event…</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name?(' · '+e.client_name):''}{e.main_date?(' · '+fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})):''}</option>)}</select></div>
               {rec.eventId&&<div style={{gridColumn:'1 / -1'}}>
                 <label className="field-label">Vendor</label>
                 <select className="field-input" value={rec.newVendor?'__new':rec.eventVendorId} onChange={e=>{ if(e.target.value==='__new'){setR('newVendor',true);setR('eventVendorId','');} else {setR('newVendor',false);setR('eventVendorId',e.target.value);} }}>
@@ -5933,7 +5933,7 @@ function ExpensesModule({onNavigate}){
     setLoading(true);
     const [{data:ex},{data:ev}]=await Promise.all([
       supabase.from('expenses').select('*').eq('is_deleted',false).order('date',{ascending:false}),
-      supabase.from('events').select('event_id,ref_number,name').eq('is_deleted',false).order('main_date',{ascending:false})
+      supabase.from('events').select('event_id,ref_number,name,main_date,client_name').eq('is_deleted',false).order('main_date',{ascending:false})
     ]);
     setRows(ex||[]); setEvents(ev||[]); setLoading(false);
   },[]);
@@ -5992,7 +5992,7 @@ function ExpensesModule({onNavigate}){
           <input className="field-input" style={{paddingLeft:36}} placeholder="Search description / reference…" value={search} onChange={e=>setSearch(e.target.value)}/>
         </div>
         <select className="field-input" style={{width:160}} value={catFilter} onChange={e=>setCatFilter(e.target.value)}><option value="">All categories</option>{EXPENSE_CATS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
-        <select className="field-input" style={{width:180}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option><option value="general">General (no event)</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}</option>)}</select>
+        <select className="field-input" style={{width:180}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option><option value="general">General (no event)</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name?(' · '+e.client_name):''}{e.main_date?(' · '+fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})):''}</option>)}</select>
         <select className="field-input" style={{width:130}} value={range} onChange={e=>setRange(e.target.value)}><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option></select>
       </div>
       {loading? <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>
@@ -6026,7 +6026,7 @@ function ExpensesModule({onNavigate}){
               <div><label className="field-label">Date <span style={{color:'var(--pink)'}}>*</span></label><input type="date" className="field-input" value={form.date} onChange={e=>setF('date',e.target.value)}/></div>
               <div><label className="field-label">Category</label><select className="field-input" value={form.category} onChange={e=>setF('category',e.target.value)}>{EXPENSE_CATS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
               <div><label className="field-label">Sub-category</label><input className="field-input" value={form.sub_category} onChange={e=>setF('sub_category',e.target.value)} placeholder="optional"/></div>
-              <div><label className="field-label">Link to event</label><select className="field-input" value={form.event_id} onChange={e=>setF('event_id',e.target.value)}><option value="">General (no event)</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}</option>)}</select></div>
+              <div><label className="field-label">Link to event</label><select className="field-input" value={form.event_id} onChange={e=>setF('event_id',e.target.value)}><option value="">General (no event)</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name?(' · '+e.client_name):''}{e.main_date?(' · '+fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})):''}</option>)}</select></div>
               <div><label className="field-label">Payment mode</label><select className="field-input" value={form.payment_mode} onChange={e=>setF('payment_mode',e.target.value)}>{[['upi','UPI'],['neft','Bank / NEFT'],['cash','Cash'],['cheque','Cheque']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
               <div><label className="field-label">Reference no.</label><input className="field-input" value={form.reference_number} onChange={e=>setF('reference_number',e.target.value)} placeholder="optional"/></div>
               <div><label className="field-label">Receipt</label><input type="file" accept="image/*,application/pdf" onChange={e=>setFile(e.target.files&&e.target.files[0])} style={{fontSize:12}}/></div>
