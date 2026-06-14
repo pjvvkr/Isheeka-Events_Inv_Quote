@@ -391,7 +391,7 @@ function TemplateEditor({template, onSave, onCancel}) {
       if(allItems.length>0){ const {error:tiie}=await supabase.from('event_template_items').insert(allItems); if(tiie) throw tiie; }
       notify('Template saved!','success');
       onSave();
-    } catch(err){ console.error('[Isheeka ERP] template save failed:', err); setSaveError('Could not save template. Please try again.'); }
+    } catch(err){ console.error('[Isheeka ERP] template save failed:', err); setSaveError('Could not save template: '+((err&&(err.message||err.details||err.hint))||'please try again.')); }
     finally { setSaving(false); }
   };
 
