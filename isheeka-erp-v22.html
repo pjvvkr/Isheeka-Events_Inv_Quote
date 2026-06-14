@@ -4994,7 +4994,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       </div>
 
       {/* Status banners */}
-      {(quot.status==='converted'||quot.event_id)&&!invoiceIssued&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:12}}>📅 An event has been created from this quote. Changes flow through the event.</div>}
+      {srcEvent&&(srcEvent.status||'').toLowerCase()==='cancelled'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--red-light)',color:'var(--red)',borderRadius:'var(--radius-sm)',fontSize:12}}>⛔ The event created from this quote (<b>{srcEvent.ref_number}</b>) has been cancelled. This quote is kept for record only.</div>}
+      {(quot.status==='converted'||quot.event_id)&&!invoiceIssued&&(!srcEvent||(srcEvent.status||'').toLowerCase()!=='cancelled')&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:12}}>📅 An event has been created from this quote. Changes flow through the event.</div>}
       {invoiceIssued&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>🔒 An invoice has been issued — this quote is locked. To change scope or pricing, revise the invoice.</div>}
 
       {/* What the client sees + share/export */}
@@ -5087,6 +5088,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
 
 function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
   const [quotes, setQuotes] = React.useState([]);
+  const [cancelledEvents, setCancelledEvents] = React.useState({});
   const [viewQuotId, setViewQuotId] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [search, setSearch] = React.useState('');
@@ -5096,6 +5098,8 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
     setLoading(true);
     const {data} = await supabase.from('quotations').select('*').eq('is_deleted',false).order('doc_date',{ascending:false});
     if(data) setQuotes(data);
+    const {data:ce} = await supabase.from('events').select('event_id').eq('status','cancelled').eq('is_deleted',false);
+    const m={}; (ce||[]).forEach(e=>{m[e.event_id]=true;}); setCancelledEvents(m);
     setLoading(false);
   },[]);
   React.useEffect(()=>{ loadQuotes(); },[loadQuotes]);
@@ -5152,7 +5156,7 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                       <span style={{fontSize:14,fontWeight:500,color:'var(--pink)'}}>{q.ref_number}</span>
                       {q.revision_number>0&&<span style={{fontSize:11,color:'var(--grey-400)'}}>Rev {q.revision_number}</span>}
-                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{QUOT_STATUS_LABELS[q.status]||q.status}</span>{isQuoteExpired(q)&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)'}}>Expired</span>}
+                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{QUOT_STATUS_LABELS[q.status]||q.status}</span>{isQuoteExpired(q)&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)'}}>Expired</span>}{q.event_id&&cancelledEvents[q.event_id]&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--red-light)',color:'var(--red)'}}>Event cancelled</span>}
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {q.client_name&&<span>👤 {q.client_name}</span>}
