@@ -2258,6 +2258,28 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [quoteWizardSubs, setQuoteWizardSubs] = React.useState([]);
   const [reviseQuoteId, setReviseQuoteId] = React.useState(null);
   const [invoices, setInvoices] = React.useState([]);
+  const [eventVendors, setEventVendors] = React.useState([]);
+  const [showAddVendor, setShowAddVendor] = React.useState(false);
+  const [vForm, setVForm] = React.useState({vendorName:'',category:'other',service:'',agreed:''});
+  const [payVendorFor, setPayVendorFor] = React.useState(null);
+  const [vPay, setVPay] = React.useState({amount:'',date:todayLocalStr(),mode:'upi',reference:''});
+  const [vSaving, setVSaving] = React.useState(false);
+  const loadEventVendors = React.useCallback(async()=>{ const {data}=await supabase.from('event_vendors').select('*').eq('event_id',eventId).eq('is_deleted',false).order('created_at'); setEventVendors(data||[]); },[eventId]);
+  React.useEffect(()=>{ loadEventVendors(); },[loadEventVendors]);
+  const submitAddVendor=async()=>{
+    if(!vForm.vendorName.trim()){ notify('Enter the vendor name.','error'); return; }
+    setVSaving(true);
+    try{ await addEventVendor({eventId, vendorName:vForm.vendorName.trim(), category:vForm.category, service:vForm.service, agreed:vForm.agreed}); setShowAddVendor(false); setVForm({vendorName:'',category:'other',service:'',agreed:''}); notify('Vendor added.','success'); await loadEventVendors(); }
+    catch(err){ notify('Could not add vendor: '+(err&&err.message?err.message:''),'error'); }
+    setVSaving(false);
+  };
+  const submitVendorPayment=async()=>{
+    const amt=parseFloat(vPay.amount)||0; if(amt<=0){ notify('Enter a valid amount.','error'); return; }
+    setVSaving(true);
+    try{ await recordVendorPayment(payVendorFor, {amount:amt,date:vPay.date,mode:vPay.mode,reference:vPay.reference}); setPayVendorFor(null); setVPay({amount:'',date:todayLocalStr(),mode:'upi',reference:''}); notify('Payment recorded.','success'); await loadEventVendors(); }
+    catch(err){ notify('Could not record payment: '+(err&&err.message?err.message:''),'error'); }
+    setVSaving(false);
+  };
   const [altContacts, setAltContacts] = React.useState([]);
   const [staffList, setStaffList] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -2740,12 +2762,53 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         </div>
       </div>
 
-      {/* Vendors placeholder */}
-      <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'20px',border:'1px solid var(--grey-100)',textAlign:'center',color:'var(--grey-400)'}}>
-        <div style={{fontSize:20,marginBottom:6}}>🔧</div>
-        <div style={{fontSize:13,fontWeight:500}}>Vendors</div>
-        <div style={{fontSize:12}}>Vendor assignment coming soon</div>
+      {/* Vendors & payments */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Vendors &amp; payments</div>
+          <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>setShowAddVendor(true)}>+ Add vendor</button>
+        </div>
+        {(()=>{ const paid=eventVendors.reduce((s,v)=>s+(parseFloat(v.total_paid)||0),0); const out=eventVendors.reduce((s,v)=>s+(parseFloat(v.outstanding)||0),0); const agr=eventVendors.reduce((s,v)=>s+(parseFloat(v.agreed_amount)||0),0); return <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:12}}>Vendor cost: <b style={{color:'var(--grey-800)'}}>₹{Math.round(paid).toLocaleString('en-IN')} paid</b> · ₹{Math.round(out).toLocaleString('en-IN')} outstanding · ₹{Math.round(agr).toLocaleString('en-IN')} agreed</div>; })()}
+        {eventVendors.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No vendors added yet.</div>}
+        {eventVendors.map(v=>{ const st={pending:{bg:'var(--grey-100)',color:'var(--grey-400)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'}}[v.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}; return (
+          <div key={v.event_vendor_id} style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 96px 110px',gap:8,alignItems:'center',padding:'9px 0',borderTop:'1px solid var(--grey-100)',fontSize:13}}>
+            <div><div style={{fontWeight:500}}>{v.vendor_name||'Vendor'}</div>{v.service_description&&<div style={{fontSize:12,color:'var(--grey-400)'}}>{v.service_description}</div>}</div>
+            <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.agreed_amount)||0).toLocaleString('en-IN')}</div>
+            <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.total_paid)||0).toLocaleString('en-IN')}</div>
+            <div style={{textAlign:'right',color:(parseFloat(v.outstanding)||0)>0?'var(--red)':'var(--grey-800)'}}>₹{Math.round(parseFloat(v.outstanding)||0).toLocaleString('en-IN')}</div>
+            <div style={{textAlign:'right',display:'flex',gap:6,justifyContent:'flex-end',alignItems:'center'}}><span style={{fontSize:11,padding:'2px 8px',borderRadius:12,background:st.bg,color:st.color,textTransform:'capitalize'}}>{(v.status||'').replace('_',' ')}</span>{(parseFloat(v.outstanding)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>{setPayVendorFor(v);setVPay({amount:'',date:todayLocalStr(),mode:'upi',reference:''});}}>+ Pay</button>}</div>
+          </div>
+        ); })}
       </div>
+
+      {showAddVendor&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px'}} onClick={e=>{if(e.target===e.currentTarget)setShowAddVendor(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:460}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Add vendor to this event</div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Vendor name <span style={{color:'var(--pink)'}}>*</span></label><input className="field-input" value={vForm.vendorName} onChange={e=>setVForm(f=>({...f,vendorName:e.target.value}))} placeholder="e.g. Blooms Decor"/></div>
+              <div><label className="field-label">Category</label><select className="field-input" value={vForm.category} onChange={e=>setVForm(f=>({...f,category:e.target.value}))}>{VENDOR_CATS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+              <div><label className="field-label">Agreed amount (₹)</label><input type="number" className="field-input" value={vForm.agreed} onChange={e=>setVForm(f=>({...f,agreed:e.target.value}))} placeholder="0"/></div>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Service</label><input className="field-input" value={vForm.service} onChange={e=>setVForm(f=>({...f,service:e.target.value}))} placeholder="e.g. Mandap & florals"/></div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setShowAddVendor(false)}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitAddVendor}>{vSaving?'Saving…':'Add vendor'}</button></div>
+          </div>
+        </div>
+      )}
+      {payVendorFor&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px'}} onClick={e=>{if(e.target===e.currentTarget)setPayVendorFor(null);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:440}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Pay {payVendorFor.vendor_name||'vendor'} <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· balance ₹{Math.round(parseFloat(payVendorFor.outstanding)||0).toLocaleString('en-IN')}</span></div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div><label className="field-label">Amount (₹) <span style={{color:'var(--pink)'}}>*</span></label><input type="number" className="field-input" value={vPay.amount} onChange={e=>setVPay(f=>({...f,amount:e.target.value}))} placeholder="0"/></div>
+              <div><label className="field-label">Date</label><input type="date" className="field-input" value={vPay.date} onChange={e=>setVPay(f=>({...f,date:e.target.value}))}/></div>
+              <div><label className="field-label">Mode</label><select className="field-input" value={vPay.mode} onChange={e=>setVPay(f=>({...f,mode:e.target.value}))}>{VENDOR_MODES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+              <div><label className="field-label">Reference</label><input className="field-input" value={vPay.reference} onChange={e=>setVPay(f=>({...f,reference:e.target.value}))} placeholder="optional"/></div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setPayVendorFor(null)}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitVendorPayment}>{vSaving?'Saving…':'Record payment'}</button></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -5646,6 +5709,207 @@ function Dashboard({ user, onNavigate }) {
   );
 }
 
+// ── Vendor payment helpers (shared by the event section + Vendor Payments module) ──
+const VENDOR_CATS=[['caterer','Caterer'],['decorator','Decorator'],['photographer','Photographer'],['sound_lighting','Sound & lighting'],['venue','Venue'],['transport','Transport'],['makeup','Makeup'],['entertainment','Entertainment'],['other','Other']];
+const VENDOR_MODES=[['upi','UPI'],['neft','Bank / NEFT'],['cash','Cash'],['cheque','Cheque']];
+// vendor_payments.installment_id is NOT NULL → every event_vendor gets one default installment (= agreed amount).
+async function _ensureVendorInstallment(eventVendorId, agreedAmount){
+  const {data:ex}=await supabase.from('vendor_installments').select('installment_id').eq('event_vendor_id',eventVendorId).order('installment_number').limit(1);
+  if(ex&&ex.length) return ex[0].installment_id;
+  const ag=parseFloat(agreedAmount)||0;
+  const {data:ins,error}=await supabase.from('vendor_installments').insert({event_vendor_id:eventVendorId,installment_number:1,amount_due:ag,amount_paid:0,balance:ag,status:'pending',created_at:new Date().toISOString()}).select('installment_id').single();
+  if(error) throw error; return ins.installment_id;
+}
+async function addEventVendor({eventId, vendorId, vendorName, category, service, agreed}){
+  let vid=vendorId, vname=vendorName;
+  if(!vid){
+    const {data:v,error}=await supabase.from('vendors').insert({name:vendorName,category:category||null,status:'active',created_by:await _currentUid(),created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false}).select('vendor_id,name').single();
+    if(error) throw error; vid=v.vendor_id; vname=v.name;
+  }
+  const ag=parseFloat(agreed)||0;
+  const {data:ev,error:ee}=await supabase.from('event_vendors').insert({event_id:eventId,vendor_id:vid,vendor_name:vname||null,service_description:service||null,agreed_amount:ag,total_paid:0,outstanding:ag,status:'pending',created_by:await _currentUid(),created_at:new Date().toISOString(),is_deleted:false}).select('*').single();
+  if(ee) throw ee;
+  await _ensureVendorInstallment(ev.event_vendor_id, ag);
+  return ev;
+}
+async function recordVendorPayment(ev, pay){
+  const instId=await _ensureVendorInstallment(ev.event_vendor_id, ev.agreed_amount);
+  const amt=parseFloat(pay.amount)||0;
+  const {error:pe}=await supabase.from('vendor_payments').insert({event_vendor_id:ev.event_vendor_id,installment_id:instId,vendor_id:ev.vendor_id,event_id:ev.event_id,amount:amt,payment_date:pay.date,payment_mode:pay.mode||null,reference_number:pay.reference||null,notes:pay.notes||null,recorded_by:await _currentUid(),recorded_at:new Date().toISOString()});
+  if(pe) throw pe;
+  const {data:inst}=await supabase.from('vendor_installments').select('amount_due,amount_paid').eq('installment_id',instId).single();
+  const ip=(parseFloat(inst&&inst.amount_paid)||0)+amt, idue=parseFloat(inst&&inst.amount_due)||0, ibal=Math.max(0,idue-ip);
+  await supabase.from('vendor_installments').update({amount_paid:ip,balance:ibal,status:ibal<=0?'paid':'partially_paid',updated_at:new Date().toISOString()}).eq('installment_id',instId);
+  const newPaid=(parseFloat(ev.total_paid)||0)+amt, agreed=parseFloat(ev.agreed_amount)||0, out=Math.max(0,agreed-newPaid);
+  await supabase.from('event_vendors').update({total_paid:newPaid,outstanding:out,status:newPaid<=0?'pending':(out<=0?'paid':'partially_paid'),updated_at:new Date().toISOString()}).eq('event_vendor_id',ev.event_vendor_id);
+}
+
+// ── Event quick-view popup (used from the Vendor Payments module) ──────────────
+function EventQuickView({eventId, onClose, onNavigate}){
+  const [ev,setEv]=React.useState(null);
+  const [loading,setLoading]=React.useState(true);
+  React.useEffect(()=>{ let a=true; (async()=>{ const {data}=await supabase.from('events').select('event_id,ref_number,name,type,status,main_date,location,client_name').eq('event_id',eventId).single(); if(a){ setEv(data||null); setLoading(false); } })(); return ()=>{a=false;}; },[eventId]);
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:440}}>
+        <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>{loading?'Loading…':(ev?ev.name:'Event not found')}</div>
+          <button className="btn sm" onClick={onClose}>✕</button>
+        </div>
+        {ev&&<div style={{padding:20,fontSize:13}}>
+          <div style={{color:'var(--grey-400)',marginBottom:10}}>{ev.ref_number} · {ev.type?eventTypeLabel(ev.type):''} · <span style={{textTransform:'capitalize'}}>{(ev.status||'').replace('_',' ')}</span></div>
+          {[['Client',ev.client_name],['Main date',ev.main_date?fmtDate(ev.main_date,{day:'numeric',month:'long',year:'numeric'}):'—'],['Location',ev.location||'—']].map(([l,v])=>(
+            <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid var(--grey-50)'}}><span style={{color:'var(--grey-400)'}}>{l}</span><span style={{fontWeight:500}}>{v}</span></div>
+          ))}
+          <button className="btn primary" style={{marginTop:14,width:'100%'}} onClick={()=>{onClose();onNavigate&&onNavigate('events',{eventId:ev.event_id});}}>Open full event →</button>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Vendor Payments Module ────────────────────────────────────────────────────
+function VendorPaymentsModule({onNavigate}){
+  const [pays,setPays]=React.useState([]);
+  const [evs,setEvs]=React.useState([]); // event_vendors
+  const [vendors,setVendors]=React.useState([]);
+  const [events,setEvents]=React.useState([]);
+  const [loading,setLoading]=React.useState(true);
+  const [search,setSearch]=React.useState('');
+  const [evtFilter,setEvtFilter]=React.useState('');
+  const [range,setRange]=React.useState('month');
+  const [popupEvent,setPopupEvent]=React.useState(null);
+  const [showRec,setShowRec]=React.useState(false);
+  const [saving,setSaving]=React.useState(false);
+  const recEmpty={eventId:'',eventVendorId:'',newVendor:false,vendorName:'',vendorId:'',category:'other',service:'',agreed:'',amount:'',date:todayLocalStr(),mode:'upi',reference:''};
+  const [rec,setRec]=React.useState(recEmpty);
+  const setR=(k,v)=>setRec(f=>({...f,[k]:v}));
+
+  const load=React.useCallback(async()=>{
+    setLoading(true);
+    const [{data:p},{data:ev},{data:vn},{data:e}]=await Promise.all([
+      supabase.from('vendor_payments').select('*').order('payment_date',{ascending:false}),
+      supabase.from('event_vendors').select('*').eq('is_deleted',false),
+      supabase.from('vendors').select('vendor_id,name').eq('is_deleted',false),
+      supabase.from('events').select('event_id,ref_number,name').eq('is_deleted',false).order('main_date',{ascending:false})
+    ]);
+    setPays(p||[]); setEvs(ev||[]); setVendors(vn||[]); setEvents(e||[]); setLoading(false);
+  },[]);
+  React.useEffect(()=>{ load(); },[load]);
+
+  const vMap={}; vendors.forEach(v=>{vMap[v.vendor_id]=v.name;});
+  const eMap={}; events.forEach(e=>{eMap[e.event_id]=e;});
+  const evMap={}; evs.forEach(x=>{evMap[x.event_vendor_id]=x;});
+  const yr=String(new Date().getFullYear()), mo=todayLocalStr().slice(0,7);
+  const inRange=d=> range==='all'?true: range==='year'?(String(d||'').slice(0,4)===yr):(String(d||'').slice(0,7)===mo);
+  const inr=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
+  const mMonth=pays.filter(p=>String(p.payment_date||'').slice(0,7)===mo).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+  const mYear=pays.filter(p=>String(p.payment_date||'').slice(0,4)===yr).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+  const outstanding=evs.reduce((s,x)=>s+(parseFloat(x.outstanding)||0),0);
+  const filtered=pays.filter(p=>{
+    const q=search.toLowerCase();
+    const ev=evMap[p.event_vendor_id]; const evt=eMap[p.event_id];
+    const ms=!q||`${vMap[p.vendor_id]||p.vendor_id||''} ${(ev&&ev.service_description)||''} ${(evt&&evt.ref_number)||''} ${(evt&&evt.name)||''} ${p.reference_number||''}`.toLowerCase().includes(q);
+    const me=!evtFilter||p.event_id===evtFilter;
+    return ms&&me&&inRange(p.payment_date);
+  });
+
+  const evForSelectedEvent=evs.filter(x=>x.event_id===rec.eventId);
+  const openRec=()=>{ setRec(recEmpty); setShowRec(true); };
+  const saveRec=async()=>{
+    if(!rec.eventId){ notify('Select the event this payment is for.','error'); return; }
+    const amt=parseFloat(rec.amount)||0; if(amt<=0){ notify('Enter a valid amount.','error'); return; }
+    setSaving(true);
+    try{
+      let ev;
+      if(rec.newVendor){
+        if(!rec.vendorName.trim()){ notify('Enter the vendor name.','error'); setSaving(false); return; }
+        ev=await addEventVendor({eventId:rec.eventId, vendorId:rec.vendorId||null, vendorName:rec.vendorName.trim(), category:rec.category, service:rec.service, agreed:rec.agreed});
+      } else {
+        if(!rec.eventVendorId){ notify('Pick the vendor on this event (or add a new one).','error'); setSaving(false); return; }
+        ev=evMap[rec.eventVendorId];
+      }
+      await recordVendorPayment(ev, {amount:amt, date:rec.date, mode:rec.mode, reference:rec.reference});
+      setSaving(false); setShowRec(false); notify('Vendor payment recorded.','success'); load();
+    }catch(err){ console.error('[Isheeka ERP] vendor payment failed:',err); notify('Could not record the payment: '+(err&&err.message?err.message:'try again'),'error'); setSaving(false); }
+  };
+
+  return (
+    <div>
+      {popupEvent&&<EventQuickView eventId={popupEvent} onClose={()=>setPopupEvent(null)} onNavigate={onNavigate}/>}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+        <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>Vendor payments</div>
+        <button className="btn primary" onClick={openRec}>+ Record payment</button>
+      </div>
+      <div className="metrics-grid" style={{marginBottom:18}}>
+        <div className="metric-card pink"><div className="metric-icon">🧾</div><div className="metric-value">{inr(mMonth)}</div><div className="metric-label">Paid this month</div></div>
+        <div className="metric-card red"><div className="metric-icon">⏳</div><div className="metric-value">{inr(outstanding)}</div><div className="metric-label">Outstanding to vendors</div></div>
+        <div className="metric-card blue"><div className="metric-icon">📅</div><div className="metric-value">{inr(mYear)}</div><div className="metric-label">Paid this year</div></div>
+      </div>
+      <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
+        <div style={{flex:1,minWidth:180,position:'relative'}}>
+          <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',fontSize:15,color:'var(--grey-400)',pointerEvents:'none'}}>🔍</span>
+          <input className="field-input" style={{paddingLeft:36}} placeholder="Search vendor, event ref/name, reference…" value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
+        <select className="field-input" style={{width:200}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}</option>)}</select>
+        <select className="field-input" style={{width:130}} value={range} onChange={e=>setRange(e.target.value)}><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option></select>
+      </div>
+      {loading? <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+       : filtered.length===0? <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:50,textAlign:'center',border:'1px solid var(--grey-100)',color:'var(--grey-400)'}}>No vendor payments for this view. <button className="btn sm" onClick={openRec}>+ Record one</button></div>
+       : <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}}>
+          <div style={{display:'grid',gridTemplateColumns:'80px 1fr 200px 90px 96px',gap:10,padding:'9px 16px',background:'var(--grey-50)',fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em'}}>
+            <div>Date</div><div>Vendor / service</div><div>Event</div><div>Mode</div><div style={{textAlign:'right'}}>Amount</div>
+          </div>
+          {filtered.map(p=>{ const ev=evMap[p.event_vendor_id]; const evt=eMap[p.event_id]; return (
+            <div key={p.payment_id} style={{display:'grid',gridTemplateColumns:'80px 1fr 200px 90px 96px',gap:10,padding:'11px 16px',borderTop:'1px solid var(--grey-100)',alignItems:'center',fontSize:13}}>
+              <div style={{color:'var(--grey-500)'}}>{fmtDate(p.payment_date,{day:'numeric',month:'short'})}</div>
+              <div><b>{vMap[p.vendor_id]||'Vendor'}</b>{ev&&ev.service_description?(' · '+ev.service_description):''}</div>
+              <div>{evt?<><a onClick={()=>setPopupEvent(p.event_id)} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>{evt.ref_number}</a> <span style={{color:'var(--grey-400)'}}>· {evt.name}</span></>:'—'}</div>
+              <div style={{textTransform:'uppercase',fontSize:11,color:'var(--grey-500)'}}>{p.payment_mode}</div>
+              <div style={{textAlign:'right',fontWeight:500}}>{inr(p.amount)}</div>
+            </div>
+          ); })}
+        </div>}
+
+      {showRec&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget)setShowRec(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:520}}>
+            <div style={{padding:'16px 24px',borderBottom:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Record vendor payment</div>
+              <button className="btn sm" onClick={()=>setShowRec(false)}>✕</button>
+            </div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Event <span style={{color:'var(--pink)'}}>*</span></label><select className="field-input" value={rec.eventId} onChange={e=>{setR('eventId',e.target.value);setR('eventVendorId','');setR('newVendor',false);}}><option value="">Select event…</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}</option>)}</select></div>
+              {rec.eventId&&<div style={{gridColumn:'1 / -1'}}>
+                <label className="field-label">Vendor</label>
+                <select className="field-input" value={rec.newVendor?'__new':rec.eventVendorId} onChange={e=>{ if(e.target.value==='__new'){setR('newVendor',true);setR('eventVendorId','');} else {setR('newVendor',false);setR('eventVendorId',e.target.value);} }}>
+                  <option value="">Select a vendor on this event…</option>
+                  {evForSelectedEvent.map(x=><option key={x.event_vendor_id} value={x.event_vendor_id}>{x.vendor_name||vMap[x.vendor_id]||'Vendor'}{x.service_description?(' — '+x.service_description):''} (bal ₹{Math.round(parseFloat(x.outstanding)||0).toLocaleString('en-IN')})</option>)}
+                  <option value="__new">+ Add a new vendor to this event</option>
+                </select>
+              </div>}
+              {rec.eventId&&rec.newVendor&&<>
+                <div><label className="field-label">Vendor name <span style={{color:'var(--pink)'}}>*</span></label><input className="field-input" value={rec.vendorName} onChange={e=>setR('vendorName',e.target.value)} placeholder="e.g. Blooms Decor"/></div>
+                <div><label className="field-label">Category</label><select className="field-input" value={rec.category} onChange={e=>setR('category',e.target.value)}>{VENDOR_CATS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+                <div><label className="field-label">Service</label><input className="field-input" value={rec.service} onChange={e=>setR('service',e.target.value)} placeholder="e.g. Mandap & florals"/></div>
+                <div><label className="field-label">Agreed amount (₹)</label><input type="number" className="field-input" value={rec.agreed} onChange={e=>setR('agreed',e.target.value)} placeholder="0"/></div>
+              </>}
+              <div><label className="field-label">Amount paid (₹) <span style={{color:'var(--pink)'}}>*</span></label><input type="number" className="field-input" value={rec.amount} onChange={e=>setR('amount',e.target.value)} placeholder="0"/></div>
+              <div><label className="field-label">Date <span style={{color:'var(--pink)'}}>*</span></label><input type="date" className="field-input" value={rec.date} onChange={e=>setR('date',e.target.value)}/></div>
+              <div><label className="field-label">Mode</label><select className="field-input" value={rec.mode} onChange={e=>setR('mode',e.target.value)}>{VENDOR_MODES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+              <div><label className="field-label">Reference</label><input className="field-input" value={rec.reference} onChange={e=>setR('reference',e.target.value)} placeholder="optional"/></div>
+            </div>
+            <div style={{padding:'14px 24px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button className="btn" onClick={()=>setShowRec(false)}>Cancel</button>
+              <button className="btn primary" disabled={saving} onClick={saveRec}>{saving?'Saving…':'Record payment'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Expenses Module ───────────────────────────────────────────────────────────
 const EXPENSE_CATS=[['marketing','Marketing'],['operations','Operations'],['travel','Travel'],['staff','Staff'],['event_incidentals','Event incidentals'],['professional','Professional'],['banking','Banking'],['miscellaneous','Miscellaneous']];
 const EXPENSE_CAT_LABEL=c=>{ const f=EXPENSE_CATS.find(x=>x[0]===c); return f?f[1]:c; };
@@ -5893,7 +6157,8 @@ function App() {
           {activePage==='invoices' && <InvoicesModule onNavigate={navigate} initialInvoiceId={navTarget&&navTarget.page==='invoices'?navTarget.invoiceId:null} onConsumed={()=>setNavTarget(null)}/>}
           {activePage==='quotations' && <QuotationsModule onNavigate={navigate} initialQuotId={navTarget&&navTarget.page==='quotations'?navTarget.quotId:null} onConsumed={()=>setNavTarget(null)}/>}
           {activePage==='expenses' && <ExpensesModule onNavigate={navigate}/>}
-          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='invoices' && activePage!=='quotations' && activePage!=='expenses' && <ComingSoon page={activePage}/>}
+          {activePage==='vendor-payments' && <VendorPaymentsModule onNavigate={navigate}/>}
+          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='invoices' && activePage!=='quotations' && activePage!=='expenses' && activePage!=='vendor-payments' && <ComingSoon page={activePage}/>}
         </div>
       </main>
     </div>
