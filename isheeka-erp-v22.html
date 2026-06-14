@@ -2779,7 +2779,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
 
   const sc = EVENT_STATUS_COLORS[event.status?.toLowerCase()]||EVENT_STATUS_COLORS.planning;
   const hasFinancialDocs = quotations.length>0||invoices.length>0;
-  const activeQuote = quotations.find(q=>!['superseded','rejected','expired','converted'].includes(q.status));
+  const activeQuote = quotations.find(q=>!['superseded','rejected','expired'].includes(q.status));
   // Once an invoice has been ISSUED (sent or beyond), the invoice is the master — quote revisions
   // would silently diverge from the document the client received/paid against. Draft invoices still
   // auto-refresh from the quote, so revising is fine while the only invoice is a draft.
@@ -2992,7 +2992,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                 ? <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>
                 : invoiceIssued
                   ? <span style={{fontSize:11,color:'var(--grey-400)',display:'inline-flex',alignItems:'center',gap:4}} title="An invoice has already been issued for this event. To change scope or pricing, revise the invoice instead — revising the quote now would diverge from the issued invoice.">🔒 Invoice issued — revise the invoice</span>
-                  : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:(activeQuote||quotations[0]).quotation_id})} title="Open the quotation">📄 Open quote →</button>}
+                  : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:(activeQuote||quotations[0]).quotation_id})} title="Open the quote — revise it here until the invoice is issued">✏️ Revise quote →</button>}
             </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
             {(()=>{
@@ -5148,8 +5148,10 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
         origin={eventId:ev.event_id, eventName:ev.name};
         const {data:c}=await supabase.from('clients').select('first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',ev.client_id).single();
         const nm=(ev.client_name||'').trim();
-        leadObj = c ? {lead_id:null,client_id:ev.client_id,first_name:c.first_name,last_name:c.last_name,phone:c.phone_1||'',phone_2:c.phone_2||'',email:c.email_1||'',source:c.source||'referral',event_type:ev.type}
-                    : {lead_id:null,client_id:ev.client_id,first_name:nm.split(' ')[0]||nm,last_name:nm.split(' ').slice(1).join(' '),phone:'',phone_2:'',email:'',source:'referral',event_type:ev.type};
+        // Carry the quote's lead_id through the revision so the lead stays linked (and its active-quote pointer can be repointed).
+        const _lid=quot.lead_id||null;
+        leadObj = c ? {lead_id:_lid,client_id:ev.client_id,first_name:c.first_name,last_name:c.last_name,phone:c.phone_1||'',phone_2:c.phone_2||'',email:c.email_1||'',source:c.source||'referral',event_type:ev.type}
+                    : {lead_id:_lid,client_id:ev.client_id,first_name:nm.split(' ')[0]||nm,last_name:nm.split(' ').slice(1).join(' '),phone:'',phone_2:'',email:'',source:'referral',event_type:ev.type};
       }
     } else if(quot.lead_id){
       const {data:l}=await supabase.from('leads').select('*').eq('lead_id',quot.lead_id).single();
@@ -5171,7 +5173,13 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const eventCancelled = !!(srcEvent && (srcEvent.status||'').toLowerCase()==='cancelled');
   // Historical/closed quote: no client sends (WhatsApp/Email), but Print/Download stay for records.
   const histClosed = eventCancelled || ['rejected','expired','superseded'].includes(quot.status);
-  const editable = !['converted','rejected','expired','superseded'].includes(quot.status) && !invoiceIssued && !eventCancelled;
+  // Revision is gated on INVOICE ISSUANCE, not conversion — a converted quote stays revisable while its
+  // invoice is still a draft (consistent across lead-origin and event-origin paths). Locks once the invoice
+  // is issued (sent+), the event is cancelled, or the quote is terminal.
+  const editable = !['rejected','expired','superseded'].includes(quot.status) && !invoiceIssued && !eventCancelled;
+  // A draft revision sitting under an event with an unissued invoice — revising alone doesn't touch the
+  // invoice; the user must re-confirm to push the change into the draft invoice.
+  const pendingRevisionConfirm = quot.status==='draft' && (quot.revision_number||0)>0 && !!quot.event_id && !invoiceIssued && !eventCancelled;
   // Event-origin: confirm available until approved (then the invoice exists). Lead-origin: confirm
   // (= create the event) available until converted, including 'approved' (idempotent re-convert).
   const canConfirm = (quot.event_id
@@ -5215,7 +5223,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       {/* Status banners */}
       {quot.status==='rejected'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--red-light)',color:'var(--red)',borderRadius:'var(--radius-sm)',fontSize:12}}>✕ <b>This quote was closed — not proceeding.</b>{(()=>{const r=(qActivity||[]).find(a=>a.action==='rejected'&&a.notes);return r?(' '+r.notes):'';})()} To pursue again, revise or generate a new quote.</div>}
       {srcEvent&&(srcEvent.status||'').toLowerCase()==='cancelled'&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--red-light)',color:'var(--red)',borderRadius:'var(--radius-sm)',fontSize:12}}>⛔ The event created from this quote (<b>{srcEvent.ref_number}</b>) has been cancelled. This quote is kept for record only.</div>}
-      {(quot.status==='converted'||quot.event_id)&&!invoiceIssued&&(!srcEvent||(srcEvent.status||'').toLowerCase()!=='cancelled')&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:12}}>📅 An event has been created from this quote. Changes flow through the event.</div>}
+      {(quot.status==='converted'||quot.event_id)&&!invoiceIssued&&!pendingRevisionConfirm&&(!srcEvent||(srcEvent.status||'').toLowerCase()!=='cancelled')&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',fontSize:12}}>📅 An event has been created from this quote. You can still revise it until the invoice is issued — confirming a revision updates the draft invoice.</div>}
+      {pendingRevisionConfirm&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>📝 <b>Draft revision.</b> Use <b>Confirm &amp; create invoice</b> above to push these changes into the draft invoice — until you do, the invoice keeps the previous figures.</div>}
       {invoiceIssued&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>🔒 An invoice has been issued — this quote is locked. To change scope or pricing, revise the invoice.</div>}
 
       {/* What the client sees + share/export */}
@@ -8905,6 +8914,10 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           updated_at:new Date().toISOString()
         }).eq('lead_id',lead.lead_id);
         if(lqe) throw lqe;
+      } else if(lead.lead_id){
+        // Revising a quote that already has an event (lead-origin, post-conversion): keep the lead pointing
+        // at the newest revision so it doesn't surface the superseded original. Stage is left as-is (converted).
+        try{ await supabase.from('leads').update({active_quotation_id:newQ.quotation_id,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id); }catch(e){ console.error('[Isheeka ERP] lead active-quote repoint failed:', e); }
       }
 
       setCreatedQuot(newQ);
