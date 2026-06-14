@@ -2278,7 +2278,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     setEventInstallments(map);
   },[eventId]);
   React.useEffect(()=>{ loadEventVendors(); },[loadEventVendors]);
-  React.useEffect(()=>{ (async()=>{ const {data}=await supabase.from('vendors').select('vendor_id,name,category').eq('is_deleted',false).eq('status','active').order('name'); setVendorMaster(data||[]); })(); },[showAddVendor]);
+  React.useEffect(()=>{ (async()=>{ const {data}=await supabase.from('vendors').select('vendor_id,name,category').eq('is_deleted',false).eq('status','active').order('name'); setVendorMaster(data||[]); })(); },[showAddVendor,editEngage]);
   const submitAddVendor=async()=>{
     if(vForm.mode==='existing'){
       if(!vForm.vendorId){ notify('Pick a vendor.','error'); return; }
@@ -2326,6 +2326,40 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     if(!window.confirm('Remove this installment from the schedule?')) return;
     const {error}=await runDb(supabase.from('vendor_installments').delete().eq('installment_id',inst.installment_id),'delete installment');
     if(!error){ notify('Installment removed.','success'); await loadEventVendors(); }
+  };
+  const [editEngage,setEditEngage]=React.useState(null);
+  const [engForm,setEngForm]=React.useState({vendorId:'',service:'',agreed:''});
+  const openEditEngage=v=>{ setEditEngage(v); setEngForm({vendorId:String(v.vendor_id||''),service:v.service_description||'',agreed:String(Math.round(parseFloat(v.agreed_amount)||0))}); };
+  const submitEditEngage=async()=>{
+    const v=editEngage; if(!v) return;
+    const paid=parseFloat(v.total_paid)||0; const vendorChanged=String(engForm.vendorId)!==String(v.vendor_id);
+    if(!engForm.vendorId){ notify('Pick a vendor.','error'); return; }
+    if(vendorChanged && paid>0){ notify('Payments are recorded against this vendor — you can’t swap it. Remove the payments first, or remove this vendor and add the new one.','error'); return; }
+    const ag=parseFloat(engForm.agreed)||0;
+    const picked=vendorMaster.find(x=>String(x.vendor_id)===String(engForm.vendorId));
+    const vname=vendorChanged?(picked&&picked.name):v.vendor_name;
+    setVSaving(true);
+    try{
+      const out=Math.max(0,ag-paid);
+      const patch={vendor_id:engForm.vendorId,vendor_name:vname||null,service_description:engForm.service||null,agreed_amount:ag,outstanding:out,status:paid<=0?'pending':(out<=0?'paid':'partially_paid'),updated_at:new Date().toISOString()};
+      const {error}=await runDb(supabase.from('event_vendors').update(patch).eq('event_vendor_id',v.event_vendor_id),'update engagement'); if(error) throw error;
+      const insts=eventInstallments[v.event_vendor_id]||[];
+      if(insts.length===1 && (parseFloat(insts[0].amount_paid)||0)<=0){ await supabase.from('vendor_installments').update({amount_due:ag,balance:ag,updated_at:new Date().toISOString()}).eq('installment_id',insts[0].installment_id); }
+      setEditEngage(null); notify('Vendor engagement updated.','success'); await loadEventVendors();
+    }catch(err){ notify('Could not update: '+(err&&err.message?err.message:''),'error'); }
+    setVSaving(false);
+  };
+  const removeEngage=async v=>{
+    if((parseFloat(v.total_paid)||0)>0){ notify('This vendor has payments recorded — can’t remove it (it would orphan the payment history). Delete the payments first if you really need to.','error'); return; }
+    if(!window.confirm('Remove '+(v.vendor_name||'this vendor')+' from this event?')) return;
+    setVSaving(true);
+    try{
+      const insts=eventInstallments[v.event_vendor_id]||[];
+      if(insts.length){ await supabase.from('vendor_installments').delete().in('installment_id',insts.map(i=>i.installment_id)); }
+      const {error}=await runDb(supabase.from('event_vendors').update({is_deleted:true,updated_at:new Date().toISOString()}).eq('event_vendor_id',v.event_vendor_id),'remove vendor'); if(error) throw error;
+      setEditEngage(null); notify('Vendor removed from this event.','success'); await loadEventVendors();
+    }catch(err){ notify('Could not remove: '+(err&&err.message?err.message:''),'error'); }
+    setVSaving(false);
   };
   const [altContacts, setAltContacts] = React.useState([]);
   const [staffList, setStaffList] = React.useState([]);
@@ -2820,7 +2854,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         {eventVendors.map(v=>{ const st={pending:{bg:'var(--grey-100)',color:'var(--grey-400)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'}}[v.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}; const insts=(eventInstallments[v.event_vendor_id]||[]); const anyOverdue=insts.some(isVendorInstOverdue); const open=expandedVendor===v.event_vendor_id; return (
           <div key={v.event_vendor_id} style={{borderTop:'1px solid var(--grey-100)'}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 96px 110px',gap:8,alignItems:'center',padding:'9px 0',fontSize:13}}>
-              <div style={{cursor:'pointer'}} onClick={()=>setExpandedVendor(open?null:v.event_vendor_id)}><div style={{fontWeight:500}}>{insts.length>0&&<span style={{color:'var(--grey-400)',marginRight:4}}>{open?'▾':'▸'}</span>}{v.vendor_name||'Vendor'}{anyOverdue&&<span style={{marginLeft:6,fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--red)',color:'white'}}>OVERDUE</span>}</div>{v.service_description&&<div style={{fontSize:12,color:'var(--grey-400)',marginLeft:insts.length>0?16:0}}>{v.service_description}</div>}</div>
+              <div><div style={{fontWeight:500,display:'flex',alignItems:'center',gap:6}}><span style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}} onClick={()=>setExpandedVendor(open?null:v.event_vendor_id)}>{insts.length>0&&<span style={{color:'var(--grey-400)',marginRight:4}}>{open?'▾':'▸'}</span>}{v.vendor_name||'Vendor'}</span>{anyOverdue&&<span style={{fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--red)',color:'white'}}>OVERDUE</span>}<span title="Edit / swap / remove vendor" onClick={()=>openEditEngage(v)} style={{cursor:'pointer',color:'var(--grey-400)',fontSize:12}}>✏️</span></div>{v.service_description&&<div style={{fontSize:12,color:'var(--grey-400)',marginLeft:insts.length>0?16:0}}>{v.service_description}</div>}</div>
               <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.agreed_amount)||0).toLocaleString('en-IN')}</div>
               <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.total_paid)||0).toLocaleString('en-IN')}</div>
               <div style={{textAlign:'right',color:(parseFloat(v.outstanding)||0)>0?'var(--red)':'var(--grey-800)'}}>₹{Math.round(parseFloat(v.outstanding)||0).toLocaleString('en-IN')}</div>
@@ -2894,6 +2928,23 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           </div>
         </div>
       )}
+      {editEngage&&(()=>{ const paid=parseFloat(editEngage.total_paid)||0; const opts=[{id:String(editEngage.vendor_id||''),name:editEngage.vendor_name||'(current)'}].concat(vendorMaster.filter(m=>String(m.vendor_id)!==String(editEngage.vendor_id)&&!eventVendors.some(ev=>String(ev.vendor_id)===String(m.vendor_id)&&!ev.is_deleted)).map(m=>({id:String(m.vendor_id),name:m.name}))); return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px'}} onClick={e=>{if(e.target===e.currentTarget)setEditEngage(null);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:440}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Edit vendor on this event</div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Vendor</label><select className="field-input" value={engForm.vendorId} disabled={paid>0} onChange={e=>setEngForm(f=>({...f,vendorId:e.target.value}))}>{opts.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select>{paid>0&&<div style={{fontSize:11,color:'var(--grey-400)',marginTop:3}}>Locked — ₹{Math.round(paid).toLocaleString('en-IN')} already paid to this vendor. Remove payments to swap, or remove + re-add.</div>}</div>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Service</label><input className="field-input" value={engForm.service} onChange={e=>setEngForm(f=>({...f,service:e.target.value}))} placeholder="e.g. Mandap & florals"/></div>
+              <div><label className="field-label">Agreed amount (₹)</label><input type="number" className="field-input" value={engForm.agreed} onChange={e=>setEngForm(f=>({...f,agreed:e.target.value}))} placeholder="0"/></div>
+              <div style={{display:'flex',alignItems:'flex-end',fontSize:11,color:'var(--grey-400)'}}>{paid>0?('Paid ₹'+Math.round(paid).toLocaleString('en-IN')+' · balance updates to agreed − paid.'):'No payments yet.'}</div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+              <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} disabled={vSaving||paid>0} title={paid>0?'Has payments — cannot remove':'Remove from event'} onClick={()=>removeEngage(editEngage)}>🗑 Remove</button>
+              <div style={{display:'flex',gap:8}}><button className="btn" onClick={()=>setEditEngage(null)}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitEditEngage}>{vSaving?'Saving…':'Save'}</button></div>
+            </div>
+          </div>
+        </div>
+      ); })()}
     </div>
   );
 
