@@ -2374,6 +2374,18 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     setVSaving(false);
   };
   const openPayInstallment=(v,inst)=>{ setPayVendorFor(v); setPayInst(inst); const bal=inst?Math.max(0,(parseFloat(inst.amount_due)||0)-(parseFloat(inst.amount_paid)||0)):(parseFloat(v.outstanding)||0); setVPay({amount:bal>0?String(Math.round(bal)):'',date:todayLocalStr(),mode:'upi',reference:''}); };
+  const [refundFor,setRefundFor]=React.useState(null);
+  const [refundForm,setRefundForm]=React.useState({amount:'',reason:'',date:todayLocalStr()});
+  const openVendorRefund=(v)=>{ setRefundFor(v); setRefundForm({amount:String(Math.round(parseFloat(v.total_paid)||0)),reason:'',date:todayLocalStr()}); };
+  const submitVendorRefund=async()=>{
+    const amt=parseFloat(refundForm.amount)||0; if(amt<=0){ notify('Enter a valid refund amount.','error'); return; }
+    if(amt>(parseFloat(refundFor.total_paid)||0)+0.5){ notify('Refund cannot exceed the amount paid ('+'₹'+Math.round(parseFloat(refundFor.total_paid)||0).toLocaleString('en-IN')+').','error'); return; }
+    if(!refundForm.reason.trim()){ notify('Enter a reason for the refund.','error'); return; }
+    setVSaving(true);
+    try{ await recordVendorRefund(refundFor,{amount:amt,reason:refundForm.reason.trim(),date:refundForm.date}); setRefundFor(null); notify('Vendor refund recorded.','success'); await loadEventVendors(); }
+    catch(err){ notify('Could not record refund: '+(err&&err.message?err.message:''),'error'); }
+    setVSaving(false);
+  };
   const openInstEditor=(v,inst)=>{ setInstFor(v); setInstForm(inst?{id:inst.installment_id,label:inst.label||'',amount:String(Math.round(parseFloat(inst.amount_due)||0)),due_date:inst.due_date||''}:{id:null,label:'',amount:'',due_date:''}); };
   const submitInstallment=async()=>{
     const v=instFor; if(!v) return;
@@ -2616,18 +2628,33 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [cancelling, setCancelling] = React.useState(false);
   const [expTotal, setExpTotal] = React.useState(0);
   const [rebuildDismissed, setRebuildDismissed] = React.useState(false);
+  const [invHandling, setInvHandling] = React.useState({}); // invoice_id -> {mode:'refund'|'retain', amount}
+  const [venHandling, setVenHandling] = React.useState({}); // event_vendor_id -> {mode:'recover'|'lost', amount}
+  const cancelInvList = (invoices||[]).filter(i=>i.status!=='cancelled' && (parseFloat(i.total_received)||0)>0);
+  const cancelVenList = (eventVendors||[]).filter(v=>(parseFloat(v.total_paid)||0)>0);
+  const cancelChoicesComplete = cancelInvList.every(i=>invHandling[i.invoice_id]&&invHandling[i.invoice_id].mode) && cancelVenList.every(v=>venHandling[v.event_vendor_id]&&venHandling[v.event_vendor_id].mode);
   const openCancel = async () => {
-    setCancelReason(''); setShowCancel(true);
+    setCancelReason('');
+    const ih={}; cancelInvList.forEach(i=>{ ih[i.invoice_id]={mode:'',amount:String(Math.round(parseFloat(i.total_received)||0))}; });
+    const vh={}; cancelVenList.forEach(v=>{ vh[v.event_vendor_id]={mode:'',amount:String(Math.round(parseFloat(v.total_paid)||0))}; });
+    setInvHandling(ih); setVenHandling(vh); setShowCancel(true);
     const {data}=await supabase.from('expenses').select('amount').eq('event_id',eventId).eq('is_deleted',false);
     setExpTotal((data||[]).reduce((s,x)=>s+(parseFloat(x.amount)||0),0));
   };
   const doCancelEvent = async () => {
     if(!cancelReason.trim()){ notify('Enter a reason for cancellation.','error'); return; }
+    if(!cancelChoicesComplete){ notify('Mark how each client refund and vendor payment is handled.','error'); return; }
     setCancelling(true);
     try{
       const uid=await _currentUid();
+      const reason='Event '+(event.ref_number||'')+' cancelled: '+cancelReason.trim();
       const {error:ee}=await runDb(supabase.from('events').update({status:'cancelled',cancellation_reason:cancelReason.trim(),cancelled_at:new Date().toISOString(),cancelled_by:uid,updated_at:new Date().toISOString()}).eq('event_id',eventId),'cancel event'); if(ee) throw ee;
+      // 1) cancel all the event's open invoices, then post client refunds (preserving cancelled status)
       await supabase.from('invoices').update({status:'cancelled',updated_at:new Date().toISOString()}).eq('event_id',eventId).eq('is_deleted',false).neq('status','cancelled');
+      for(const i of cancelInvList){ const h=invHandling[i.invoice_id]; if(h&&h.mode==='refund'){ const amt=Math.min(parseFloat(h.amount)||0,parseFloat(i.total_received)||0); if(amt>0) await recordClientRefund({...i,status:'cancelled'},{amount:amt,reason,date:todayLocalStr()}); } }
+      // 2) vendor refunds (recovered amounts) before installment cleanup
+      for(const v of cancelVenList){ const h=venHandling[v.event_vendor_id]; if(h&&h.mode==='recover'){ const amt=Math.min(parseFloat(h.amount)||0,parseFloat(v.total_paid)||0); if(amt>0) await recordVendorRefund(v,{amount:amt,reason,date:todayLocalStr()}); } }
+      // 3) clean up vendor installments (unpaid removed, partly-paid due dates cleared)
       const evIds=eventVendors.map(v=>v.event_vendor_id);
       if(evIds.length){
         const {data:insts}=await supabase.from('vendor_installments').select('installment_id,amount_paid').in('event_vendor_id',evIds);
@@ -3017,7 +3044,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.agreed_amount)||0).toLocaleString('en-IN')}</div>
               <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.total_paid)||0).toLocaleString('en-IN')}</div>
               <div style={{textAlign:'right',color:(parseFloat(v.outstanding)||0)>0?'var(--red)':'var(--grey-800)'}}>₹{Math.round(parseFloat(v.outstanding)||0).toLocaleString('en-IN')}</div>
-              <div style={{textAlign:'right',display:'flex',gap:6,justifyContent:'flex-end',alignItems:'center'}}><span style={{fontSize:11,padding:'2px 8px',borderRadius:12,background:st.bg,color:st.color,textTransform:'capitalize'}}>{(v.status||'').replace('_',' ')}</span>{(parseFloat(v.outstanding)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>openPayInstallment(v,null)}>+ Pay</button>}</div>
+              <div style={{textAlign:'right',display:'flex',gap:6,justifyContent:'flex-end',alignItems:'center'}}><span style={{fontSize:11,padding:'2px 8px',borderRadius:12,background:st.bg,color:st.color,textTransform:'capitalize'}}>{(v.status||'').replace('_',' ')}</span>{(parseFloat(v.outstanding)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>openPayInstallment(v,null)}>+ Pay</button>}{(parseFloat(v.total_paid)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} title="Record a refund the vendor returned" onClick={()=>openVendorRefund(v)}>↩ Refund</button>}</div>
             </div>
             {open&&<div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'8px 12px',margin:'0 0 8px',marginLeft:16}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}><div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em'}}>Payment schedule</div><button className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>openInstEditor(v,null)}>+ Add installment</button></div>
@@ -3074,6 +3101,19 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               <div><label className="field-label">Reference</label><input className="field-input" value={vPay.reference} onChange={e=>setVPay(f=>({...f,reference:e.target.value}))} placeholder="optional"/></div>
             </div>
             <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>{setPayVendorFor(null);setPayInst(null);}}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitVendorPayment}>{vSaving?'Saving…':'Record payment'}</button></div>
+          </div>
+        </div>
+      )}
+      {refundFor&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px'}} onClick={e=>{if(e.target===e.currentTarget)setRefundFor(null);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:420}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Record vendor refund <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {refundFor.vendor_name||'vendor'} · paid ₹{Math.round(parseFloat(refundFor.total_paid)||0).toLocaleString('en-IN')}</span></div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div><label className="field-label">Refund amount (₹) <span style={{color:'var(--pink)'}}>*</span></label><input type="number" className="field-input" value={refundForm.amount} onChange={e=>setRefundForm(f=>({...f,amount:e.target.value}))} placeholder="0"/></div>
+              <div><label className="field-label">Date</label><input type="date" className="field-input" value={refundForm.date} onChange={e=>setRefundForm(f=>({...f,date:e.target.value}))}/></div>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Reason <span style={{color:'var(--pink)'}}>*</span></label><input className="field-input" value={refundForm.reason} onChange={e=>setRefundForm(f=>({...f,reason:e.target.value}))} placeholder="e.g. Vendor returned advance after cancellation"/></div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setRefundFor(null)}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitVendorRefund}>{vSaving?'Saving…':'Record refund'}</button></div>
           </div>
         </div>
       )}
@@ -3144,20 +3184,44 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                 <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12.5}}><div style={{color:'var(--grey-400)',fontSize:12}}>💰 Expenses</div>{inr(expTotal)} (kept as sunk cost)</div>
                 <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12.5}}><div style={{color:'var(--grey-400)',fontSize:12}}>🎪 Sub-events · Lead</div>{(subEvents||[]).length} sub-event{(subEvents||[]).length===1?'':'s'}{linkedLead?(' · '+(linkedLead.ref_number||'lead')):''}</div>
               </div>
-              <div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:6}}>On confirm</div>
-              <div style={{fontSize:12.5,lineHeight:1.8,marginBottom:14,color:'var(--grey-700)'}}>
-                {unpaidCount>0&&<div>✓ Void {unpaidCount} unpaid invoice{unpaidCount===1?'':'s'} → cancelled</div>}
-                {paidCount>0&&<div style={{color:'#854F0B'}}>⚠ Keep {paidCount} paid/partly-paid invoice{paidCount===1?'':'s'} as record — refund {inr(collected)} offline</div>}
-                {dueInst>0&&<div>✓ Cancel {dueInst} unpaid vendor installment{dueInst===1?'':'s'} (stops overdue alerts)</div>}
-                <div style={{color:'var(--grey-400)'}}>• Keep {inr(vPaid)} vendor payments &amp; {inr(expTotal)} expenses as records (sunk cost in Reports)</div>
-                {linkedLead&&<div style={{color:'var(--grey-400)'}}>• Add a note to lead {linkedLead.ref_number||''} (lead left open)</div>}
+              {cancelInvList.length>0&&<div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:6}}>Client money collected — refund or retain? <span style={{color:'var(--red)'}}>*</span></div>
+                {cancelInvList.map(i=>{ const h=invHandling[i.invoice_id]||{}; const recv=Math.round(parseFloat(i.total_received)||0); return (
+                  <div key={i.invoice_id} style={{padding:'7px 0',borderTop:'1px solid var(--grey-100)',fontSize:12.5}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span>{i.ref_number} <span style={{color:'var(--grey-400)'}}>· {inr(recv)} collected</span></span></div>
+                    <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                      <button className={'btn sm'+(h.mode==='refund'?' primary':'')} style={{fontSize:11,padding:'2px 10px'}} onClick={()=>setInvHandling(p=>({...p,[i.invoice_id]:{...p[i.invoice_id],mode:'refund'}}))}>Refund to client</button>
+                      <button className={'btn sm'+(h.mode==='retain'?' primary':'')} style={{fontSize:11,padding:'2px 10px'}} onClick={()=>setInvHandling(p=>({...p,[i.invoice_id]:{...p[i.invoice_id],mode:'retain'}}))}>Retain (keep)</button>
+                      {h.mode==='refund'&&<span style={{fontSize:11,color:'var(--grey-400)'}}>₹<input type="number" value={h.amount} onChange={e=>setInvHandling(p=>({...p,[i.invoice_id]:{...p[i.invoice_id],amount:e.target.value}}))} style={{width:90,padding:'2px 6px',border:'1px solid var(--grey-200)',borderRadius:4,fontSize:12}}/> refunded {parseFloat(h.amount)<recv?('· '+inr(recv-(parseFloat(h.amount)||0))+' retained'):''}</span>}
+                    </div>
+                  </div>
+                ); })}
+              </div>}
+              {cancelVenList.length>0&&<div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:6}}>Vendor money paid — recovered or lost? <span style={{color:'var(--red)'}}>*</span></div>
+                {cancelVenList.map(v=>{ const h=venHandling[v.event_vendor_id]||{}; const paid=Math.round(parseFloat(v.total_paid)||0); return (
+                  <div key={v.event_vendor_id} style={{padding:'7px 0',borderTop:'1px solid var(--grey-100)',fontSize:12.5}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><span>{v.vendor_name||'Vendor'} <span style={{color:'var(--grey-400)'}}>· {inr(paid)} paid</span></span></div>
+                    <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                      <button className={'btn sm'+(h.mode==='recover'?' primary':'')} style={{fontSize:11,padding:'2px 10px'}} onClick={()=>setVenHandling(p=>({...p,[v.event_vendor_id]:{...p[v.event_vendor_id],mode:'recover'}}))}>Recovered (reverse)</button>
+                      <button className={'btn sm'+(h.mode==='lost'?' primary':'')} style={{fontSize:11,padding:'2px 10px'}} onClick={()=>setVenHandling(p=>({...p,[v.event_vendor_id]:{...p[v.event_vendor_id],mode:'lost'}}))}>Lost — write off</button>
+                      {h.mode==='recover'&&<span style={{fontSize:11,color:'var(--grey-400)'}}>₹<input type="number" value={h.amount} onChange={e=>setVenHandling(p=>({...p,[v.event_vendor_id]:{...p[v.event_vendor_id],amount:e.target.value}}))} style={{width:90,padding:'2px 6px',border:'1px solid var(--grey-200)',borderRadius:4,fontSize:12}}/> recovered {parseFloat(h.amount)<paid?('· '+inr(paid-(parseFloat(h.amount)||0))+' lost'):''}</span>}
+                    </div>
+                  </div>
+                ); })}
+              </div>}
+              <div style={{fontSize:12,lineHeight:1.7,marginBottom:14,color:'var(--grey-400)'}}>
+                {unpaidCount>0&&<div>• Void {unpaidCount} unpaid invoice{unpaidCount===1?'':'s'} → cancelled</div>}
+                {dueInst>0&&<div>• Cancel {dueInst} unpaid vendor installment{dueInst===1?'':'s'} (stops overdue alerts)</div>}
+                <div>• Keep {inr(expTotal)} expenses as records (sunk cost in Reports)</div>
+                {linkedLead&&<div>• Add a note to lead {linkedLead.ref_number||''} (lead left open)</div>}
               </div>
               <label className="field-label">Reason for cancellation <span style={{color:'var(--pink)'}}>*</span></label>
               <textarea className="field-textarea" rows={2} value={cancelReason} onChange={e=>setCancelReason(e.target.value)} placeholder="e.g. Client postponed indefinitely; date clash; budget withdrawn."/>
             </div>
             <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
               <span style={{fontSize:11,color:'var(--grey-400)'}}>Reversible — you can reopen later (status only)</span>
-              <div style={{display:'flex',gap:8}}><button className="btn" onClick={()=>setShowCancel(false)}>Keep event</button><button className="btn primary" disabled={cancelling} style={{background:'var(--red)',borderColor:'var(--red)'}} onClick={doCancelEvent}>{cancelling?'Cancelling…':'Cancel this event'}</button></div>
+              <div style={{display:'flex',gap:8}}><button className="btn" onClick={()=>setShowCancel(false)}>Keep event</button><button className="btn primary" disabled={cancelling||!cancelReason.trim()||!cancelChoicesComplete} title={!cancelChoicesComplete?'Mark every client and vendor payment first':''} style={{background:'var(--red)',borderColor:'var(--red)'}} onClick={doCancelEvent}>{cancelling?'Cancelling…':'Cancel this event'}</button></div>
             </div>
           </div>
         </div>
@@ -4858,12 +4922,15 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{}); setQActivity(qact||[]);
     { const m={}; (qus||[]).forEach(u=>{m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim();}); setQUserMap(m); }
     if(q&&q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
-    if(q&&q.lead_id){ const {data:ld}=await supabase.from('leads').select('lead_id,ref_number,stage').eq('lead_id',q.lead_id).maybeSingle(); setSrcLead(ld||null); } else setSrcLead(null);
+    let _evd=null;
+    if(q&&q.lead_id){ const {data:ld}=await supabase.from('leads').select('lead_id,ref_number,stage,tentative_date').eq('lead_id',q.lead_id).maybeSingle(); setSrcLead(ld||null); if(ld&&ld.tentative_date) _evd=ld.tentative_date; } else setSrcLead(null);
     if(q&&q.event_id){
-      const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status').eq('event_id',q.event_id).maybeSingle(); setSrcEvent(ev||null);
+      const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status,main_date').eq('event_id',q.event_id).maybeSingle(); setSrcEvent(ev||null);
+      if(ev&&ev.main_date) _evd=ev.main_date;
       const {data:invs}=await supabase.from('invoices').select('status').eq('event_id',q.event_id).eq('is_deleted',false);
       setInvoiceIssued((invs||[]).some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase())));
     } else { setSrcEvent(null); setInvoiceIssued(false); }
+    if(_evd) setQuot(prev=>prev?{...prev,event_date:_evd}:prev);
     setLoading(false);
   },[quotationId]);
   React.useEffect(()=>{ loadAll(); },[loadAll]);
@@ -5310,6 +5377,20 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [payForm, setPayForm] = React.useState({amount:'',date:new Date().toISOString().split('T')[0],mode:'upi',installment_id:'',reference:'',notes:''});
   const [paySaving, setPaySaving] = React.useState(false);
   const [payFile, setPayFile] = React.useState(null);
+  const [showRefund, setShowRefund] = React.useState(false);
+  const [refundForm, setRefundForm] = React.useState({amount:'',reason:'',date:new Date().toISOString().split('T')[0]});
+  const openRefund = ()=>{ setRefundForm({amount:String(Math.round(parseFloat(inv.total_received)||0)),reason:'',date:new Date().toISOString().split('T')[0]}); setShowRefund(true); };
+  const submitRefund = async ()=>{
+    if(paySaving) return;
+    const amt=parseFloat(refundForm.amount)||0;
+    if(amt<=0){ notify('Enter a valid refund amount.','error'); return; }
+    if(amt>(parseFloat(inv.total_received)||0)+0.5){ notify('Refund cannot exceed the amount collected (₹'+Math.round(parseFloat(inv.total_received)||0).toLocaleString('en-IN')+').','error'); return; }
+    if(!refundForm.reason.trim()){ notify('Enter a reason for the refund.','error'); return; }
+    setPaySaving(true);
+    try{ await recordClientRefund(inv,{amount:amt,reason:refundForm.reason.trim(),date:refundForm.date}); setShowRefund(false); notify('Client refund recorded.','success'); await loadAll(); }
+    catch(err){ notify('Could not record refund: '+(err&&err.message?err.message:''),'error'); }
+    setPaySaving(false);
+  };
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
@@ -5337,7 +5418,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     else setSrcLead(null);
     // Source event — prefer the invoice's own event_id, else the quote's event_id
     const evtId=(i&&i.event_id)||(sq&&sq.event_id)||null;
-    if(evtId){ const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status').eq('event_id',evtId).maybeSingle(); setSrcEvent(ev||null); }
+    if(evtId){ const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status,main_date').eq('event_id',evtId).maybeSingle(); setSrcEvent(ev||null); }
     else setSrcEvent(null);
     setLoading(false);
   },[invoiceId]);
@@ -5404,6 +5485,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   // Phase 5 — shape the invoice as a quote-like object for the shared PDF engine (docType='invoice')
   const invForPdf = () => ({
     ...inv,
+    event_date: (srcEvent&&srcEvent.main_date)||inv.event_date||null,
     client_phone:clientInfo.phone_1||'', client_email:clientInfo.email_1||'', client_city:clientInfo.city||'',
     additional_terms:inv.additional_notes||'',
     payment_schedule: installments.map(it=>({
@@ -5637,6 +5719,20 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
           </div>
         </div>
       )}
+      {showRefund&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowRefund(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:440,boxShadow:'var(--shadow-lg)'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Record client refund <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {inv.ref_number} · collected ₹{Math.round(parseFloat(inv.total_received)||0).toLocaleString('en-IN')}</span></div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+              <div><label className="field-label">Refund amount (₹) <span style={{color:'var(--pink)'}}>*</span></label><input type="number" className="field-input" value={refundForm.amount} onChange={e=>setRefundForm(f=>({...f,amount:e.target.value}))} placeholder="0"/></div>
+              <div><label className="field-label">Date</label><input type="date" className="field-input" value={refundForm.date} onChange={e=>setRefundForm(f=>({...f,date:e.target.value}))}/></div>
+              <div style={{gridColumn:'1 / -1'}}><label className="field-label">Reason <span style={{color:'var(--pink)'}}>*</span></label><input className="field-input" value={refundForm.reason} onChange={e=>setRefundForm(f=>({...f,reason:e.target.value}))} placeholder="e.g. Refunded advance after cancellation"/></div>
+              <div style={{gridColumn:'1 / -1',fontSize:11,color:'var(--grey-400)'}}>Recorded as a reversal — reduces collected. Move the money to the client offline.</div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setShowRefund(false)}>Cancel</button><button className="btn primary" disabled={paySaving} onClick={submitRefund}>{paySaving?'Saving…':'Record refund'}</button></div>
+          </div>
+        </div>
+      )}
       {showPay&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowPay(false);}}>
           <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:480,boxShadow:'var(--shadow-lg)',padding:'20px 24px'}}>
@@ -5763,6 +5859,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8,paddingTop:8,borderTop:'1px solid var(--grey-50)'}}>
               <span style={{fontSize:11,fontWeight:600,color:'var(--grey-700)'}}>Payments ({payments.length})</span>
               {canRecordPay&&<button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={openPay}>+ Record</button>}
+              {(parseFloat(inv.total_received)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} title="Record money refunded to the client" onClick={openRefund}>↩ Refund</button>}
             </div>
             {payments.length===0&&<div style={{fontSize:11,color:'var(--grey-400)',marginTop:4}}>No payments recorded yet.</div>}
             {payments.map(p=>(
@@ -5995,6 +6092,29 @@ async function recordVendorPayment(ev, pay){
   await supabase.from('vendor_installments').update({amount_paid:ip,balance:ibal,status:ibal<=0?'paid':'partially_paid',updated_at:new Date().toISOString()}).eq('installment_id',instId);
   const newPaid=(parseFloat(ev.total_paid)||0)+amt, agreed=parseFloat(ev.agreed_amount)||0, out=Math.max(0,agreed-newPaid);
   await supabase.from('event_vendors').update({total_paid:newPaid,outstanding:out,status:newPaid<=0?'pending':(out<=0?'paid':'partially_paid'),updated_at:new Date().toISOString()}).eq('event_vendor_id',ev.event_vendor_id);
+}
+// Record a vendor refund (money the vendor returned) as a negative is_refund row + roll back totals.
+async function recordVendorRefund(ev, refund){
+  const amt=parseFloat(refund.amount)||0; if(amt<=0) return;
+  const instId=(refund.installmentId)||await _ensureVendorInstallment(ev.event_vendor_id, ev.agreed_amount);
+  const {error:pe}=await supabase.from('vendor_payments').insert({event_vendor_id:ev.event_vendor_id,installment_id:instId,vendor_id:ev.vendor_id,event_id:ev.event_id,amount:-amt,payment_date:refund.date||todayLocalStr(),payment_mode:'refund',reference_number:refund.reference||null,notes:('Refund: '+(refund.reason||'')),is_refund:true,recorded_by:await _currentUid(),recorded_at:new Date().toISOString()});
+  if(pe) throw pe;
+  const {data:inst}=await supabase.from('vendor_installments').select('amount_due,amount_paid').eq('installment_id',instId).single();
+  const ip=Math.max(0,(parseFloat(inst&&inst.amount_paid)||0)-amt), idue=parseFloat(inst&&inst.amount_due)||0, ibal=Math.max(0,idue-ip);
+  await supabase.from('vendor_installments').update({amount_paid:ip,balance:ibal,status:ip<=0?'pending':(ibal<=0?'paid':'partially_paid'),updated_at:new Date().toISOString()}).eq('installment_id',instId);
+  const newPaid=Math.max(0,(parseFloat(ev.total_paid)||0)-amt), agreed=parseFloat(ev.agreed_amount)||0, out=Math.max(0,agreed-newPaid);
+  await supabase.from('event_vendors').update({total_paid:newPaid,outstanding:out,status:newPaid<=0?'pending':(out<=0?'paid':'partially_paid'),updated_at:new Date().toISOString()}).eq('event_vendor_id',ev.event_vendor_id);
+}
+// Record a client refund (money returned to the client) as a negative is_refund row + roll back invoice totals.
+async function recordClientRefund(inv, refund){
+  const amt=parseFloat(refund.amount)||0; if(amt<=0) return;
+  let instId=refund.installmentId||null;
+  if(!instId){ const {data:ins}=await supabase.from('invoice_installments').select('installment_id').eq('invoice_id',inv.invoice_id).eq('is_deleted',false).order('installment_number').limit(1); instId=(ins&&ins[0]&&ins[0].installment_id)||null; }
+  const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:inv.invoice_id,installment_id:instId,amount:-amt,payment_date:refund.date||todayLocalStr(),payment_mode:'refund',reference_number:refund.reference||null,notes:('Refund: '+(refund.reason||'')),is_refund:true,recorded_by:await _currentUid()});
+  if(pe) throw pe;
+  const newRecv=Math.max(0,(parseFloat(inv.total_received)||0)-amt), grand=parseFloat(inv.grand_total)||0, out=Math.max(0,grand-newRecv);
+  const st=(inv.status==='cancelled')?'cancelled':(newRecv<=0?'sent':(out<=0?'paid':'partially_paid'));
+  await supabase.from('invoices').update({total_received:newRecv,total_outstanding:out,status:st,updated_at:new Date().toISOString()}).eq('invoice_id',inv.invoice_id);
 }
 
 // ── Event quick-view popup (used from the Vendor Payments module) ──────────────
@@ -6499,7 +6619,7 @@ function ReportsModule({onNavigate}){
     setLoading(true);
     const [{data:inv},{data:ip},{data:ex},{data:vp},{data:ev},{data:ld}]=await Promise.all([
       supabase.from('invoices').select('invoice_id,ref_number,status,grand_total,total_received,total_outstanding,event_id,doc_date').eq('is_deleted',false),
-      supabase.from('invoice_payments').select('amount,payment_date'),
+      supabase.from('invoice_payments').select('amount,payment_date,invoice_id'),
       supabase.from('expenses').select('amount,date,event_id,category').eq('is_deleted',false),
       supabase.from('vendor_payments').select('amount,payment_date,event_id,is_voided'),
       supabase.from('events').select('event_id,ref_number,name,main_date,status,client_name').eq('is_deleted',false),
@@ -6526,14 +6646,19 @@ function ReportsModule({onNavigate}){
   const rangeLabel={month:'This month',quarter:'This quarter',year:'This year',all:'All time'}[range];
 
   // ---- locked profitability helpers ----
+  const invEvent={}; invoices.forEach(i=>{ invEvent[i.invoice_id]=i.event_id; });
+  const netCollectedByEvent={}; pays.forEach(p=>{ const eid=invEvent[p.invoice_id]; if(eid) netCollectedByEvent[eid]=(netCollectedByEvent[eid]||0)+(parseFloat(p.amount)||0); });
+  const eventStatusMap={}; events.forEach(e=>{ eventStatusMap[e.event_id]=(e.status||'').toLowerCase(); });
   const eventFee=id=>invoices.filter(i=>i.event_id===id&&i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0);
+  // Cancelled events have fee 0 (invoices voided), so revenue = net retained client money (decision); active events use billed fee.
+  const eventRevenue=id=> eventStatusMap[id]==='cancelled' ? Math.max(0,netCollectedByEvent[id]||0) : eventFee(id);
   const eventExp=id=>expenses.filter(x=>x.event_id===id).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
   const eventVend=id=>vpays.filter(x=>x.event_id===id&&!x.is_voided).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
-  const eventProfit=id=>eventFee(id)-eventExp(id)-eventVend(id);
+  const eventProfit=id=>eventRevenue(id)-eventExp(id)-eventVend(id);
 
   // events in the selected range (by main_date)
   const rangeEvents=events.filter(e=>range==='all'?true:inRange(e.main_date));
-  const perEvent=rangeEvents.map(e=>{ const fee=eventFee(e.event_id),ex=eventExp(e.event_id),vn=eventVend(e.event_id); const pr=fee-ex-vn; return {...e,fee,ex,vn,profit:pr,margin:fee>0?pr/fee*100:0}; })
+  const perEvent=rangeEvents.map(e=>{ const fee=eventRevenue(e.event_id),ex=eventExp(e.event_id),vn=eventVend(e.event_id); const pr=fee-ex-vn; return {...e,fee,ex,vn,profit:pr,margin:fee>0?pr/fee*100:0}; })
     .sort((a,b)=>(b.main_date||'').localeCompare(a.main_date||''));
   const genExpRange=expenses.filter(x=>!x.event_id&&inRange(x.date)).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
   const sumEventProfit=perEvent.reduce((s,e)=>s+e.profit,0);
@@ -7992,7 +8117,8 @@ function buildQuotationPDF(quot, lineItems, opts={}){
 
   const drawFrame=()=>{ doc.saveGraphicsState(); setDraw(PINK); doc.setLineWidth(2); doc.rect(12,12,W-24,H-24,'S'); doc.restoreGraphicsState(); };
 
-  const HDR_BOTTOM = 96;
+  const HDR_BOTTOM = 108;
+  const _evDate = quot.event_date||quot.main_date||quot.tentative_date||null;
   const drawHeaderBand=()=>{
     const top=28; const lh=46, lw=lh*LAR;
     try{ doc.addImage(LOGO,'PNG',M,top,lw,lh); }catch(e){}
@@ -8006,6 +8132,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     sans('normal',8); setText(MUTED);
     doc.text('Date: '+fmt(quot.doc_date), W-M, top+40, {align:'right'});
     { const _dd=isInv?quot.due_date:quot.valid_until; if(_dd) doc.text((isInv?'Due date: ':'Valid until: ')+fmt(_dd), W-M, top+51, {align:'right'}); }
+    { if(_evDate){ setText(PINK); doc.text('Event date: '+fmt(_evDate), W-M, top+62, {align:'right'}); setText(MUTED); } }
     setDraw(PINK); doc.setLineWidth(1.4); doc.line(M, HDR_BOTTOM-12, W-M, HDR_BOTTOM-12);
   };
 
@@ -8034,7 +8161,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     sans('bold',9); setText(PINK); doc.text('PREPARED FOR', W/2, y, {align:'center'}); y+=25;
     sans('bold',16); setText(PINK); doc.text(String(quot.event_name||''), W/2, y, {align:'center'}); y+=16;
     cormorant(13); setText(PINK);
-    doc.text(fmt(quot.doc_date), W/2, y, {align:'center'}); y+=36;
+    doc.text(_evDate?fmt(_evDate):fmt(quot.doc_date), W/2, y, {align:'center'}); y+=36;
     const introTpl = settings.cover_intro || 'Thank you for choosing Isheeka Events to be part of your celebration. Every occasion tells a story, and it is our privilege to help bring yours to life with care, creativity, and attention to the smallest detail.\n\nThe pages that follow set out the details, prepared thoughtfully for {event}. Should you wish to adjust anything, we would be delighted to tailor it to your vision.';
     const introBody = introTpl.replace(/\{client\}/g, quot.client_name||'').replace(/\{event\}/g, quot.event_name||'your event');
     const bx=M+60, bw=W-2*(M+60);
@@ -8564,7 +8691,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
     const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
-    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||''};
+    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:lead.tentative_date||null};
     const url=await uploadQuotePdf(enrichedQuot, pdfItems, displayOpts, s||{});
     return {s:s||{}, enrichedQuot, url};
   };
@@ -8600,7 +8727,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
     })));
     const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
-    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||''};
+    const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:lead.tentative_date||null};
     buildQuotationPDF(enrichedQuot,pdfItems,{action,displayOpts,settings:s||{}});
   };
 
