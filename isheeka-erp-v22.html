@@ -2269,6 +2269,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [expandedVendor, setExpandedVendor] = React.useState(null);
   const [instFor, setInstFor] = React.useState(null);
   const [instForm, setInstForm] = React.useState({id:null,label:'',amount:'',due_date:''});
+  const [voidedPays, setVoidedPays] = React.useState([]);
   const loadEventVendors = React.useCallback(async()=>{
     const {data}=await supabase.from('event_vendors').select('*').eq('event_id',eventId).eq('is_deleted',false).order('created_at');
     const evs=data||[]; setEventVendors(evs);
@@ -2276,6 +2277,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     let map={};
     if(ids.length){ const {data:ii}=await supabase.from('vendor_installments').select('*').in('event_vendor_id',ids).order('installment_number'); (ii||[]).forEach(it=>{ (map[it.event_vendor_id]=map[it.event_vendor_id]||[]).push(it); }); }
     setEventInstallments(map);
+    const {data:vp}=await supabase.from('vendor_payments').select('*').eq('event_id',eventId).eq('is_voided',true).order('voided_at',{ascending:false});
+    setVoidedPays(vp||[]);
   },[eventId]);
   React.useEffect(()=>{ loadEventVendors(); },[loadEventVendors]);
   React.useEffect(()=>{ (async()=>{ const {data}=await supabase.from('vendors').select('vendor_id,name,category').eq('is_deleted',false).eq('status','active').order('name'); setVendorMaster(data||[]); })(); },[showAddVendor,editEngage]);
@@ -2349,8 +2352,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     }catch(err){ notify('Could not update: '+(err&&err.message?err.message:''),'error'); }
     setVSaving(false);
   };
+  const [removeReasonFor, setRemoveReasonFor] = React.useState(null);
+  const [removeReason, setRemoveReason] = React.useState('');
   const removeEngage=async v=>{
-    if((parseFloat(v.total_paid)||0)>0){ notify('This vendor has payments recorded — can’t remove it (it would orphan the payment history). Delete the payments first if you really need to.','error'); return; }
+    if((parseFloat(v.total_paid)||0)>0){ setRemoveReason(''); setRemoveReasonFor(v); return; }
     if(!window.confirm('Remove '+(v.vendor_name||'this vendor')+' from this event?')) return;
     setVSaving(true);
     try{
@@ -2358,6 +2363,19 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       if(insts.length){ await supabase.from('vendor_installments').delete().in('installment_id',insts.map(i=>i.installment_id)); }
       const {error}=await runDb(supabase.from('event_vendors').update({is_deleted:true,updated_at:new Date().toISOString()}).eq('event_vendor_id',v.event_vendor_id),'remove vendor'); if(error) throw error;
       setEditEngage(null); notify('Vendor removed from this event.','success'); await loadEventVendors();
+    }catch(err){ notify('Could not remove: '+(err&&err.message?err.message:''),'error'); }
+    setVSaving(false);
+  };
+  const confirmVoidRemove=async()=>{
+    const v=removeReasonFor; if(!v) return;
+    if(!removeReason.trim()){ notify('Enter a reason for voiding the payments.','error'); return; }
+    setVSaving(true);
+    try{
+      const uid=await _currentUid();
+      const {error:ve}=await runDb(supabase.from('vendor_payments').update({is_voided:true,void_reason:removeReason.trim(),voided_at:new Date().toISOString(),voided_by:uid}).eq('event_vendor_id',v.event_vendor_id).eq('is_voided',false),'void payments'); if(ve) throw ve;
+      // keep installments (voided payment rows still FK-reference them); zero the engagement's live totals + soft-delete it
+      const {error}=await runDb(supabase.from('event_vendors').update({is_deleted:true,total_paid:0,outstanding:parseFloat(v.agreed_amount)||0,status:'pending',updated_at:new Date().toISOString()}).eq('event_vendor_id',v.event_vendor_id),'remove vendor'); if(error) throw error;
+      setRemoveReasonFor(null); setEditEngage(null); notify('Vendor removed; its payments were voided.','success'); await loadEventVendors();
     }catch(err){ notify('Could not remove: '+(err&&err.message?err.message:''),'error'); }
     setVSaving(false);
   };
@@ -2878,6 +2896,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
             </div>}
           </div>
         ); })}
+        {voidedPays.length>0&&<div style={{marginTop:12,borderTop:'1px dashed var(--grey-200)',paddingTop:10}}>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:4}}>Voided vendor payments <span style={{fontWeight:400}}>(audit)</span></div>
+          {voidedPays.map(p=><div key={p.payment_id||p.vendor_payment_id||p.voided_at} style={{fontSize:12,color:'var(--grey-400)',padding:'3px 0',textDecoration:'none'}}><span style={{textDecoration:'line-through'}}>₹{Math.round(parseFloat(p.amount)||0).toLocaleString('en-IN')}</span> · {p.payment_date?fmtDate(p.payment_date,{day:'numeric',month:'short',year:'numeric'}):''} · voided{p.voided_at?(' '+fmtDate(p.voided_at,{day:'numeric',month:'short'})):''}{p.void_reason?(' — '+p.void_reason):''}</div>)}
+        </div>}
       </div>
 
       {showAddVendor&&(
@@ -2939,12 +2961,25 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               <div style={{display:'flex',alignItems:'flex-end',fontSize:11,color:'var(--grey-400)'}}>{paid>0?('Paid ₹'+Math.round(paid).toLocaleString('en-IN')+' · balance updates to agreed − paid.'):'No payments yet.'}</div>
             </div>
             <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-              <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} disabled={vSaving||paid>0} title={paid>0?'Has payments — cannot remove':'Remove from event'} onClick={()=>removeEngage(editEngage)}>🗑 Remove</button>
+              <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} disabled={vSaving} title={paid>0?'Remove + void recorded payments (reason required)':'Remove from event'} onClick={()=>removeEngage(editEngage)}>🗑 {paid>0?'Remove & void payments':'Remove'}</button>
               <div style={{display:'flex',gap:8}}><button className="btn" onClick={()=>setEditEngage(null)}>Cancel</button><button className="btn primary" disabled={vSaving} onClick={submitEditEngage}>{vSaving?'Saving…':'Save'}</button></div>
             </div>
           </div>
         </div>
       ); })()}
+      {removeReasonFor&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'80px 20px'}} onClick={e=>{if(e.target===e.currentTarget)setRemoveReasonFor(null);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:420}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Remove {removeReasonFor.vendor_name||'vendor'} &amp; void payments</div>
+            <div style={{padding:20}}>
+              <div style={{fontSize:13,color:'var(--grey-600)',marginBottom:10}}>₹{Math.round(parseFloat(removeReasonFor.total_paid)||0).toLocaleString('en-IN')} has been recorded against this vendor. Removing will <b>void those payments</b> (kept as an audit record, excluded from totals &amp; reports). This can't be undone in the app.</div>
+              <label className="field-label">Reason for voiding <span style={{color:'var(--pink)'}}>*</span></label>
+              <textarea className="field-textarea" rows={3} value={removeReason} onChange={e=>setRemoveReason(e.target.value)} placeholder="e.g. Wrong vendor selected, paid in error; refund received."/>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setRemoveReasonFor(null)}>Cancel</button><button className="btn primary" disabled={vSaving} style={{background:'var(--red)',borderColor:'var(--red)'}} onClick={confirmVoidRemove}>{vSaving?'Removing…':'Void & remove'}</button></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -5984,6 +6019,7 @@ function VendorPaymentsModule({onNavigate}){
   const [search,setSearch]=React.useState('');
   const [evtFilter,setEvtFilter]=React.useState('');
   const [range,setRange]=React.useState('month');
+  const [showVoided,setShowVoided]=React.useState(false);
   const [popupEvent,setPopupEvent]=React.useState(null);
   const [showRec,setShowRec]=React.useState(false);
   const [saving,setSaving]=React.useState(false);
@@ -6009,13 +6045,16 @@ function VendorPaymentsModule({onNavigate}){
   const yr=String(new Date().getFullYear()), mo=todayLocalStr().slice(0,7);
   const inRange=d=> range==='all'?true: range==='year'?(String(d||'').slice(0,4)===yr):(String(d||'').slice(0,7)===mo);
   const inr=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
-  const mMonth=pays.filter(p=>String(p.payment_date||'').slice(0,7)===mo).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
-  const mYear=pays.filter(p=>String(p.payment_date||'').slice(0,4)===yr).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+  const live=pays.filter(p=>!p.is_voided);
+  const mMonth=live.filter(p=>String(p.payment_date||'').slice(0,7)===mo).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+  const mYear=live.filter(p=>String(p.payment_date||'').slice(0,4)===yr).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
   const outstanding=evs.reduce((s,x)=>s+(parseFloat(x.outstanding)||0),0);
+  const voidedCount=pays.filter(p=>p.is_voided).length;
   const filtered=pays.filter(p=>{
+    if(showVoided ? !p.is_voided : p.is_voided) return false;
     const q=search.toLowerCase();
     const ev=evMap[p.event_vendor_id]; const evt=eMap[p.event_id];
-    const ms=!q||`${vMap[p.vendor_id]||p.vendor_id||''} ${(ev&&ev.service_description)||''} ${(evt&&evt.ref_number)||''} ${(evt&&evt.name)||''} ${p.reference_number||''}`.toLowerCase().includes(q);
+    const ms=!q||`${vMap[p.vendor_id]||p.vendor_id||''} ${(ev&&ev.service_description)||''} ${(evt&&evt.ref_number)||''} ${(evt&&evt.name)||''} ${p.reference_number||''} ${p.void_reason||''}`.toLowerCase().includes(q);
     const me=!evtFilter||p.event_id===evtFilter;
     return ms&&me&&inRange(p.payment_date);
   });
@@ -6059,6 +6098,7 @@ function VendorPaymentsModule({onNavigate}){
         </div>
         <select className="field-input" style={{width:200}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name?(' · '+e.client_name):''}{e.main_date?(' · '+fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})):''}</option>)}</select>
         <select className="field-input" style={{width:130}} value={range} onChange={e=>setRange(e.target.value)}><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option></select>
+        <button className="btn sm" onClick={()=>setShowVoided(v=>!v)} title="Audit trail of voided payments" style={{background:showVoided?'var(--grey-100)':undefined,color:showVoided?'var(--grey-800)':'var(--grey-400)'}}>{showVoided?'← Active':('Voided'+(voidedCount?(' ('+voidedCount+')'):''))}</button>
       </div>
       {loading? <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>
        : filtered.length===0? <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:50,textAlign:'center',border:'1px solid var(--grey-100)',color:'var(--grey-400)'}}>No vendor payments for this view. <button className="btn sm" onClick={openRec}>+ Record one</button></div>
@@ -6067,12 +6107,12 @@ function VendorPaymentsModule({onNavigate}){
             <div>Date</div><div>Vendor / service</div><div>Event</div><div>Mode</div><div style={{textAlign:'right'}}>Amount</div>
           </div>
           {filtered.map(p=>{ const ev=evMap[p.event_vendor_id]; const evt=eMap[p.event_id]; return (
-            <div key={p.payment_id} style={{display:'grid',gridTemplateColumns:'80px 1fr 200px 90px 96px',gap:10,padding:'11px 16px',borderTop:'1px solid var(--grey-100)',alignItems:'center',fontSize:13}}>
+            <div key={p.payment_id||p.vendor_payment_id} style={{display:'grid',gridTemplateColumns:'80px 1fr 200px 90px 96px',gap:10,padding:'11px 16px',borderTop:'1px solid var(--grey-100)',alignItems:'center',fontSize:13,opacity:p.is_voided?0.75:1}}>
               <div style={{color:'var(--grey-500)'}}>{fmtDate(p.payment_date,{day:'numeric',month:'short'})}</div>
-              <div><b>{vMap[p.vendor_id]||'Vendor'}</b>{ev&&ev.service_description?(' · '+ev.service_description):''}</div>
+              <div><b>{vMap[p.vendor_id]||'Vendor'}</b>{ev&&ev.service_description?(' · '+ev.service_description):''}{p.is_voided&&<div style={{fontSize:11,color:'var(--red)'}}>voided{p.voided_at?(' '+fmtDate(p.voided_at,{day:'numeric',month:'short',year:'numeric'})):''}{p.void_reason?(' — '+p.void_reason):''}</div>}</div>
               <div>{evt?<><a onClick={()=>setPopupEvent(p.event_id)} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>{evt.ref_number}</a> <span style={{color:'var(--grey-400)'}}>· {evt.name}</span></>:'—'}</div>
               <div style={{textTransform:'uppercase',fontSize:11,color:'var(--grey-500)'}}>{p.payment_mode}</div>
-              <div style={{textAlign:'right',fontWeight:500}}>{inr(p.amount)}</div>
+              <div style={{textAlign:'right',fontWeight:500,textDecoration:p.is_voided?'line-through':'none',color:p.is_voided?'var(--grey-400)':'var(--grey-800)'}}>{inr(p.amount)}</div>
             </div>
           ); })}
         </div>}
@@ -6274,7 +6314,7 @@ function ReportsModule({onNavigate}){
       supabase.from('invoices').select('invoice_id,ref_number,status,grand_total,total_received,total_outstanding,event_id,doc_date').eq('is_deleted',false),
       supabase.from('invoice_payments').select('amount,payment_date'),
       supabase.from('expenses').select('amount,date,event_id,category').eq('is_deleted',false),
-      supabase.from('vendor_payments').select('amount,payment_date,event_id'),
+      supabase.from('vendor_payments').select('amount,payment_date,event_id,is_voided'),
       supabase.from('events').select('event_id,ref_number,name,main_date,status,client_name').eq('is_deleted',false),
       supabase.from('leads').select('lead_id,stage,budget').eq('is_deleted',false)
     ]);
@@ -6301,7 +6341,7 @@ function ReportsModule({onNavigate}){
   // ---- locked profitability helpers ----
   const eventFee=id=>invoices.filter(i=>i.event_id===id&&i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0);
   const eventExp=id=>expenses.filter(x=>x.event_id===id).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
-  const eventVend=id=>vpays.filter(x=>x.event_id===id).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
+  const eventVend=id=>vpays.filter(x=>x.event_id===id&&!x.is_voided).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
   const eventProfit=id=>eventFee(id)-eventExp(id)-eventVend(id);
 
   // events in the selected range (by main_date)
@@ -6317,14 +6357,15 @@ function ReportsModule({onNavigate}){
   const collected=pays.filter(p=>range==='all'||inRange(p.payment_date)).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
   const outstanding=invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.total_outstanding!=null?i.total_outstanding:((parseFloat(i.grand_total)||0)-(parseFloat(i.total_received)||0)))||0),0);
   const totExp=expenses.filter(x=>range==='all'||inRange(x.date)).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
-  const totVend=vpays.filter(x=>range==='all'||inRange(x.payment_date)).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
+  const totVend=vpays.filter(x=>!x.is_voided&&(range==='all'||inRange(x.payment_date))).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
+  const voidedVend=vpays.filter(x=>x.is_voided&&(range==='all'||inRange(x.payment_date))).reduce((s,x)=>s+(parseFloat(x.amount)||0),0);
 
   // last 12 months series
   const months=[]; for(let i=11;i>=0;i--){ const d=new Date(yr,now.getMonth()-i,1); months.push({key:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'),label:d.toLocaleString('en-US',{month:'short'})}); }
   const mSum=(arr,dateKey)=>months.map(m=>arr.filter(r=>String(r[dateKey]||'').slice(0,7)===m.key).reduce((s,r)=>s+(parseFloat(r.amount)||0),0));
   const collSeries=mSum(pays,'payment_date');
   const billSeries=months.map(m=>invoices.filter(i=>i.status!=='cancelled'&&String(i.doc_date||'').slice(0,7)===m.key).reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0));
-  const expSeries=months.map(m=>{ const e=expenses.filter(x=>String(x.date||'').slice(0,7)===m.key).reduce((s,x)=>s+(parseFloat(x.amount)||0),0); const v=vpays.filter(x=>String(x.payment_date||'').slice(0,7)===m.key).reduce((s,x)=>s+(parseFloat(x.amount)||0),0); return e+v; });
+  const expSeries=months.map(m=>{ const e=expenses.filter(x=>String(x.date||'').slice(0,7)===m.key).reduce((s,x)=>s+(parseFloat(x.amount)||0),0); const v=vpays.filter(x=>!x.is_voided&&String(x.payment_date||'').slice(0,7)===m.key).reduce((s,x)=>s+(parseFloat(x.amount)||0),0); return e+v; });
 
   // pipeline by stage (active leads, collapsed display stage)
   const pipeStages=[['new','New'],['contacted','Contacted'],['Quoting','Quoting']];
@@ -6363,7 +6404,7 @@ function ReportsModule({onNavigate}){
   const [exporting,setExporting]=React.useState(false);
   const evRefMap={}; events.forEach(e=>{ evRefMap[e.event_id]=(e.ref_number||'')+(e.name?(' · '+e.name):''); });
   const rangeExpenses=expenses.filter(x=>range==='all'||inRange(x.date));
-  const rangeVpays=vpays.filter(x=>range==='all'||inRange(x.payment_date));
+  const rangeVpays=vpays.filter(x=>!x.is_voided&&(range==='all'||inRange(x.payment_date)));
   const stamp=todayLocalStr();
   const safeRange=({month:'Month',quarter:'Quarter',year:'Year',all:'AllTime'}[range]);
 
@@ -6474,7 +6515,7 @@ function ReportsModule({onNavigate}){
           </div>
         ))}
       </div>
-      <div style={{fontSize:11,color:'var(--grey-400)',marginBottom:16,marginTop:-6}}>{rangeLabel} · Net profit = event fees − event expenses − vendor payments (events by event date) − general overhead. Outstanding is current across all open invoices. Margin {billed>0?(Math.round(periodProfit/ (perEvent.reduce((s,e)=>s+e.fee,0)||1)*100)+'%'):'—'} on event fees.</div>
+      <div style={{fontSize:11,color:'var(--grey-400)',marginBottom:16,marginTop:-6}}>{rangeLabel} · Net profit = event fees − event expenses − vendor payments (events by event date) − general overhead. Outstanding is current across all open invoices. Margin {billed>0?(Math.round(periodProfit/ (perEvent.reduce((s,e)=>s+e.fee,0)||1)*100)+'%'):'—'} on event fees.{voidedVend>0?(' ₹'+Math.round(voidedVend).toLocaleString('en-IN')+' in voided vendor payments excluded.'):''}</div>
 
       {/* charts row */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
