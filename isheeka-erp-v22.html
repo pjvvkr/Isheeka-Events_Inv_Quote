@@ -3845,8 +3845,8 @@ function QuotationDetailModal(){ return null; /* dead code removed — supersede
               </div>
             ))}
             <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'12px 16px',marginBottom:14}}>
-              {[['Subtotal','Rs.'+(parseFloat(quot.subtotal)||0).toLocaleString('en-IN'),false],['Discount','-Rs.'+(parseFloat(quot.discount_amount)||0).toLocaleString('en-IN'),false],['Grand total','Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN'),true]].map(([l,v,bold],i)=>(
-                <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:i<2?'1px solid var(--grey-200)':'none'}}>
+              {(()=>{const _d=parseFloat(quot.discount_amount)||0;const rows=[['Subtotal','Rs.'+(parseFloat(quot.subtotal)||0).toLocaleString('en-IN'),false]];if(Math.abs(_d)>0.5)rows.push(['Adjustment',(_d>0?'- ':'+ ')+'Rs.'+Math.abs(Math.round(_d)).toLocaleString('en-IN'),false]);rows.push(['Grand total','Rs.'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN'),true]);return rows;})().map(([l,v,bold],i,arr)=>(
+                <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:i<arr.length-1?'1px solid var(--grey-200)':'none'}}>
                   <span style={{fontSize:13,color:'var(--grey-400)'}}>{l}</span>
                   <span style={{fontSize:bold?15:13,fontWeight:bold?700:400,color:bold?'var(--green)':'var(--grey-800)'}}>{v}</span>
                 </div>
@@ -5264,8 +5264,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           </div>
         ))}
         <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'12px 16px'}}>
-          {[['Subtotal','₹'+(parseFloat(quot.subtotal)||0).toLocaleString('en-IN'),false],['Discount','-₹'+(parseFloat(quot.discount_amount)||0).toLocaleString('en-IN'),false],['Grand total','₹'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN'),true]].map(([l,v,bold],i)=>(
-            <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:i<2?'1px solid var(--grey-200)':'none'}}>
+          {(()=>{const _d=parseFloat(quot.discount_amount)||0;const rows=[['Subtotal','₹'+(parseFloat(quot.subtotal)||0).toLocaleString('en-IN'),false]];if(Math.abs(_d)>0.5)rows.push(['Adjustment',(_d>0?'- ':'+ ')+'₹'+Math.abs(Math.round(_d)).toLocaleString('en-IN'),false]);rows.push(['Grand total','₹'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN'),true]);return rows;})().map(([l,v,bold],i,arr)=>(
+            <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:i<arr.length-1?'1px solid var(--grey-200)':'none'}}>
               <span style={{fontSize:13,color:'var(--grey-400)'}}>{l}</span>
               <span style={{fontSize:bold?15:13,fontWeight:bold?700:400,color:bold?'var(--green)':'var(--grey-800)'}}>{v}</span>
             </div>
@@ -5538,6 +5538,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [revising, setRevising] = React.useState(false);
   const [revItems, setRevItems] = React.useState([]);
   const [revDiscount, setRevDiscount] = React.useState(0);
+  const [revTotalOverride, setRevTotalOverride] = React.useState('');
   const [revReason, setRevReason] = React.useState('');
   const [revSaving, setRevSaving] = React.useState(false);
   const [srcQuote, setSrcQuote] = React.useState(null);
@@ -5709,21 +5710,28 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     if(inv.status==='paid' && !window.confirm('This invoice is fully paid. Revising a settled invoice is an admin action and will be logged. Continue?')) return;
     setRevItems(items.map(it=>({description:it.description||'',quantity:parseFloat(it.quantity)||1,unit_price:parseFloat(it.unit_price)||0,sub_event_name:it.sub_event_name||null})));
     setRevDiscount(parseFloat(inv.discount_amount)||0);
+    // If the invoice carries a manual adjustment (signed discount with no pct), prefill the override with its pre-GST total.
+    const _adj=parseFloat(inv.discount_amount)||0;
+    setRevTotalOverride(_adj!==0?String(Math.round((parseFloat(inv.subtotal)||0)-_adj)):'');
     setRevReason('');
     setRevising(true);
   };
   const revSub = revItems.reduce((s,r)=>s+(parseFloat(r.quantity)||0)*(parseFloat(r.unit_price)||0),0);
-  const revTaxable = Math.max(0, revSub-(parseFloat(revDiscount)||0));
+  // Override (pre-GST final total) takes precedence; the gap becomes a signed adjustment. GST is added on top.
+  const revOverrideOn = revTotalOverride!==''&&revTotalOverride!=null&&!isNaN(parseFloat(revTotalOverride));
+  const revEffDiscount = revOverrideOn ? (revSub-parseFloat(revTotalOverride)) : (parseFloat(revDiscount)||0);
+  const revTaxable = revSub-revEffDiscount;
   const revTax = inv.gst_applicable?Math.round(revTaxable*gstPct/100):0;
   const revGrand = revTaxable+revTax;
   const handleRevise = async () => {
     if(revSaving) return;
     if(!revReason.trim()){ notify('Please enter a reason for the revision.','error'); return; }
     if(revItems.filter(r=>r.description.trim()).length===0){ notify('Add at least one line item.','error'); return; }
-    if((parseFloat(revDiscount)||0)<0||(parseFloat(revDiscount)||0)>revSub){ notify('Discount must be between ₹0 and the subtotal (₹'+revSub.toLocaleString('en-IN')+').','error'); return; }
+    if(!revOverrideOn && ((parseFloat(revDiscount)||0)<0||(parseFloat(revDiscount)||0)>revSub)){ notify('Discount must be between ₹0 and the subtotal (₹'+revSub.toLocaleString('en-IN')+').','error'); return; }
+    if(revTaxable<0){ notify('The final total can’t be negative.','error'); return; }
     setRevSaving(true);
     const rows = revItems.filter(r=>r.description.trim()).map((r,idx)=>({invoice_id:invoiceId,description:r.description.trim(),sub_event_name:r.sub_event_name||null,quantity:parseFloat(r.quantity)||0,unit_price:parseFloat(r.unit_price)||0,amount:(parseFloat(r.quantity)||0)*(parseFloat(r.unit_price)||0),sort_order:idx}));
-    const newDiscount=parseFloat(revDiscount)||0, newSub=revSub, newGrand=revGrand, newTax=revTax;
+    const newDiscount=revEffDiscount, newSub=revSub, newGrand=revGrand, newTax=revTax;
     const newOut=Math.max(0,newGrand-received);
     const newRev=(inv.status==='draft')?(inv.revision_number||0):((inv.revision_number||0)+1);
     const oldGrand=grand;
@@ -5961,10 +5969,16 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
               ))}
               <button className="btn sm" onClick={()=>setRevItems([...revItems,{description:'',quantity:1,unit_price:0,sub_event_name:null}])}>+ Add item</button>
             </div>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,borderTop:'1px solid var(--grey-100)',paddingTop:10,marginBottom:10}}>
-              <label style={{fontSize:13,color:'var(--grey-600)'}}>Discount (₹) <input className="field-input" type="number" style={{width:120,display:'inline-block',marginLeft:8}} value={revDiscount} onChange={e=>setRevDiscount(e.target.value)}/></label>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,borderTop:'1px solid var(--grey-100)',paddingTop:10,marginBottom:10}}>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                <label style={{fontSize:13,color:'var(--grey-600)'}}>Discount (₹) <input className="field-input" type="number" disabled={revOverrideOn} style={{width:120,display:'inline-block',marginLeft:8,...(revOverrideOn?{opacity:0.5}:{})}} value={revDiscount} onChange={e=>setRevDiscount(e.target.value)}/></label>
+                <label style={{fontSize:13,color:'var(--grey-600)'}}>Or set total (before GST) <input className="field-input" type="number" style={{width:120,display:'inline-block',marginLeft:8}} value={revTotalOverride}
+                  onChange={e=>setRevTotalOverride(e.target.value)}
+                  onBlur={e=>{ const v=e.target.value; if(v!==''&&!isNaN(parseFloat(v))){ const tgt=parseFloat(v); if(Math.abs(tgt-revSub)>0.5){ const adj=revSub-tgt; if(!window.confirm('Set the total (before GST) to ₹'+Math.round(tgt).toLocaleString('en-IN')+'?\n\nLine items add up to ₹'+Math.round(revSub).toLocaleString('en-IN')+'. This applies a '+(adj>0?'−':'+')+'₹'+Math.round(Math.abs(adj)).toLocaleString('en-IN')+' adjustment'+(inv.gst_applicable?', then GST is added on top.':'.'))){ setRevTotalOverride(''); } } } }}/></label>
+                {revOverrideOn&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',alignSelf:'flex-start'}}>Manual total · {revEffDiscount>=0?'−':'+'}₹{Math.round(Math.abs(revEffDiscount)).toLocaleString('en-IN')} adjustment</span>}
+              </div>
               <div style={{textAlign:'right',fontSize:13}}>
-                <div style={{color:'var(--grey-400)'}}>Subtotal ₹{revSub.toLocaleString('en-IN')}{inv.gst_applicable?(' · GST ₹'+revTax.toLocaleString('en-IN')):''}</div>
+                <div style={{color:'var(--grey-400)'}}>Subtotal ₹{revSub.toLocaleString('en-IN')}{revOverrideOn?(' · adj '+(revEffDiscount>=0?'−':'+')+'₹'+Math.round(Math.abs(revEffDiscount)).toLocaleString('en-IN')):''}{inv.gst_applicable?(' · GST ₹'+revTax.toLocaleString('en-IN')):''}</div>
                 <div style={{fontSize:15,fontWeight:600}}>Grand total ₹{revGrand.toLocaleString('en-IN')}</div>
               </div>
             </div>
@@ -5998,7 +6012,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
           ))}
           <div style={{borderTop:'1px solid var(--grey-200)',marginTop:10,paddingTop:10}}>
             <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0',color:'var(--grey-600)'}}><span>Subtotal</span><span>₹{subtotal.toLocaleString('en-IN')}</span></div>
-            {discount>0&&<div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0',color:'var(--grey-600)'}}><span>Discount</span><span>− ₹{discount.toLocaleString('en-IN')}</span></div>}
+            {Math.abs(discount)>0.5&&<div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0',color:'var(--grey-600)'}}><span>Adjustment</span><span>{discount>0?'− ':'+ '}₹{Math.abs(Math.round(discount)).toLocaleString('en-IN')}</span></div>}
             <div style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'2px 0',color:'var(--grey-600)'}}><span>GST {inv.gst_applicable?'@ '+gstPct+'%':'(not applied)'}</span><span>₹{tax.toLocaleString('en-IN')}</span></div>
             <div style={{display:'flex',justifyContent:'space-between',fontSize:15,fontWeight:600,padding:'4px 0'}}><span>Grand total</span><span>₹{grand.toLocaleString('en-IN')}</span></div>
           </div>
@@ -8402,7 +8416,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   // Reserve room at the page bottom so the pricing summary + schedule never land alone atop a fresh page —
   // autotable then breaks earlier and pulls the last item rows onto the page that carries the summary.
   const schedH=(dOpts.schedule&&ps.length)?(16+26*ps.length):0;
-  let sumH=16+40; if(showPrices){ sumH+=15+((dOpts.discount&&disc>0)?15:0)+((isInv&&quot.gst_applicable)?15:0)+2; } if(isInv){ sumH+=32; }
+  let sumH=16+40; if(showPrices){ sumH+=15+((dOpts.discount&&Math.abs(disc)>0.5)?15:0)+((isInv&&quot.gst_applicable)?15:0)+2; } if(isInv){ sumH+=32; }
   const blockH=Math.max(schedH,sumH)+26;
   doc.autoTable({
     head:[head], body:body, startY:y, margin:{left:M,right:M,top:HDR_BOTTOM-2,bottom:58+blockH+24},
@@ -8431,7 +8445,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   if(showPrices){
     sans('normal',10); setText([85,85,85]);
     doc.text('Subtotal', rightX, ty); doc.text(money(sub), rr, ty, {align:'right'}); ty+=15;
-    if(dOpts.discount && disc>0){ doc.text('Discount', rightX, ty); doc.text('- '+money(disc), rr, ty, {align:'right'}); ty+=15; }
+    if(dOpts.discount && Math.abs(disc)>0.5){ doc.text('Adjustment', rightX, ty); doc.text((disc>0?'- ':'+ ')+money(Math.abs(disc)), rr, ty, {align:'right'}); ty+=15; }
     if(isInv && quot.gst_applicable){ doc.text('GST'+(quot.gst_pct?(' ('+parseFloat(quot.gst_pct)+'%)'):''), rightX, ty); doc.text(money(quot.tax_amount), rr, ty, {align:'right'}); ty+=15; }
     ty+=2;
   }
@@ -8572,7 +8586,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   const [quotDetails, setQuotDetails] = React.useState({
     doc_date:today, valid_until:'',
     event_name:'', event_date:'',
-    discount_pct:0, discount_amount:0,
+    discount_pct:0, discount_amount:0, total_override:'',
     additional_notes:'', payment_terms:'', additional_terms:'',
     payment_terms_touched: false,
     valid_until_touched: false,
@@ -8653,7 +8667,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           // edits installment amounts in the revision (it only "sticks" once they hand-edit the terms box).
           // event_name defaults to the "{Type} Event" formula (per the chosen rule), editable in step 3 —
           // not the legacy stored name (older quotes carried the "{Client}'s {Type}" auto-name).
-          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:false,payment_schedule_touched:hasAmounts,payment_schedule:ps.length>0?ps:f.payment_schedule}));
+          const _mAdj=(parseFloat(q.discount_amount)||0)!==0 && (!q.discount_pct||parseFloat(q.discount_pct)===0);
+          const _ovPrefill=_mAdj?String(Math.round((parseFloat(q.grand_total)!=null?parseFloat(q.grand_total):((parseFloat(q.subtotal)||0)-(parseFloat(q.discount_amount)||0))))):'';
+          setQuotDetails(f=>({...f,doc_date:q.doc_date||f.doc_date,valid_until:q.valid_until||f.valid_until,event_name:defaultEventName(lead.event_type),discount_pct:q.discount_pct||0,discount_amount:q.discount_amount||0,total_override:_ovPrefill,additional_notes:q.additional_notes||'',payment_terms:q.payment_terms||'',additional_terms:q.additional_terms||'',payment_terms_touched:false,payment_schedule_touched:hasAmounts,payment_schedule:ps.length>0?ps:f.payment_schedule}));
           if(q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
         }
       });
@@ -8677,7 +8693,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   React.useEffect(()=>{
     const its=subEventBlocks.flatMap(b=>b.items);
     const sub=its.reduce((s,i)=>s+(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0),0);
-    const disc=quotDetails.discount_pct>0?sub*(parseFloat(quotDetails.discount_pct)||0)/100:(parseFloat(quotDetails.discount_amount)||0);
+    const _ov=quotDetails.total_override;
+    const _ovOn=_ov!==''&&_ov!=null&&!isNaN(parseFloat(_ov));
+    const disc=_ovOn?(sub-parseFloat(_ov)):(quotDetails.discount_pct>0?sub*(parseFloat(quotDetails.discount_pct)||0)/100:(parseFloat(quotDetails.discount_amount)||0));
     const grand=Math.max(0,sub-disc);
     setQuotDetails(f=>{
       if(f.payment_schedule_touched) return f;
@@ -8686,7 +8704,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       const filled=sch.map((p,i)=>{ if(i===sch.length-1){ return {...p,amount:Math.max(0,grand-acc)}; } const a=Math.round(grand*(parseFloat(p.pct)||0)/100); acc+=a; return {...p,amount:a}; });
       return {...f, payment_schedule:filled, payment_terms: f.payment_terms_touched?f.payment_terms:buildPaymentTermsText(filled)};
     });
-  },[subEventBlocks, quotDetails.discount_pct, quotDetails.discount_amount]);
+  },[subEventBlocks, quotDetails.discount_pct, quotDetails.discount_amount, quotDetails.total_override]);
 
   const loadTemplateForBlock = (blockId, templateId, subEventName) => {
     const items=templateItems[templateId]; if(!items) return;
@@ -8741,7 +8759,11 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
   });
   const allItems=subEventBlocks.flatMap(b=>b.items);
   const subtotal=allItems.reduce((s,i)=>s+(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0),0);
-  const discountAmt=quotDetails.discount_pct>0?subtotal*(parseFloat(quotDetails.discount_pct)||0)/100:(parseFloat(quotDetails.discount_amount)||0);
+  // Manual total override: when set, it's the final (pre-GST) total the user wants; the gap becomes a
+  // signed adjustment stored in discount_amount (positive = reduced, negative = added). Quotes carry no GST.
+  const _ovRaw=quotDetails.total_override;
+  const overrideOn=_ovRaw!==''&&_ovRaw!=null&&!isNaN(parseFloat(_ovRaw));
+  const discountAmt=overrideOn?(subtotal-parseFloat(_ovRaw)):(quotDetails.discount_pct>0?subtotal*(parseFloat(quotDetails.discount_pct)||0)/100:(parseFloat(quotDetails.discount_amount)||0));
   const grandTotal=subtotal-discountAmt;
   const schedAllocated=(quotDetails.payment_schedule||[]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
   const schedBalance=Math.round(grandTotal-schedAllocated);
@@ -8772,7 +8794,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           }));
         });
         const {error:ue}=await supabase.from('quotations').update({
-          subtotal,discount_pct:parseFloat(quotDetails.discount_pct)||0,
+          subtotal,discount_pct:overrideOn?0:(parseFloat(quotDetails.discount_pct)||0),
           discount_amount:discountAmt,grand_total:grandTotal,
           doc_date:quotDetails.doc_date,valid_until:quotDetails.valid_until,
           event_name:quotDetails.event_name||null,
@@ -9093,12 +9115,23 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
                 <div><label className="field-label">Discount %</label>
-                  <input type="number" className="field-input" value={quotDetails.discount_pct||''} onChange={e=>{setQD('discount_pct',parseFloat(e.target.value)||0);setQD('discount_amount',0);}} placeholder="0"/></div>
+                  <input type="number" className="field-input" disabled={overrideOn} style={overrideOn?{opacity:0.5}:{}} value={quotDetails.discount_pct||''} onChange={e=>{setQD('discount_pct',parseFloat(e.target.value)||0);setQD('discount_amount',0);}} placeholder="0"/></div>
                 <div><label className="field-label">Discount (fixed Rs.)</label>
-                  <input type="number" className="field-input" value={quotDetails.discount_amount||''} onChange={e=>{setQD('discount_amount',parseFloat(e.target.value)||0);setQD('discount_pct',0);}} placeholder="0"/></div>
+                  <input type="number" className="field-input" disabled={overrideOn} style={overrideOn?{opacity:0.5}:{}} value={quotDetails.discount_amount||''} onChange={e=>{setQD('discount_amount',parseFloat(e.target.value)||0);setQD('discount_pct',0);}} placeholder="0"/></div>
+              </div>
+              <div style={{marginBottom:14}}>
+                <label className="field-label">Or set final total <span style={{fontWeight:400,color:'var(--grey-400)'}}>(override — replaces discount; GST added on top for invoices)</span></label>
+                <input type="number" className="field-input" value={quotDetails.total_override}
+                  onChange={e=>setQD('total_override',e.target.value)}
+                  onBlur={e=>{ const v=e.target.value; if(v!==''&&!isNaN(parseFloat(v))){ const tgt=parseFloat(v); if(Math.abs(tgt-subtotal)>0.5){ const adj=subtotal-tgt; if(!window.confirm('Set the total to ₹'+Math.round(tgt).toLocaleString('en-IN')+'?\n\nLine items add up to ₹'+Math.round(subtotal).toLocaleString('en-IN')+'. This applies a '+(adj>0?'−':'+')+'₹'+Math.round(Math.abs(adj)).toLocaleString('en-IN')+' adjustment.')){ setQD('total_override',''); } } } }}
+                  placeholder={'Default ₹'+Math.round(subtotal).toLocaleString('en-IN')+' (line-items sum)'}/>
+                {overrideOn&&<div style={{marginTop:6,display:'flex',gap:8,alignItems:'center'}}>
+                  <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)'}}>Manual total · {discountAmt>=0?'−':'+'}₹{Math.round(Math.abs(discountAmt)).toLocaleString('en-IN')} adjustment</span>
+                  <button type="button" className="btn sm" style={{fontSize:11,padding:'2px 8px'}} onClick={()=>setQD('total_override','')}>Clear</button>
+                </div>}
               </div>
               <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'12px 16px',marginBottom:14}}>
-                {[['Subtotal','Rs.'+subtotal.toLocaleString('en-IN'),false],['Discount','-Rs.'+discountAmt.toLocaleString('en-IN'),false],['Grand total','Rs.'+grandTotal.toLocaleString('en-IN'),true]].map(([l,v,bold],i)=>(
+                {[['Subtotal','Rs.'+subtotal.toLocaleString('en-IN'),false],[overrideOn?'Adjustment':'Discount',(overrideOn?((discountAmt>=0?'- ':'+ ')+'Rs.'+Math.abs(Math.round(discountAmt)).toLocaleString('en-IN')):('-Rs.'+discountAmt.toLocaleString('en-IN'))),false],['Grand total','Rs.'+grandTotal.toLocaleString('en-IN'),true]].map(([l,v,bold],i)=>(
                   <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:i<2?'1px solid var(--grey-200)':'none'}}>
                     <span style={{fontSize:13,color:'var(--grey-400)'}}>{l}</span>
                     <span style={{fontSize:bold?15:13,fontWeight:bold?700:400,color:bold?'var(--green)':'var(--grey-800)'}}>{v}</span>
