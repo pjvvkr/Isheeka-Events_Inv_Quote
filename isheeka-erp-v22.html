@@ -15,7 +15,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',sans-serif;background:#f8f4f6;color:#1a1a1a;min-height:100vh}
+body{font-family:'Inter',sans-serif;background:#FAF7F3;color:#1a1a1a;min-height:100vh}
 :root{
   --pink:#e8185a;--pink-dark:#A01044;--pink-light:#FCEAF1;--pink-mid:#F4C0D1;
   --gold:#B8893A;--gold-light:#F3E8CF;
@@ -477,9 +477,9 @@ function TemplateEditor({template, onSave, onCancel}) {
           </div>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
-              <tr style={{background:'#FBEAF0'}}>
-                <th style={{padding:'6px 8px',textAlign:'left',fontSize:10,fontWeight:700,color:'#993556',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>Description</th>
-                <th style={{padding:'6px 8px',textAlign:'right',fontSize:10,fontWeight:700,color:'#993556',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'15%'}}>Default qty</th>
+              <tr style={{background:'#FCEAF1'}}>
+                <th style={{padding:'6px 8px',textAlign:'left',fontSize:10,fontWeight:700,color:'#A01044',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>Description</th>
+                <th style={{padding:'6px 8px',textAlign:'right',fontSize:10,fontWeight:700,color:'#A01044',textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'15%'}}>Default qty</th>
                 <th style={{borderBottom:'1.5px solid #e8185a',width:'6%'}}></th>
               </tr>
             </thead>
@@ -2278,7 +2278,7 @@ function ChangeClientModal({currentClient, onSave, onCancel}) {
                 const sel=selected?.client_id===c.client_id;
                 return (
                   <div key={c.client_id} onClick={()=>setSelected(c)}
-                    style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:`1px solid ${sel?'#993556':'var(--grey-100)'}`,borderRadius:'var(--radius-md)',cursor:'pointer',background:sel?'#FBEAF0':'white'}}>
+                    style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:`1px solid ${sel?'#A01044':'var(--grey-100)'}`,borderRadius:'var(--radius-md)',cursor:'pointer',background:sel?'#FCEAF1':'white'}}>
                     <div style={{width:32,height:32,borderRadius:'50%',background:'var(--pink-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:600,color:'var(--pink)',flexShrink:0}}>
                       {c.first_name?.charAt(0)}{c.last_name?.charAt(0)}
                     </div>
@@ -3538,8 +3538,8 @@ function LossReasonModal({onSave, onCancel}) {
           <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
             {LEAD_LOSS_REASONS.map(r=>(
               <div key={r.value} onClick={()=>{setReason(r.value);setError('');}}
-                style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',border:`1.5px solid ${reason===r.value?'#993556':'var(--grey-100)'}`,borderRadius:'var(--radius-md)',cursor:'pointer',background:reason===r.value?'#FBEAF0':'white',transition:'all .15s'}}>
-                <div style={{width:16,height:16,borderRadius:'50%',border:`2px solid ${reason===r.value?'#993556':'var(--grey-300)'}`,background:reason===r.value?'#993556':'white',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',border:`1.5px solid ${reason===r.value?'#A01044':'var(--grey-100)'}`,borderRadius:'var(--radius-md)',cursor:'pointer',background:reason===r.value?'#FCEAF1':'white',transition:'all .15s'}}>
+                <div style={{width:16,height:16,borderRadius:'50%',border:`2px solid ${reason===r.value?'#A01044':'var(--grey-300)'}`,background:reason===r.value?'#A01044':'white',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
                   {reason===r.value&&<div style={{width:6,height:6,borderRadius:'50%',background:'white'}}/>}
                 </div>
                 <span style={{fontSize:13,color:'var(--grey-800)',fontWeight:reason===r.value?500:400}}>{r.label}</span>
@@ -3664,7 +3664,7 @@ function LeadForm({initial={}, onSave, onCancel, title='New lead', referenceData
   const eventTypes = useEventTypes();
   const empty = {
     first_name:'',last_name:'',phone:'',phone_2:'',email:'',
-    source:'',event_type:'',tentative_date:'',location:'',
+    source:'',event_type:'',tentative_date:'',location:'Hyderabad',
     budget:'',guest_count:'',venue_preference:'',referred_by:'',
     stage:'new',assigned_to:'',notes:'',follow_up_date:'',
   };
@@ -4379,7 +4379,7 @@ function LostLeadEditModal({onEditAnyway, onCreateFromReference, onCancel}) {
         <div style={{padding:20,display:'flex',flexDirection:'column',gap:10}}>
           <button
             onClick={onCreateFromReference}
-            style={{display:'flex',alignItems:'center',gap:12,padding:'14px 16px',border:'1.5px solid var(--pink)',borderRadius:'var(--radius-md)',background:'#FBEAF0',cursor:'pointer',textAlign:'left',width:'100%'}}>
+            style={{display:'flex',alignItems:'center',gap:12,padding:'14px 16px',border:'1.5px solid var(--pink)',borderRadius:'var(--radius-md)',background:'#FCEAF1',cursor:'pointer',textAlign:'left',width:'100%'}}>
             <span style={{fontSize:22}}>📋</span>
             <div>
               <div style={{fontSize:13,fontWeight:600,color:'var(--pink)',marginBottom:2}}>Create a new lead from this one</div>
@@ -4471,7 +4471,7 @@ function LeadReferenceModal({onSelect, onCancel}) {
             return (
               <div key={lead.lead_id}
                 style={{padding:'12px 14px',borderRadius:'var(--radius-md)',border:'1px solid var(--grey-100)',marginBottom:6,cursor:'pointer',opacity:isLost?.65:1,transition:'all .15s'}}
-                onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--pink)';e.currentTarget.style.background='#FBEAF0';}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--pink)';e.currentTarget.style.background='#FCEAF1';}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--grey-100)';e.currentTarget.style.background='white';}}
                 onClick={()=>onSelect(lead)}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:4}}>
@@ -4761,12 +4761,12 @@ const EVENT_STATUS_COLORS = {
   cancelled:{bg:'#FCEBEB',color:'#A32D2D',dot:'#A32D2D'},
 };
 const INVOICE_STATUS_COLORS = {
-  draft:{bg:'#F1EFE8',color:'#5F5E5A',dot:'#888780'},
+  draft:{bg:'#F1ECE4',color:'#6B6660',dot:'#9A938A'},
   sent:{bg:'#E6F1FB',color:'#185FA5',dot:'#185FA5'},
   partially_paid:{bg:'#FAEEDA',color:'#854F0B',dot:'#c87d2a'},
   paid:{bg:'#E1F5EE',color:'#0F6E56',dot:'#0F6E56'},
   overdue:{bg:'#FCEBEB',color:'#A32D2D',dot:'#A32D2D'},
-  cancelled:{bg:'#F1EFE8',color:'#888780',dot:'#B4B2A9'},
+  cancelled:{bg:'#F1ECE4',color:'#9A938A',dot:'#CFC6BA'},
 };
 const INVOICE_STATUS_LABELS = {draft:'Draft',sent:'Sent',partially_paid:'Partly paid',paid:'Paid',overdue:'Overdue',cancelled:'Cancelled'};
 // ── Derived event funnel (client ladder + vendor balance) ─────────────────────
@@ -6602,6 +6602,16 @@ function VendorPaymentsModule({onNavigate}){
   const voidedCount=pays.filter(p=>p.is_voided).length;
   // Cross-event dues rollup: what's still owed to each vendor, summed across all their engagements.
   const duesByVendor=(()=>{ const m={}; evs.forEach(x=>{ const out=parseFloat(x.outstanding)||0; const vid=x.vendor_id?('id:'+x.vendor_id):('nm:'+(x.vendor_name||'?')); const name=vMap[x.vendor_id]||x.vendor_name||'Unknown vendor'; if(!m[vid]) m[vid]={key:vid, vid:x.vendor_id||null, name, agreed:0, paid:0, outstanding:0, events:[]}; m[vid].agreed+=parseFloat(x.agreed_amount)||0; m[vid].paid+=parseFloat(x.total_paid)||0; m[vid].outstanding+=out; if(out>0.5){ m[vid].events.push({eid:x.event_id, ev:eMap[x.event_id], outstanding:out, service:x.service_description}); } }); return Object.values(m).filter(r=>r.outstanding>0.5).sort((a,b)=>b.outstanding-a.outstanding); })();
+  const exportDues=()=>{
+    if(!duesByVendor.length){ notify('No outstanding vendor dues to export.','info'); return; }
+    const rows=[];
+    duesByVendor.forEach(r=>{
+      rows.push({Vendor:r.name, Event:'— Total —', Agreed:Math.round(r.agreed), Paid:Math.round(r.paid), Outstanding:Math.round(r.outstanding)});
+      r.events.forEach(e=>{ rows.push({Vendor:'', Event:(e.ev?(e.ev.ref_number+' · '+e.ev.name):'(event)')+(e.service?(' · '+e.service):''), Agreed:'', Paid:'', Outstanding:Math.round(e.outstanding)}); });
+    });
+    try{ const ws=XLSX.utils.json_to_sheet(rows,{header:['Vendor','Event','Agreed','Paid','Outstanding']}); ws['!cols']=[{wch:26},{wch:42},{wch:12},{wch:12},{wch:13}]; const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Vendor dues'); XLSX.writeFile(wb,'isheeka-vendor-dues-'+todayLocalStr()+'.xlsx'); notify('Vendor dues exported.','success'); }
+    catch(err){ console.error('[Isheeka ERP] dues export failed:',err); notify('Could not export the dues.','error'); }
+  };
   const filtered=pays.filter(p=>{
     if(showVoided ? !p.is_voided : p.is_voided) return false;
     const q=search.toLowerCase();
@@ -6651,6 +6661,7 @@ function VendorPaymentsModule({onNavigate}){
         <select className="field-input" style={{width:200}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name?(' · '+e.client_name):''}{e.main_date?(' · '+fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})):''}</option>)}</select>
         <select className="field-input" style={{width:130}} value={range} onChange={e=>setRange(e.target.value)}><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option></select>
         <button className="btn sm" onClick={()=>setDuesView(v=>!v)} title="Outstanding owed to each vendor across all their events" style={{background:duesView?'var(--grey-100)':undefined,color:duesView?'var(--grey-800)':'var(--grey-400)'}}>{duesView?'← Payments':('Dues by vendor'+(duesByVendor.length?(' ('+duesByVendor.length+')'):''))}</button>
+        {duesView&&<button className="btn sm" onClick={exportDues} title="Download the vendor dues as an Excel file">⬇ Export</button>}
         <button className="btn sm" onClick={()=>setShowVoided(v=>!v)} title="Audit trail of voided payments" style={{background:showVoided?'var(--grey-100)':undefined,color:showVoided?'var(--grey-800)':'var(--grey-400)'}}>{showVoided?'← Active':('Voided'+(voidedCount?(' ('+voidedCount+')'):''))}</button>
       </div>
       {!duesView && (loading? <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>
@@ -7455,12 +7466,12 @@ function FastEntryTable({items, onChange}) {
       </div>
       <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
         <thead>
-          <tr style={{background:'#FBEAF0'}}>
-            <th style={{padding:'6px 8px',textAlign:'left',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>#</th>
-            <th style={{padding:'6px 8px',textAlign:'left',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>Description</th>
-            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'10%'}}>Qty</th>
-            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Unit price (₹)</th>
-            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Amount (₹)</th>
+          <tr style={{background:'#FCEAF1'}}>
+            <th style={{padding:'6px 8px',textAlign:'left',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>#</th>
+            <th style={{padding:'6px 8px',textAlign:'left',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>Description</th>
+            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'10%'}}>Qty</th>
+            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Unit price (₹)</th>
+            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Amount (₹)</th>
             <th style={{borderBottom:'1.5px solid #e8185a',width:28}}></th>
           </tr>
         </thead>
@@ -7529,11 +7540,11 @@ function SubEventItemsTable({ items, onChange }) {
     <div>
       <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
         <thead>
-          <tr style={{background:'#FBEAF0'}}>
-            <th style={{padding:'6px 8px',textAlign:'left',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>Description</th>
-            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'10%'}}>Qty</th>
-            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Unit price</th>
-            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#993556',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Amount</th>
+          <tr style={{background:'#FCEAF1'}}>
+            <th style={{padding:'6px 8px',textAlign:'left',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a'}}>Description</th>
+            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'10%'}}>Qty</th>
+            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Unit price</th>
+            <th style={{padding:'6px 8px',textAlign:'right',fontWeight:700,color:'#A01044',fontSize:10,textTransform:'uppercase',letterSpacing:'.03em',borderBottom:'1.5px solid #e8185a',width:'18%'}}>Amount</th>
             <th style={{borderBottom:'1.5px solid #e8185a',width:'6%'}}></th>
           </tr>
         </thead>
@@ -7638,7 +7649,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
 
   // Step 1 form
   const [form, setForm] = useState({
-    name:'', type:'', status:'planning', main_date:'', location:'',
+    name:'', type:'', status:'planning', main_date:'', location:'Hyderabad',
     guest_count:'', budget:'', assigned_staff_id:'', assigned_staff_name:'', internal_notes:''
   });
 
@@ -7926,9 +7937,9 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
       <div style={{background:'var(--grey-50)',padding:'14px 24px',borderBottom:'1px solid var(--grey-100)',display:'flex',alignItems:'center',gap:0}}>
         {steps.map((s,i)=>(
           <React.Fragment key={i}>
-            <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:i+1===step?'#993556':i+1<step?'var(--green)':'var(--grey-400)',fontWeight:i+1===step?500:400}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:i+1===step?'#A01044':i+1<step?'var(--green)':'var(--grey-400)',fontWeight:i+1===step?500:400}}>
               <div style={{width:22,height:22,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:600,flexShrink:0,
-                background:i+1===step?'#993556':i+1<step?'var(--green-light)':'transparent',
+                background:i+1===step?'#A01044':i+1<step?'var(--green-light)':'transparent',
                 color:i+1===step?'#F4C0D1':i+1<step?'var(--green)':'var(--grey-400)',
                 border:i+1<step?'1.5px solid var(--green)':i+1===step?'none':'1.5px solid var(--grey-200)'}}>
                 {i+1<step?'✓':i+1}
@@ -7991,7 +8002,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
                   const sel=selectedClient?.client_id===c.client_id;
                   return (
                     <div key={c.client_id} onClick={()=>setSelectedClient(c)}
-                      style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',border:`1px solid ${sel?'#993556':'var(--grey-100)'}`,borderRadius:'var(--radius-md)',cursor:'pointer',background:sel?'#FBEAF0':'white',transition:'all .15s'}}>
+                      style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',border:`1px solid ${sel?'#A01044':'var(--grey-100)'}`,borderRadius:'var(--radius-md)',cursor:'pointer',background:sel?'#FCEAF1':'white',transition:'all .15s'}}>
                       <div style={{width:32,height:32,borderRadius:'50%',background:'var(--pink-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:600,color:'var(--pink)',flexShrink:0}}>
                         {c.first_name?.charAt(0)}{c.last_name?.charAt(0)}
                       </div>
@@ -8011,8 +8022,8 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
             {selectedClient&&(
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 {/* Primary contact */}
-                <div style={{border:'1.5px solid #993556',borderRadius:'var(--radius-md)',padding:14,background:'#FBEAF0'}}>
-                  <div style={{fontSize:11,fontWeight:600,color:'#993556',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:10}}>Primary contact <span style={{color:'#993556'}}>*</span></div>
+                <div style={{border:'1.5px solid #A01044',borderRadius:'var(--radius-md)',padding:14,background:'#FCEAF1'}}>
+                  <div style={{fontSize:11,fontWeight:600,color:'#A01044',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:10}}>Primary contact <span style={{color:'#A01044'}}>*</span></div>
                   {[{id:'client',name:`${selectedClient.first_name} ${selectedClient.last_name}`,sub:'Client themselves'},...altContacts.map(ac=>({id:ac.contact_id,name:`${ac.first_name} ${ac.last_name}`,sub:`${ac.relationship} · ${ac.phone}`}))].map(opt=>(
                     <div key={opt.id} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:'1px solid rgba(153,53,86,0.15)',cursor:'pointer'}} onClick={()=>{setPrimaryContactId(opt.id);setPrimaryContactName(opt.name);}}>
                       <input type="radio" name="pc" checked={primaryContactId===opt.id} onChange={()=>{}} style={{width:'auto',flexShrink:0}}/>
@@ -8068,7 +8079,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
             {/* Main event items */}
             <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-lg)',padding:'14px 16px',marginBottom:10,border:'1px dashed var(--grey-200)'}}>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,paddingBottom:8,borderBottom:'1px solid var(--grey-200)'}}>
-                <div style={{width:9,height:9,borderRadius:'50%',background:'#888780',flexShrink:0}}></div>
+                <div style={{width:9,height:9,borderRadius:'50%',background:'#9A938A',flexShrink:0}}></div>
                 <span style={{fontSize:13,fontWeight:500,color:'var(--grey-800)',flex:1}}>Main event items</span>
                 <span style={{fontSize:11,color:'var(--grey-400)'}}>Items not tied to a specific sub-event</span>
                 <SubEventTplBtn templates={templates} onPick={tpl=>loadTemplateIntoMain(tpl)} onImport={items=>setMainItems(items)}/>
@@ -8690,11 +8701,11 @@ function QWTemplateSelect({options, onSelect, eventType}) {
             </div>
           )}
           {priority.length>0&&<>
-            <div style={{padding:'4px 10px',fontSize:10,fontWeight:700,color:'var(--pink)',textTransform:'uppercase',letterSpacing:'.04em',background:'#FBEAF0'}}>Matching</div>
+            <div style={{padding:'4px 10px',fontSize:10,fontWeight:700,color:'var(--pink)',textTransform:'uppercase',letterSpacing:'.04em',background:'#FCEAF1'}}>Matching</div>
             {priority.map((o,i)=>(
               <div key={i} onMouseDown={()=>{onSelect(o.templateId,o.subEventName);setOpen(false);}}
                 style={{padding:'8px 12px',fontSize:12,cursor:'pointer',color:'var(--grey-800)',borderBottom:'1px solid var(--grey-100)'}}
-                onMouseEnter={e=>e.currentTarget.style.background='#FBEAF0'}
+                onMouseEnter={e=>e.currentTarget.style.background='#FCEAF1'}
                 onMouseLeave={e=>e.currentTarget.style.background='white'}>{o.label}</div>
             ))}
           </>}
@@ -9202,7 +9213,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
                   {[{value:'new',label:'Create new client',sub:'Pre-filled from lead details'},{value:'existing',label:'Link existing client',sub:'Search your client list'}].map(opt=>(
                     <div key={opt.value} onClick={()=>setClientMode(opt.value)}
-                      style={{padding:'14px 16px',border:'1.5px solid '+(clientMode===opt.value?'var(--pink)':'var(--grey-100)'),borderRadius:'var(--radius-md)',cursor:'pointer',background:clientMode===opt.value?'#FBEAF0':'white'}}>
+                      style={{padding:'14px 16px',border:'1.5px solid '+(clientMode===opt.value?'var(--pink)':'var(--grey-100)'),borderRadius:'var(--radius-md)',cursor:'pointer',background:clientMode===opt.value?'#FCEAF1':'white'}}>
                       <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)',marginBottom:3}}>{opt.label}</div>
                       <div style={{fontSize:12,color:'var(--grey-400)'}}>{opt.sub}</div>
                     </div>
@@ -9227,7 +9238,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
                         const sel=existingClient&&existingClient.client_id===c.client_id;
                         return (
                           <div key={c.client_id} onClick={()=>setExistingClient(c)}
-                            style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:'1px solid '+(sel?'var(--pink)':'var(--grey-100)'),borderRadius:'var(--radius-md)',cursor:'pointer',background:sel?'#FBEAF0':'white'}}>
+                            style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:'1px solid '+(sel?'var(--pink)':'var(--grey-100)'),borderRadius:'var(--radius-md)',cursor:'pointer',background:sel?'#FCEAF1':'white'}}>
                             <div style={{width:32,height:32,borderRadius:'50%',background:'var(--pink-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:600,color:'var(--pink)'}}>
                               {c.first_name&&c.first_name.charAt(0)}{c.last_name&&c.last_name.charAt(0)}
                             </div>
