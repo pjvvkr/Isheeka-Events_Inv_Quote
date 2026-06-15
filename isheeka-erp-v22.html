@@ -1550,12 +1550,6 @@ function ClientDetail({clientId, onBack}) {
 
   return (
     <div>
-      {/* Breadcrumb */}
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,fontSize:13,color:'var(--grey-400)'}}>
-        <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'var(--pink)',fontSize:13,padding:0,fontFamily:'Inter,sans-serif'}}>← Clients</button>
-        <span>/</span>
-        <span style={{color:'var(--grey-800)',fontWeight:500}}>{client.first_name} {client.last_name}{client.ref_number&&<span style={{color:'var(--grey-400)',fontWeight:400,fontSize:12,marginLeft:6}}>{client.ref_number}</span>}</span>
-      </div>
 
       {/* Header */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'20px 24px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
@@ -1934,18 +1928,18 @@ function MassClientUpload({ onClose, onSuccess }) {
 }
 
 // ── Clients Module ────────────────────────────────────────────────────────────
-function ClientsModule() {
-  const [view, setView] = useState('list'); // list | new | detail
+function ClientsModule({nav, onNavigate, onBack}) {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [selectedId, setSelectedId] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState('');
+  const detailId = nav && nav.clientId; const isNew = !!(nav && nav.mode==='new'); // stack-driven
   const [showUpload, setShowUpload] = useState(false);
 
   useEffect(()=>{ loadClients(); },[]);
+  useEffect(()=>{ if(!detailId && !isNew) loadClients(); },[detailId, isNew]);
 
   const loadClients = async () => {
     setLoading(true);
@@ -1978,10 +1972,10 @@ function ClientsModule() {
     };
     const {data,error} = await supabase.from('clients').insert(payload).select().single();
     if(error) throw error;
-    setView('list');
     setSaveSuccess(`Client ${form.first_name} ${form.last_name} added successfully!`);
     setTimeout(()=>setSaveSuccess(''),4000);
     loadClients();
+    onBack&&onBack();
   };
 
   const filtered = clients.filter(c=>{
@@ -1994,8 +1988,8 @@ function ClientsModule() {
 
   const statusColors = {active:{bg:'var(--green-light)',color:'var(--green)'},inactive:{bg:'var(--grey-100)',color:'var(--grey-400)'},vip:{bg:'var(--pink-light)',color:'var(--pink)'}};
 
-  if(view==='new') return <ClientForm onSave={handleSaveNew} onCancel={()=>setView('list')}/>;
-  if(view==='detail') return <ClientDetail clientId={selectedId} onBack={()=>{setView('list');setSelectedId(null);loadClients();}}/>;
+  if(isNew) return <ClientForm onSave={handleSaveNew} onCancel={onBack}/>;
+  if(detailId) return <ClientDetail clientId={detailId} onBack={onBack}/>;
 
   return (
     <div>
@@ -2027,7 +2021,7 @@ function ClientsModule() {
           <option value="website">Website</option>
           <option value="manual">Manual</option>
         </select>
-        <button className="btn primary" onClick={()=>setView('new')}>+ New client</button>
+        <button className="btn primary" onClick={()=>onNavigate('clients',{mode:'new',label:'New client'})}>+ New client</button>
         <button className="btn" onClick={()=>setShowUpload(true)}>⬆️ Import</button>
       </div>
       {showUpload&&<MassClientUpload onClose={()=>setShowUpload(false)} onSuccess={(count)=>{setShowUpload(false);loadClients();setSaveSuccess(`${count} clients imported successfully!`);setTimeout(()=>setSaveSuccess(''),4000);}}/>}
@@ -2040,7 +2034,7 @@ function ClientsModule() {
           <div style={{fontSize:48,marginBottom:12}}>👥</div>
           <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>{search||statusFilter||sourceFilter?'No clients found':'No clients yet'}</div>
           <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:16}}>{search||statusFilter||sourceFilter?'Try adjusting your search or filters':'Add your first client to get started'}</div>
-          {!search&&!statusFilter&&!sourceFilter&&<button className="btn primary" onClick={()=>setView('new')}>+ Add first client</button>}
+          {!search&&!statusFilter&&!sourceFilter&&<button className="btn primary" onClick={()=>onNavigate('clients',{mode:'new',label:'New client'})}>+ Add first client</button>}
         </div>
       ) : (
         <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}}>
@@ -2054,7 +2048,7 @@ function ClientsModule() {
                 style={{display:'grid',gridTemplateColumns:'auto 1fr auto auto',gap:16,alignItems:'center',padding:'14px 20px',borderBottom:i<filtered.length-1?'1px solid var(--grey-100)':'none',cursor:'pointer',transition:'background .15s'}}
                 onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'}
                 onMouseLeave={e=>e.currentTarget.style.background='white'}
-                onClick={()=>{setSelectedId(c.client_id);setView('detail');}}>
+                onClick={()=>onNavigate('clients',{clientId:c.client_id,label:((c.first_name||'')+' '+(c.last_name||'')).trim()||c.ref_number||'Client'})}>
                 <div style={{width:40,height:40,borderRadius:'50%',background:'var(--pink-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:'var(--pink)',flexShrink:0}}>
                   {c.first_name?.charAt(0)}{c.last_name?.charAt(0)}
                 </div>
@@ -4158,12 +4152,6 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
         onClose={()=>{ setShowWelcome(false); onConverted&&onConverted(); }}
       />}
 
-      {/* Breadcrumb */}
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,fontSize:13,color:'var(--grey-400)'}}>
-        <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'var(--pink)',fontSize:13,padding:0,fontFamily:'Inter,sans-serif'}}>← Leads</button>
-        <span>/</span>
-        <span style={{color:'var(--grey-800)',fontWeight:500}}>{lead.first_name} {lead.last_name}{lead.ref_number&&<span style={{color:'var(--grey-400)',fontWeight:400,fontSize:12,marginLeft:6}}>{lead.ref_number}</span>}</span>
-      </div>
 
       {successMsg&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:12,border:'1px solid rgba(15,110,86,0.2)'}}>✅ {successMsg}</div>}
 
@@ -4497,9 +4485,8 @@ function LeadRefSearchInput({value, onChange}) {
 }
 
 // ── Leads Module ──────────────────────────────────────────────────────────────
-function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
+function LeadsModule({nav, onNavigate, onBack}) {
   const eventTypes = useEventTypes();
-  const [view, setView] = React.useState('list'); // list | new | detail
   const [leads, setLeads] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [search, setSearch] = React.useState('');
@@ -4507,16 +4494,16 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
   const [sourceFilter, setSourceFilter] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('');
   const [followUpFilter, setFollowUpFilter] = React.useState('');
-  const [selectedId, setSelectedId] = React.useState(null);
   const [saveSuccess, setSaveSuccess] = React.useState('');
   const [leadSources, setLeadSources] = React.useState(LEAD_SOURCES_DEFAULT);
   const [showRefModal, setShowRefModal] = React.useState(false);
-  const [referenceData, setReferenceData] = React.useState(null);
+  // Stack-driven: nav carries {leadId} (detail) or {mode:'new', referenceData} (form) or null (list).
+  const detailId = nav && nav.leadId;
+  const isNew = !!(nav && nav.mode==='new');
+  const referenceData = (nav && nav.referenceData) || null;
 
   React.useEffect(()=>{ loadLeads(); fetchLeadSources().then(setLeadSources); },[]);
-  React.useEffect(()=>{
-    if(initialLeadId){ setSelectedId(initialLeadId); setView('detail'); onConsumed&&onConsumed(); }
-  },[initialLeadId]);
+  React.useEffect(()=>{ if(!detailId && !isNew) loadLeads(); },[detailId, isNew]);
 
   const loadLeads = useCallback(async () => {
     setLoading(true);
@@ -4529,7 +4516,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
     const {data:ses} = await supabase.from('lead_sub_events')
       .select('*').eq('lead_id',lead.lead_id).eq('is_deleted',false).order('sort_order');
     // Copy ALL fields — user can update whatever they want
-    setReferenceData({
+    const rd = {
       first_name: lead.first_name||'',
       last_name: lead.last_name||'',
       phone: lead.phone||'',
@@ -4548,9 +4535,9 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
       follow_up_date: lead.follow_up_date||'',
       notes: lead.notes||'',
       subEvents: (ses||[]).map(se=>({name:se.name,date:se.date||'',location:se.location||''})),
-    });
+    };
     setShowRefModal(false);
-    setView('new');
+    onNavigate('leads',{mode:'new',referenceData:rd,label:'New lead'});
   };
 
   const handleSaveNew = async (form, subEvents) => {
@@ -4580,11 +4567,10 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
     };
     const {data,error} = await supabase.from('leads').insert(insertPayload).select().single();
     if(error) throw error;
-    setReferenceData(null);
-    setView('list');
     setSaveSuccess('Lead '+form.first_name+' '+form.last_name+' added successfully!');
     setTimeout(()=>setSaveSuccess(''),4000);
     loadLeads();
+    onBack&&onBack();
   };
 
   // Filter leads
@@ -4614,22 +4600,18 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
   const converted = leads.filter(l=>l.stage==='event_triggered');
   const convRate = leads.length>0?Math.round((converted.length/leads.length)*100):0;
 
-  if(view==='new') return <LeadForm
+  if(isNew) return <LeadForm
     referenceData={referenceData}
     onSave={handleSaveNew}
-    onCancel={()=>{setView('list');setReferenceData(null);}}
+    onCancel={onBack}
   />;
-  if(view==='detail') return (
+  if(detailId) return (
     <LeadDetail
-      leadId={selectedId}
-      onBack={()=>{setView('list');setSelectedId(null);loadLeads();}}
-      onConverted={()=>{setView('list');setSelectedId(null);loadLeads();}}
+      leadId={detailId}
+      onBack={onBack}
+      onConverted={onBack}
       onNavigate={onNavigate}
-      onCreateFromReference={(refData)=>{
-        setSelectedId(null);
-        setReferenceData(refData);
-        setView('new');
-      }}
+      onCreateFromReference={(refData)=>onNavigate('leads',{mode:'new',referenceData:refData,label:'New lead'})}
     />
   );
 
@@ -4665,7 +4647,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
           <option value="">All sources</option>
           {leadSources.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
-        <button className="btn primary" onClick={()=>setView('new')}>+ New lead</button>
+        <button className="btn primary" onClick={()=>onNavigate('leads',{mode:'new',label:'New lead'})}>+ New lead</button>
         <button className="btn" onClick={()=>setShowRefModal(true)}>📋 From reference</button>
       </div>
 
@@ -4693,7 +4675,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
           <div style={{fontSize:48,marginBottom:12}}>📋</div>
           <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>{search||stageFilter||typeFilter||followUpFilter?'No leads found':'No leads yet'}</div>
           <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:16}}>{search||stageFilter?'Try adjusting your filters':'Add your first lead to get started'}</div>
-          {!search&&!stageFilter&&<button className="btn primary" onClick={()=>setView('new')}>+ Add first lead</button>}
+          {!search&&!stageFilter&&<button className="btn primary" onClick={()=>onNavigate('leads',{mode:'new',label:'New lead'})}>+ Add first lead</button>}
         </div>
       ) : (
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -4708,7 +4690,7 @@ function LeadsModule({onNavigate, initialLeadId, onConsumed}) {
                 style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer',opacity:isLost?.6:1,transition:'border-color .15s'}}
                 onMouseEnter={e=>e.currentTarget.style.borderColor='var(--grey-200)'}
                 onMouseLeave={e=>e.currentTarget.style.borderColor='var(--grey-100)'}
-                onClick={()=>{setSelectedId(lead.lead_id);setView('detail');}}>
+                onClick={()=>onNavigate('leads',{leadId:lead.lead_id,label:((lead.first_name||'')+' '+(lead.last_name||'')).trim()||lead.ref_number||'Lead'})}>
                 <div style={{display:'grid',gridTemplateColumns:'6px 1fr auto auto',alignItems:'stretch'}}>
                   <div style={{background:uc.dot,borderRadius:'var(--radius-lg) 0 0 var(--radius-lg)'}}/>
                   <div style={{padding:'14px 16px'}}>
@@ -5201,11 +5183,6 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       {showWizard&&wizardCtx&&<QuoteGenerationWizard lead={wizardCtx.lead} leadSubEvents={[]} isRevision={wizardCtx.isRevision} isContinuation={!wizardCtx.isRevision} existingQuotationId={quot.quotation_id} originEvent={wizardCtx.origin||undefined} onComplete={async(newQ)=>{ setShowWizard(false); setWizardCtx(null); if(newQ&&newQ.quotation_id&&newQ.quotation_id!==quot.quotation_id){ onNavigate&&onNavigate('quotations',{quotId:newQ.quotation_id}); } else { await loadAll(); } }} onCancel={()=>{ setShowWizard(false); setWizardCtx(null); }}/>}
       {showConvert&&convertLead&&<ConvertLeadModal lead={convertLead} onConfirm={doConvertFromQuote} onCancel={()=>{setShowConvert(false);setConvertLead(null);}}/>}
 
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,fontSize:13}}>
-        <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'var(--pink)',fontSize:13,padding:0,fontFamily:'Inter,sans-serif'}}>← Quotations</button>
-        <span style={{color:'var(--grey-300)'}}>/</span>
-        <span style={{color:'var(--grey-800)',fontWeight:500}}>{quot.ref_number}</span>
-      </div>
 
       {/* Header */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
@@ -5353,13 +5330,13 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   );
 }
 
-function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
+function QuotationsModule({nav, onNavigate, onBack}) {
   const [quotes, setQuotes] = React.useState([]);
   const [cancelledEvents, setCancelledEvents] = React.useState({});
-  const [viewQuotId, setViewQuotId] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
+  const detailId = nav && nav.quotId; // stack-driven detail target
 
   const loadQuotes = React.useCallback(async () => {
     setLoading(true);
@@ -5370,9 +5347,9 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
     setLoading(false);
   },[]);
   React.useEffect(()=>{ loadQuotes(); },[loadQuotes]);
-  React.useEffect(()=>{ if(initialQuotId){ setViewQuotId(initialQuotId); onConsumed&&onConsumed(); } },[initialQuotId]);
+  React.useEffect(()=>{ if(!detailId) loadQuotes(); },[detailId]);
 
-  if(viewQuotId) return <QuotationDetail quotationId={viewQuotId} onBack={()=>{setViewQuotId(null);loadQuotes();}} onNavigate={onNavigate}/>;
+  if(detailId) return <QuotationDetail quotationId={detailId} onBack={onBack} onNavigate={onNavigate}/>;
 
   const filtered = quotes.filter(q=>{
     const s=search.toLowerCase();
@@ -5415,7 +5392,7 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
           {filtered.map(q=>{
             const sc=QUOT_STATUS_COLORS[q.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
             return (
-              <div key={q.quotation_id} onClick={()=>setViewQuotId(q.quotation_id)} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer',opacity:q.status==='superseded'?0.65:1}}
+              <div key={q.quotation_id} onClick={()=>onNavigate('quotations',{quotId:q.quotation_id,label:q.ref_number})} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer',opacity:q.status==='superseded'?0.65:1}}
                 onMouseEnter={ev=>ev.currentTarget.style.borderColor='var(--grey-200)'}
                 onMouseLeave={ev=>ev.currentTarget.style.borderColor='var(--grey-100)'}>
                 <div style={{display:'grid',gridTemplateColumns:'1fr auto auto',alignItems:'center',padding:'14px 16px',gap:12}}>
@@ -5444,13 +5421,12 @@ function QuotationsModule({initialQuotId, onConsumed, onNavigate}) {
 }
 
 // ── Invoices Module (Phase 3a) ────────────────────────────────────────────────
-function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
-  const [view, setView] = React.useState('list'); // list | detail
+function InvoicesModule({nav, onNavigate, onBack}) {
   const [invoices, setInvoices] = React.useState([]);
-  const [selectedId, setSelectedId] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [search, setSearch] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('');
+  const detailId = nav && nav.invoiceId; // stack-driven detail target
 
   const loadInvoices = React.useCallback(async () => {
     setLoading(true);
@@ -5459,7 +5435,7 @@ function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
     setLoading(false);
   },[]);
   React.useEffect(()=>{ loadInvoices(); },[loadInvoices]);
-  React.useEffect(()=>{ if(initialInvoiceId){ setSelectedId(initialInvoiceId); setView('detail'); onConsumed&&onConsumed(); } },[initialInvoiceId]);
+  React.useEffect(()=>{ if(!detailId) loadInvoices(); },[detailId]);
 
   const filtered = invoices.filter(i=>{
     const q=search.toLowerCase();
@@ -5471,7 +5447,7 @@ function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
   const sumReceived = invoices.reduce((s,i)=>s+(parseFloat(i.total_received)||0),0);
   const overdueCount = invoices.filter(i=>i.status==='overdue').length;
 
-  if(view==='detail') return <InvoiceDetail invoiceId={selectedId} onBack={()=>{setView('list');setSelectedId(null);loadInvoices();}} onNavigate={onNavigate}/>;
+  if(detailId) return <InvoiceDetail invoiceId={detailId} onBack={onBack} onNavigate={onNavigate}/>;
 
   return (
     <div>
@@ -5511,7 +5487,7 @@ function InvoicesModule({initialInvoiceId, onConsumed, onNavigate}) {
               <div key={inv.invoice_id} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer'}}
                 onMouseEnter={ev=>ev.currentTarget.style.borderColor='var(--grey-200)'}
                 onMouseLeave={ev=>ev.currentTarget.style.borderColor='var(--grey-100)'}
-                onClick={()=>{setSelectedId(inv.invoice_id);setView('detail');}}>
+                onClick={()=>onNavigate('invoices',{invoiceId:inv.invoice_id,label:inv.ref_number})}>
                 <div style={{display:'grid',gridTemplateColumns:'6px 1fr auto auto',alignItems:'stretch'}}>
                   <div style={{background:sc.dot,borderRadius:'var(--radius-lg) 0 0 var(--radius-lg)'}}></div>
                   <div style={{padding:'14px 16px'}}>
@@ -5845,10 +5821,6 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
 
   return (
     <div>
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16,fontSize:13}}>
-        <button className="btn sm" onClick={onBack}>← Invoices</button>
-      </div>
-
       {/* Header card */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
@@ -6361,10 +6333,9 @@ function EventQuickView({eventId, onClose, onNavigate}){
 }
 
 // ── Vendors Module (master data — modeled on Clients) ─────────────────────────
-function VendorsModule({onNavigate}){
-  const [view,setView]=React.useState('list');
-  const [selId,setSelId]=React.useState(null);
+function VendorsModule({nav, onNavigate, onBack}){
   const [vendors,setVendors]=React.useState([]);
+  const detailId = nav && nav.vendorId; // stack-driven detail target
   const [evs,setEvs]=React.useState([]);
   const [events,setEvents]=React.useState([]);
   const [loading,setLoading]=React.useState(true);
@@ -6390,6 +6361,7 @@ function VendorsModule({onNavigate}){
     setVendors(v||[]); setEvs(ev||[]); setEvents(e||[]); setLoading(false);
   },[]);
   React.useEffect(()=>{ load(); },[load]);
+  React.useEffect(()=>{ if(!detailId) load(); },[detailId]);
 
   const eMap={}; events.forEach(x=>{eMap[x.event_id]=x;});
   const catLabel=c=>{ const f=VENDOR_CATS.find(x=>x[0]===c); return f?f[1]:(c||'—'); };
@@ -6416,9 +6388,9 @@ function VendorsModule({onNavigate}){
     setSaving(false); if(err) return;
     setDupWarn(null); notify(editV?'Vendor updated.':'Vendor added.','success'); setShowForm(false); load();
   };
-  const openDupVendor=()=>{ const d=dupWarn; setShowForm(false); setDupWarn(null); if(d){ setSelId(d.vendor_id); setView('detail'); } };
+  const openDupVendor=()=>{ const d=dupWarn; setShowForm(false); setDupWarn(null); if(d){ onNavigate('vendors',{vendorId:d.vendor_id,label:d.name||'Vendor'}); } };
   const setStatus=async(v,st)=>{ if(st===v.status) return; const {error}=await runDb(supabase.from('vendors').update({status:st,updated_at:new Date().toISOString()}).eq('vendor_id',v.vendor_id),'update vendor status'); if(!error){ notify('Vendor status updated.','success'); load(); } };
-  const del=async v=>{ const used=evs.filter(x=>x.vendor_id===v.vendor_id).length; if(used>0){ notify('Cannot delete — this vendor is on '+used+' event'+(used>1?'s':'')+'. Set them Inactive instead.','error'); return; } if(!window.confirm('Delete (archive) '+v.name+'? Recoverable in the database.')) return; const {error}=await runDb(supabase.from('vendors').update({is_deleted:true,updated_at:new Date().toISOString()}).eq('vendor_id',v.vendor_id),'delete vendor'); if(!error){ notify('Vendor archived.','success'); setView('list'); setSelId(null); load(); } };
+  const del=async v=>{ const used=evs.filter(x=>x.vendor_id===v.vendor_id).length; if(used>0){ notify('Cannot delete — this vendor is on '+used+' event'+(used>1?'s':'')+'. Set them Inactive instead.','error'); return; } if(!window.confirm('Delete (archive) '+v.name+'? Recoverable in the database.')) return; const {error}=await runDb(supabase.from('vendors').update({is_deleted:true,updated_at:new Date().toISOString()}).eq('vendor_id',v.vendor_id),'delete vendor'); if(!error){ notify('Vendor archived.','success'); load(); onBack&&onBack(); } };
 
   const inr=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
   const formModal=(
@@ -6454,17 +6426,14 @@ function VendorsModule({onNavigate}){
     </div>
   );
 
-  if(view==='detail'&&selId){
-    const v=vendors.find(x=>x.vendor_id===selId);
-    if(!v) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>Vendor not found. <button className="btn sm" onClick={()=>{setView('list');setSelId(null);}}>← Back</button></div>;
+  if(detailId){
+    const v=vendors.find(x=>x.vendor_id===detailId);
+    if(!v) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>Vendor not found. <button className="btn sm" onClick={onBack}>← Back</button></div>;
     const eng=evs.filter(x=>x.vendor_id===v.vendor_id);
     const sc=stColor(v.status);
     return (
       <div>
         {showForm&&formModal}
-        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,fontSize:13}}>
-          <button onClick={()=>{setView('list');setSelId(null);load();}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--pink)',fontSize:13,padding:0}}>← Vendors</button><span style={{color:'var(--grey-300)'}}>/</span><span style={{color:'var(--grey-800)',fontWeight:500}}>{v.name}</span>
-        </div>
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
           <div>
             <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{v.name} {v.is_preferred&&<span title="Preferred" style={{color:'var(--orange)'}}>★</span>}</div>
@@ -6521,7 +6490,7 @@ function VendorsModule({onNavigate}){
        : filtered.length===0? <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:50,textAlign:'center',border:'1px solid var(--grey-100)',color:'var(--grey-400)'}}>No vendors. <button className="btn sm" onClick={openNew}>+ Add one</button></div>
        : <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}}>
           {filtered.map((v,i)=>{ const sc=stColor(v.status); const used=evs.filter(x=>x.vendor_id===v.vendor_id).length; return (
-            <div key={v.vendor_id} onClick={()=>{setSelId(v.vendor_id);setView('detail');}} style={{display:'grid',gridTemplateColumns:'40px 1fr 130px 1fr auto 20px',gap:12,alignItems:'center',padding:'12px 16px',borderTop:i>0?'1px solid var(--grey-100)':'none',cursor:'pointer',opacity:v.status==='inactive'?0.6:1}}>
+            <div key={v.vendor_id} onClick={()=>onNavigate('vendors',{vendorId:v.vendor_id,label:v.name})} style={{display:'grid',gridTemplateColumns:'40px 1fr 130px 1fr auto 20px',gap:12,alignItems:'center',padding:'12px 16px',borderTop:i>0?'1px solid var(--grey-100)':'none',cursor:'pointer',opacity:v.status==='inactive'?0.6:1}}>
               <div style={{width:36,height:36,borderRadius:'50%',background:'var(--pink-light)',color:'var(--pink)',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13}}>{(v.name||'?').slice(0,2).toUpperCase()}</div>
               <div><div style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{v.name} {v.is_preferred&&<span style={{color:'var(--orange)'}}>★</span>}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>{v.rating?('★ '+v.rating):''}{used>0?((v.rating?' · ':'')+used+' event'+(used>1?'s':'')):''}</div></div>
               <div><span style={{fontSize:11,padding:'2px 8px',borderRadius:12,background:'var(--blue-light)',color:'var(--blue)'}}>{catLabel(v.category)}</span></div>
@@ -7157,11 +7126,9 @@ function App() {
   const [navStack, setNavStack] = useState([{page:'dashboard', label:'Dashboard'}]);
   const current = navStack[navStack.length-1];
   const activePage = current.page;
-  // Legacy target shape kept for not-yet-converted modules (they read navTarget.<id>).
-  const navTarget = {page:current.page, eventId:current.opts&&current.opts.eventId, leadId:current.opts&&current.opts.leadId, invoiceId:current.opts&&current.opts.invoiceId, quotId:current.opts&&current.opts.quotId};
   const navigate = useCallback((page, opts={})=>{
     const o=opts||{};
-    const rest={}; ['eventId','leadId','invoiceId','quotId','mode','referenceEvent'].forEach(k=>{ if(o[k]!==undefined&&o[k]!==null) rest[k]=o[k]; });
+    const rest={}; ['eventId','leadId','invoiceId','quotId','clientId','vendorId','expenseId','mode','referenceEvent','referenceData'].forEach(k=>{ if(o[k]!==undefined&&o[k]!==null) rest[k]=o[k]; });
     const hasPayload=Object.keys(rest).length>0;
     const label=o.label||pageTitles[page]||page;
     setNavStack(st=>{
@@ -7263,13 +7230,13 @@ function App() {
           <NavBar stack={navStack} onBack={goBack} onJump={jumpTo}/>
           {activePage==='dashboard' && <Dashboard user={user} onNavigate={navigate}/>}
           {activePage==='settings' && <SettingsModule/>}
-          {activePage==='clients' && <ClientsModule/>}
+          {activePage==='clients' && <ClientsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='events' && <EventsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
-          {activePage==='leads' && <LeadsModule key={'leads:'+(navTarget.leadId||'')} onNavigate={navigate} initialLeadId={navTarget.leadId||null} onConsumed={()=>{}}/>}
-          {activePage==='invoices' && <InvoicesModule key={'inv:'+(navTarget.invoiceId||'')} onNavigate={navigate} initialInvoiceId={navTarget.invoiceId||null} onConsumed={()=>{}}/>}
-          {activePage==='quotations' && <QuotationsModule key={'quot:'+(navTarget.quotId||'')} onNavigate={navigate} initialQuotId={navTarget.quotId||null} onConsumed={()=>{}}/>}
+          {activePage==='leads' && <LeadsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
+          {activePage==='invoices' && <InvoicesModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
+          {activePage==='quotations' && <QuotationsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='expenses' && <ExpensesModule onNavigate={navigate}/>}
-          {activePage==='vendors' && <VendorsModule onNavigate={navigate}/>}
+          {activePage==='vendors' && <VendorsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='vendor-payments' && <VendorPaymentsModule onNavigate={navigate}/>}
           {activePage==='reports' && <ReportsModule onNavigate={navigate}/>}
           {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='invoices' && activePage!=='quotations' && activePage!=='expenses' && activePage!=='vendors' && activePage!=='vendor-payments' && activePage!=='reports' && <ComingSoon page={activePage}/>}
