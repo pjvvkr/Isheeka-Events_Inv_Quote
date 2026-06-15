@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>Your Event Requirements · Isheeka Events</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Cormorant+Garamond:ital@1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --pink:#E8185A;--rose:#A01044;--pink-light:#FCEAF1;--pink-mid:#EF93B4;
+    --gold:#B8893A;--gold-soft:#F0C674;
+    --ink:#2A2723;--muted:#6B6660;--faint:#9A938A;--line:#E5DDD2;--line2:#F1ECE4;
+    --bg:#F3EFE9;--card:#ffffff;--field:#FAF7F3;--green:#0F6E56;--red:#A32D2D;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:480px;margin:0 auto;padding:16px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 6px 22px rgba(0,0,0,.06);}
+  /* masthead — matches the PDF cover */
+  .mast{background:var(--rose);padding:20px 16px;text-align:center;}
+  .mast .name{font-family:'Great Vibes',cursive;color:#fff;font-size:34px;line-height:1;}
+  .mast .tag{font-family:'Cormorant Garamond',serif;font-style:italic;color:#F3C9D9;font-size:13px;margin-top:3px;}
+  .mast .since{font-family:'Great Vibes',cursive;color:var(--gold-soft);font-size:17px;margin-top:2px;}
+  .pad{padding:18px 18px 22px;}
+  h1{font-size:16px;font-weight:600;margin:0 0 2px;}
+  .sub{font-size:12px;color:var(--faint);margin-bottom:14px;}
+  label{display:block;font-size:11px;color:var(--faint);margin:10px 0 4px;}
+  input,select,textarea{width:100%;font-family:inherit;font-size:14px;color:var(--ink);background:var(--card);border:1.5px solid var(--line);border-radius:9px;padding:10px 11px;outline:none;}
+  input:focus,select:focus,textarea:focus{border-color:var(--pink-mid);}
+  textarea{resize:vertical;min-height:64px;}
+  .row{display:flex;gap:10px;}.row>div{flex:1;}
+  .gold-label{font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--gold);margin:14px 0 4px;}
+  .btn{display:block;width:100%;text-align:center;font-size:14px;font-weight:600;border-radius:11px;padding:12px;border:none;cursor:pointer;font-family:inherit;}
+  .btn.primary{background:var(--pink);color:#fff;}
+  .btn.green{background:var(--green);color:#fff;}
+  .btn.ghost{background:#fff;border:1.5px solid var(--line);color:var(--muted);}
+  .nav{display:flex;gap:10px;margin-top:18px;}
+  .nav .ghost{flex:1;}.nav .primary{flex:2;}
+  .stepper{display:flex;align-items:center;gap:5px;padding:13px 18px;border-bottom:1px solid var(--line2);}
+  .dot{width:20px;height:20px;border-radius:50%;font-size:11px;display:flex;align-items:center;justify-content:center;background:#F1ECE4;color:var(--faint);flex:none;}
+  .dot.done{background:var(--green);color:#fff;}.dot.active{background:var(--pink);color:#fff;}
+  .bar{flex:1;height:2px;background:var(--line);}.bar.fill{background:var(--pink);}.bar.done{background:var(--green);}
+  .chip{display:inline-flex;align-items:center;font-size:12px;padding:5px 11px;border-radius:20px;border:1px solid var(--line);background:#fff;color:var(--muted);cursor:pointer;user-select:none;}
+  .chip.on{background:var(--pink-light);color:var(--rose);border-color:var(--pink-mid);}
+  .chip.add{border-style:dashed;color:var(--rose);}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:5px 0;}
+  .subrow{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .subrow .nm{min-width:84px;font-size:12px;}
+  .subrow input{flex:1;}
+  .pinbox{display:flex;gap:8px;justify-content:center;margin:14px 0;}
+  .pinbox input{width:46px;height:54px;text-align:center;font-size:22px;font-weight:700;color:var(--rose);}
+  .note{font-size:11px;color:var(--faint);margin-top:10px;text-align:center;}
+  .link{color:var(--rose);cursor:pointer;text-decoration:underline;}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:13px;padding:10px 16px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50;}
+  .toast.show{opacity:1;}
+  .itemrow{display:flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:8px;padding:7px 10px;margin-bottom:6px;}
+  .itemrow.off{opacity:.72;}
+  .itemrow .idesc{flex:1;font-size:13px;}
+  .addbtn{font-size:12px;color:var(--rose);background:#fff;border:1px solid var(--pink-mid);border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit;}
+  .qty{display:inline-flex;align-items:center;gap:8px;}
+  .qty button{width:24px;height:24px;border:1px solid var(--line);background:#fff;border-radius:6px;color:var(--rose);font-size:14px;cursor:pointer;line-height:1;}
+  .qty .rm{color:var(--faint);border-color:var(--line);}
+  .save-hint{font-size:11px;color:var(--green);text-align:center;margin-top:8px;}
+  .err{color:var(--red);font-size:12px;margin-top:8px;text-align:center;}
+  .center{text-align:center;}
+  .spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--pink);border-radius:50%;animation:s 1s linear infinite;margin:30px auto;}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="mast">
+      <div class="name">Isheeka Events</div>
+      <div class="tag">Making Every Event Memorable</div>
+      <div class="since">Since 2017</div>
+    </div>
+    <div id="app"><div class="spin"></div></div>
+  </div>
+  <div class="note">Powered by Isheeka Events · Your details are saved automatically.</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const GATEWAY = "https://jlcssesetnxulnkbrmyp.supabase.co/functions/v1/rfq-gateway";
+const BUDGETS = ["Under ₹1 Lakh","₹1–3 Lakh","₹3–5 Lakh","₹5–10 Lakh","₹10–20 Lakh","₹20–30 Lakh","Above ₹30 Lakh","Not sure yet"];
+const SUBEVENT_SUGGEST = {
+  wedding:["Mehendi","Haldi","Sangeeth","Reception"],
+  "half saree":["Pooja","Reception"],
+  engagement:["Ceremony","Reception"],
+  birthday:["Main Function"],
+  default:["Main Function"]
+};
+const EVENT_TYPES = ["Wedding","Half Saree","Engagement","Birthday","Baby Shower","House Warming","Corporate","Other"];
+
+const $ = id => document.getElementById(id);
+const app = $('app');
+const token = new URLSearchParams(location.search).get('t') || '';
+let session = sessionStorage.getItem('rfq_sess_'+token) || null;
+let data = {};            // rfq fields
+let subEvents = [];       // [{name, planned_date}]
+let items = [];           // [{sub_event_name, description, quantity, source}]
+let catalog = [];         // [{sub_event_name, description, default_quantity}]
+let step = 1;
+
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+
+async function api(action, payload){
+  const r = await fetch(GATEWAY, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({action,token},payload||{}))});
+  let j={}; try{ j=await r.json(); }catch(e){}
+  return Object.assign({_http:r.status}, j);
+}
+
+// ---------- boot ----------
+(async function boot(){
+  if(!token){ app.innerHTML = msg("This link is missing its code. Please use the full link Isheeka shared with you."); return; }
+  if(session){ const ok = await loadRfq(); if(ok) return; session=null; sessionStorage.removeItem('rfq_sess_'+token); }
+  renderUnlock();
+})();
+
+function msg(text){ return '<div class="pad center"><p style="font-size:14px;color:var(--muted)">'+text+'</p></div>'; }
+
+// ---------- unlock ----------
+function renderUnlock(mode){
+  mode = mode || 'pin';
+  if(mode==='pin'){
+    app.innerHTML = '<div class="pad">'
+      + '<h1>Your Event Requirements</h1>'
+      + '<div class="sub">Enter the PIN Isheeka shared with you.</div>'
+      + '<div class="pinbox">'
+        + '<input id="p0" inputmode="numeric" maxlength="1"><input id="p1" inputmode="numeric" maxlength="1">'
+        + '<input id="p2" inputmode="numeric" maxlength="1"><input id="p3" inputmode="numeric" maxlength="1">'
+      + '</div>'
+      + '<button class="btn primary" id="pinGo">Continue →</button>'
+      + '<div class="err" id="uerr"></div>'
+      + '<div class="note">No PIN? <span class="link" id="toOtp">Email me a code instead</span></div>'
+      + '</div>';
+    const boxes=['p0','p1','p2','p3'].map($);
+    boxes.forEach((b,i)=>b.addEventListener('input',()=>{ if(b.value&&i<3)boxes[i+1].focus(); }));
+    boxes[0].focus();
+    $('pinGo').onclick = async ()=>{
+      const pin = boxes.map(b=>b.value).join('');
+      if(pin.length<4){ $('uerr').textContent='Enter the 4-digit PIN.'; return; }
+      $('pinGo').textContent='Checking…';
+      const r = await api('verify_pin',{pin});
+      if(r.ok && r.session){ session=r.session; sessionStorage.setItem('rfq_sess_'+token,session); data=r.rfq||{}; await loadRfq(); }
+      else { $('pinGo').textContent='Continue →'; $('uerr').textContent = r.error==='wrong_pin' ? ('Incorrect PIN'+(r.attempts_left!=null?(' · '+r.attempts_left+' tries left'):'')) : (r.error==='locked'?'Too many tries — please wait a few minutes.':(r.error==='link_expired'?'This link has expired. Please ask Isheeka for a new one.':'Could not verify. Please try again.')); }
+    };
+    $('toOtp').onclick = ()=>renderUnlock('otp');
+  } else {
+    app.innerHTML = '<div class="pad">'
+      + '<h1>Your Event Requirements</h1>'
+      + '<div class="sub">We\'ll email you a 6-digit code.</div>'
+      + '<label>Your email</label><input id="oem" type="email" placeholder="you@email.com">'
+      + '<button class="btn ghost" id="otpSend" style="margin-top:10px">Send code</button>'
+      + '<div id="otpStage" style="display:none"><label>Enter the 6-digit code</label><input id="ocode" inputmode="numeric" maxlength="6" placeholder="••••••"><button class="btn primary" id="otpGo" style="margin-top:10px">Verify →</button></div>'
+      + '<div class="err" id="uerr"></div>'
+      + '<div class="note"><span class="link" id="toPin">← Use a PIN instead</span></div>'
+      + '</div>';
+    $('toPin').onclick=()=>renderUnlock('pin');
+    $('otpSend').onclick = async ()=>{
+      const email=$('oem').value.trim(); if(!email){ $('uerr').textContent='Enter your email.'; return; }
+      $('otpSend').textContent='Sending…';
+      const r = await api('request_otp',{email});
+      $('otpSend').textContent='Resend code';
+      if(r.ok){ $('otpStage').style.display='block'; $('uerr').textContent=''; toast(r.stubbed?'Code generated (check function logs in test mode)':'Code sent to your email'); }
+      else { $('uerr').textContent = r.error==='email_mismatch'?'That email doesn\'t match this request.':(r.error==='rate_limited'?'Please wait a bit before requesting again.':'Could not send. Try again.'); }
+    };
+    $('otpGo') && ($('otpGo').onclick = async ()=>{
+      const email=$('oem').value.trim(), code=$('ocode').value.trim();
+      const r = await api('verify_otp',{email,code});
+      if(r.ok && r.session){ session=r.session; sessionStorage.setItem('rfq_sess_'+token,session); data=r.rfq||{}; await loadRfq(); }
+      else $('uerr').textContent = r.error==='wrong_code'?'Incorrect code.':(r.error==='code_expired'?'Code expired — send a new one.':'Could not verify.');
+    });
+    // delegate (otpGo created after first send)
+    app.addEventListener('click',e=>{ if(e.target&&e.target.id==='otpGo'){} });
+  }
+}
+
+// ---------- load + prefill ----------
+async function loadRfq(){
+  const r = await api('get_rfq',{session});
+  if(!(r.ok && r.rfq)){ return false; }
+  data = r.rfq;
+  subEvents = Array.isArray(data.sub_events)? data.sub_events.slice() : [];
+  items = Array.isArray(r.items)? r.items.map(it=>({sub_event_name:it.sub_event_name||'',description:it.description||'',quantity:Number(it.quantity)||1,source:it.source||'custom'})) : [];
+  catalog = Array.isArray(r.catalog)? r.catalog : [];
+  if(data.status==='submitted'||data.status==='converted'){ renderSubmitted(); return true; }
+  step=1; renderForm();
+  return true;
+}
+
+// ---------- stepper ----------
+function stepper(){
+  const s=step;
+  const d=(n)=>'<span class="dot '+(s>n?'done':(s===n?'active':''))+'">'+(s>n?'✓':n)+'</span>';
+  const b=(n)=>'<span class="bar '+(s>n?'done':(s===n?'fill':''))+'"></span>';
+  return '<div class="stepper">'+d(1)+b(1)+d(2)+b(2)+d(3)+b(3)+d(4)+'</div>';
+}
+
+// ---------- collect current step fields into `data` ----------
+function collect(){
+  if(step===1){
+    data.contact_name=$('f_name').value.trim();
+    data.contact_phone=$('f_phone').value.trim();
+    data.contact_email=$('f_email').value.trim();
+    data.secondary_contact_name=$('f_sname').value.trim();
+    data.secondary_contact_phone=$('f_sphone').value.trim();
+  } else if(step===2){
+    data.event_type=$('f_type').value;
+    data.event_date=$('f_date').value||null;
+    data.location=$('f_venue').value.trim();
+    data.city=$('f_city').value.trim();
+    data.guest_count=$('f_guests').value?parseInt($('f_guests').value,10):null;
+    data.budget_range=$('f_budget').value;
+    data.notes=$('f_notes').value.trim();
+    // sub-event dates already kept in subEvents via inputs
+    data.sub_events=subEvents;
+  }
+}
+
+async function save(silent, sendItems){
+  collect();
+  const fields={
+    contact_name:data.contact_name, contact_phone:data.contact_phone,
+    secondary_contact_name:data.secondary_contact_name, secondary_contact_phone:data.secondary_contact_phone,
+    event_type:data.event_type, event_date:data.event_date, location:data.location, city:data.city,
+    guest_count:data.guest_count, budget_range:data.budget_range, notes:data.notes,
+    sub_events:data.sub_events
+  };
+  const payload={session,fields};
+  if(sendItems) payload.items=items;   // only replace items when we're on the items step (avoids wiping on step 1–2 saves)
+  const r=await api('save_rfq',payload);
+  if(!silent){ if(r.ok) toast('Saved'); else if(r._http===401){ toast('Session expired — please re-enter your PIN'); session=null; renderUnlock(); } else toast('Could not save'); }
+  return r.ok;
+}
+
+// ---------- form ----------
+function renderForm(){
+  app.innerHTML = stepper() + '<div class="pad" id="stepbody"></div>';
+  if(step===1) renderStep1();
+  else if(step===2) renderStep2();
+  else if(step===3) renderStep3();
+  else renderStep4();
+}
+
+function renderStep1(){
+  $('stepbody').innerHTML =
+    '<h1>Your details</h1><div class="sub">We\'ve pre-filled what we have — please correct anything.</div>'
+    + '<label>Full name</label><input id="f_name" value="'+esc(data.contact_name)+'">'
+    + '<label>Phone</label><input id="f_phone" value="'+esc(data.contact_phone)+'">'
+    + '<label>Email (optional)</label><input id="f_email" type="email" value="'+esc(data.contact_email)+'">'
+    + '<div class="gold-label">SECONDARY CONTACT (optional)</div>'
+    + '<div class="row"><div><label>Name</label><input id="f_sname" value="'+esc(data.secondary_contact_name)+'"></div>'
+    + '<div><label>Phone</label><input id="f_sphone" value="'+esc(data.secondary_contact_phone)+'"></div></div>'
+    + '<div class="nav"><button class="btn primary" id="next1">Next →</button></div>'
+    + '<div class="save-hint">✓ Saved automatically — you can close and resume from your link</div>';
+  $('next1').onclick=async()=>{ await save(true); step=2; renderForm(); };
+}
+
+function renderStep2(){
+  const type=(data.event_type||'').toLowerCase();
+  const sugg=SUBEVENT_SUGGEST[type]||SUBEVENT_SUGGEST.default;
+  $('stepbody').innerHTML =
+    '<h1>Event details</h1>'
+    + '<label>Main event</label><select id="f_type">'+EVENT_TYPES.map(t=>'<option '+(data.event_type===t?'selected':'')+'>'+t+'</option>').join('')+'</select>'
+    + '<label>Planned date (main event)</label><input id="f_date" type="date" value="'+esc(data.event_date)+'">'
+    + '<label>Functions &amp; their planned dates</label><div class="chips" id="chips"></div>'
+    + '<div id="subdates"></div>'
+    + '<div class="row"><div><label>Venue</label><input id="f_venue" value="'+esc(data.location)+'"></div>'
+    + '<div><label>City</label><input id="f_city" value="'+esc(data.city||'Hyderabad')+'"></div></div>'
+    + '<div class="row"><div><label>Guests</label><input id="f_guests" inputmode="numeric" value="'+esc(data.guest_count)+'"></div>'
+    + '<div><label>Approx. budget</label><select id="f_budget">'+['<option value="">Select…</option>'].concat(BUDGETS.map(b=>'<option '+(data.budget_range===b?'selected':'')+'>'+b+'</option>')).join('')+'</select></div></div>'
+    + '<label>Notes (optional)</label><textarea id="f_notes" placeholder="Anything you\'d like us to know">'+esc(data.notes)+'</textarea>'
+    + '<div class="nav"><button class="btn ghost" id="back2">← Back</button><button class="btn primary" id="next2">Next →</button></div>'
+    + '<div class="save-hint">✓ Saved automatically</div>';
+  renderChips(sugg);
+  $('f_type').onchange=()=>{ const t=$('f_type').value.toLowerCase(); renderChips(SUBEVENT_SUGGEST[t]||SUBEVENT_SUGGEST.default); };
+  $('back2').onclick=async()=>{ await save(true); step=1; renderForm(); };
+  $('next2').onclick=async()=>{ collect(); if(!subEvents.length){ toast('Pick at least one function'); return; } await save(true); step=3; renderForm(); };
+}
+
+function renderChips(sugg){
+  const have=new Set(subEvents.map(s=>s.name.toLowerCase()));
+  const all=[...new Set(sugg.concat(subEvents.map(s=>s.name)))];
+  $('chips').innerHTML = all.map(n=>'<span class="chip '+(have.has(n.toLowerCase())?'on':'')+'" data-n="'+esc(n)+'">'+esc(n)+(have.has(n.toLowerCase())?' ✓':'')+'</span>').join('')
+    + '<span class="chip add" id="addChip">+ add</span>';
+  $('chips').querySelectorAll('.chip[data-n]').forEach(c=>c.onclick=()=>toggleSub(c.getAttribute('data-n')));
+  $('addChip').onclick=()=>{ const n=prompt('Function name (e.g. Pellikoduku)'); if(n&&n.trim()){ subEvents.push({name:n.trim(),planned_date:null}); renderChips(sugg); renderSubDates(); } };
+  renderSubDates();
+}
+function toggleSub(name){
+  const i=subEvents.findIndex(s=>s.name.toLowerCase()===name.toLowerCase());
+  if(i>=0) subEvents.splice(i,1); else subEvents.push({name,planned_date:null});
+  const t=($('f_type').value||'').toLowerCase(); renderChips(SUBEVENT_SUGGEST[t]||SUBEVENT_SUGGEST.default);
+}
+function renderSubDates(){
+  $('subdates').innerHTML = subEvents.map((s,i)=>
+    '<div class="subrow"><span class="nm">'+esc(s.name)+'</span><input type="date" data-i="'+i+'" value="'+esc(s.planned_date)+'"></div>').join('');
+  $('subdates').querySelectorAll('input[data-i]').forEach(inp=>inp.onchange=()=>{ subEvents[+inp.getAttribute('data-i')].planned_date=inp.value||null; });
+}
+
+// ---------- step 3: requirements (items) grouped by chosen function ----------
+function itemRow(se, desc){
+  const it=items.find(x=>x.sub_event_name===se && x.description===desc);
+  const right = it
+    ? '<span class="qty"><button data-act="dec" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">−</button><b>'+it.quantity+'</b><button data-act="inc" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">+</button><button class="rm" data-act="rm" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">✕</button></span>'
+    : '<button class="addbtn" data-act="add" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">+ Add</button>';
+  return '<div class="itemrow'+(it?'':' off')+'"><span class="idesc">'+esc(desc)+'</span>'+right+'</div>';
+}
+function renderStep3(){
+  if(!subEvents.length){
+    $('stepbody').innerHTML='<h1>Your requirements</h1><div class="sub">Go back and pick at least one function first.</div><div class="nav"><button class="btn ghost" id="b3">← Back</button></div>';
+    $('b3').onclick=()=>{step=2;renderForm();}; return;
+  }
+  let html='<h1>Your requirements</h1><div class="sub">Pick what you\'d like for each function. No prices — we\'ll quote these.</div>';
+  subEvents.forEach(se=>{
+    const matches=catalog.filter(c=>(c.sub_event_name||'').toLowerCase().trim()===se.name.toLowerCase().trim());
+    const customs=items.filter(it=>it.sub_event_name===se.name && !matches.some(m=>m.description===it.description));
+    const d=se.planned_date?(' · '+fmtD(se.planned_date)):'';
+    html+='<div class="gold-label">'+esc(se.name.toUpperCase())+d+'</div>';
+    matches.forEach(c=>{ html+=itemRow(se.name,c.description); });
+    customs.forEach(it=>{ html+=itemRow(se.name,it.description); });
+    if(!matches.length && !customs.length) html+='<div class="sub" style="margin:2px 0 6px">No preset items — add your own below.</div>';
+    html+='<div class="chip add addcustom" data-se="'+esc(se.name)+'">+ add your own item</div>';
+  });
+  html+='<div class="nav"><button class="btn ghost" id="back3">← Back</button><button class="btn primary" id="next3">Review →</button></div><div class="save-hint">✓ Saved automatically</div>';
+  $('stepbody').innerHTML=html;
+  $('back3').onclick=async()=>{ await save(true,true); step=2; renderForm(); };
+  $('next3').onclick=async()=>{ await save(true,true); step=4; renderForm(); };
+  $('stepbody').querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{
+    const se=b.getAttribute('data-se'), d=b.getAttribute('data-d'), act=b.getAttribute('data-act');
+    const idx=items.findIndex(x=>x.sub_event_name===se && x.description===d);
+    if(act==='add') items.push({sub_event_name:se,description:d,quantity:1,source:catalog.some(c=>c.sub_event_name===se&&c.description===d)?'catalog':'custom'});
+    else if(act==='inc' && idx>=0) items[idx].quantity++;
+    else if(act==='dec' && idx>=0) items[idx].quantity=Math.max(1,items[idx].quantity-1);
+    else if(act==='rm' && idx>=0) items.splice(idx,1);
+    renderStep3(); save(true,true);
+  });
+  $('stepbody').querySelectorAll('.addcustom').forEach(b=>b.onclick=()=>{
+    const se=b.getAttribute('data-se'); const d=prompt('Describe the item for '+se);
+    if(d&&d.trim()){ items.push({sub_event_name:se,description:d.trim(),quantity:1,source:'custom'}); renderStep3(); save(true,true); }
+  });
+}
+
+// ---------- step 4: review & submit ----------
+function renderStep4(){
+  collect();
+  let body='<h1>Review &amp; submit</h1>';
+  body+='<div class="sub">'+esc(data.event_type||'Event')+' · '+esc(data.budget_range||'—')+(data.guest_count?(' · '+data.guest_count+' guests'):'')+'</div>';
+  body+='<div style="font-size:12px;color:var(--muted);margin-bottom:6px">'+esc([data.location,data.city].filter(Boolean).join(', '))+'</div>';
+  body+='<div style="font-size:11px;color:var(--muted);background:var(--field);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
+    + subEvents.map(s=>esc(s.name)+(s.planned_date?(' '+fmtD(s.planned_date)):'')).join(' · ') + '</div>';
+  body+='<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Contacts: '+esc(data.contact_name||'')+(data.secondary_contact_name?(' · '+esc(data.secondary_contact_name)):'')+'</div>';
+  // items grouped
+  body+='<div style="background:var(--field);border-radius:10px;padding:10px 12px;font-size:13px">';
+  if(!items.length) body+='<div class="sub">No items added.</div>';
+  subEvents.forEach(se=>{
+    const its=items.filter(it=>it.sub_event_name===se.name);
+    if(!its.length) return;
+    body+='<div class="gold-label" style="margin-top:6px">'+esc(se.name.toUpperCase())+'</div>';
+    its.forEach(it=>{ body+='<div style="display:flex;justify-content:space-between"><span>'+esc(it.description)+'</span><span style="color:var(--muted)">×'+it.quantity+'</span></div>'; });
+  });
+  body+='</div>';
+  body+='<div class="note">Isheeka Events will review and send your quote.</div>';
+  body+='<div class="nav"><button class="btn ghost" id="back4">← Back</button><button class="btn green" id="submitBtn">Submit my requirements ✓</button></div>';
+  body+='<div class="err" id="serr"></div>';
+  $('stepbody').innerHTML=body;
+  $('back4').onclick=()=>{ step=3; renderForm(); };
+  $('submitBtn').onclick=async()=>{
+    $('submitBtn').textContent='Submitting…';
+    await save(true,true);
+    const r=await api('submit_rfq',{session});
+    if(r.ok) renderSubmitted();
+    else { $('submitBtn').textContent='Submit my requirements ✓'; $('serr').textContent = r._http===401?'Session expired — re-enter your PIN.':'Could not submit. Please try again.'; }
+  };
+}
+
+function fmtD(s){ try{ const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }catch(e){ return s; } }
+
+function renderSubmitted(){
+  app.innerHTML='<div class="pad center"><h1>Thank you!</h1><div class="sub">Your requirements have been submitted. Isheeka Events will review them and send your quote shortly.</div><p style="font-size:34px">💐</p></div>';
+}
+
+function esc(v){ return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+</script>
+</body>
+</html>

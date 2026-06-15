@@ -215,6 +215,7 @@ const NAV = [
   {section:null,items:[{id:'dashboard',label:'Dashboard',icon:'🏠',roles:['admin','manager','staff']}]},
   {section:'SALES',items:[
     {id:'leads',label:'Leads',icon:'🎯',roles:['admin','manager','staff']},
+    {id:'rfqs',label:'RFQs',icon:'📝',roles:['admin','manager','staff']},
     {id:'clients',label:'Clients',icon:'👥',roles:['admin','manager','staff']}
   ]},
   {section:'OPERATIONS',items:[
@@ -7523,15 +7524,197 @@ function App() {
           {activePage==='clients' && <ClientsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='events' && <EventsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='leads' && <LeadsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
+          {activePage==='rfqs' && <RFQsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='invoices' && <InvoicesModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='quotations' && <QuotationsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='expenses' && <ExpensesModule onNavigate={navigate}/>}
           {activePage==='vendors' && <VendorsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
           {activePage==='vendor-payments' && <VendorPaymentsModule onNavigate={navigate}/>}
           {activePage==='reports' && <ReportsModule onNavigate={navigate}/>}
-          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='invoices' && activePage!=='quotations' && activePage!=='expenses' && activePage!=='vendors' && activePage!=='vendor-payments' && activePage!=='reports' && <ComingSoon page={activePage}/>}
+          {activePage!=='dashboard' && activePage!=='settings' && activePage!=='clients' && activePage!=='events' && activePage!=='leads' && activePage!=='rfqs' && activePage!=='invoices' && activePage!=='quotations' && activePage!=='expenses' && activePage!=='vendors' && activePage!=='vendor-payments' && activePage!=='reports' && <ComingSoon page={activePage}/>}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ── RFQs module (M3 · staff side) ─────────────────────────────────────────────
+const RFQ_STATUS = {
+  draft:{l:'Draft',bg:'var(--grey-100)',c:'var(--grey-400)'},
+  sent:{l:'Sent',bg:'var(--blue-light)',c:'var(--blue)'},
+  in_progress:{l:'In progress',bg:'#FAEEDA',c:'#854F0B'},
+  submitted:{l:'Submitted',bg:'#FAEEDA',c:'#854F0B'},
+  changes_requested:{l:'Changes requested',bg:'#FCEBEB',c:'#A32D2D'},
+  approved:{l:'Approved',bg:'var(--green-light)',c:'var(--green)'},
+  converted:{l:'Converted',bg:'var(--pink-light)',c:'var(--pink)'},
+  withdrawn:{l:'Withdrawn',bg:'var(--grey-100)',c:'var(--grey-400)'},
+  expired:{l:'Expired',bg:'var(--grey-100)',c:'var(--grey-400)'},
+};
+function waLink(phone, text){ const d=(phone||'').replace(/\D/g,''); const n=d.length>=10?(d.length===10?'91'+d:d):''; return 'https://wa.me/'+n+'?text='+encodeURIComponent(text); }
+
+function RFQShareCard({created, contact, onDone}){
+  const link = rfqLink(created.token);
+  const msg = 'Hello'+(contact&&contact.name?(' '+contact.name):'')+',\n\nPlease share your event requirements with Isheeka Events here:\n'+link+(created.pin?('\n\nYour access PIN: '+created.pin):'')+'\n\nThank you!';
+  const copy=(t,what)=>{ try{ navigator.clipboard.writeText(t); notify(what+' copied.','success'); }catch(e){ notify('Copy failed — select and copy manually.','error'); } };
+  return (
+    <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'18px 20px',maxWidth:560}}>
+      <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>RFQ {created.ref_number} created — share it</div>
+      <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:14}}>Send the link{created.pin?' + PIN':''} to the client. They open it, verify, and fill their requirements.</div>
+      <div style={{display:'flex',gap:8,alignItems:'center',background:'var(--grey-50)',border:'1px solid var(--grey-100)',borderRadius:'var(--radius-md)',padding:'9px 12px',marginBottom:8}}>
+        <span style={{flex:1,fontSize:12,color:'var(--grey-600)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{link}</span>
+        <button className="btn sm" onClick={()=>copy(link,'Link')}>Copy link</button>
+      </div>
+      {created.pin && <div style={{display:'flex',gap:10,alignItems:'center',marginBottom:12}}>
+        <span style={{fontSize:12,color:'var(--grey-400)'}}>PIN</span>
+        <span style={{fontSize:18,fontWeight:700,letterSpacing:3,color:'var(--pink)',background:'var(--pink-light)',borderRadius:6,padding:'3px 14px'}}>{created.pin}</span>
+        <button className="btn sm" onClick={()=>copy(created.pin,'PIN')}>Copy PIN</button>
+      </div>}
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <a className="btn sm" style={{background:'var(--green-light)',color:'var(--green)',borderColor:'#86EFAC',textDecoration:'none'}} href={waLink(contact&&contact.phone, msg)} target="_blank" rel="noreferrer">💬 Share on WhatsApp</a>
+        <button className="btn sm primary" onClick={onDone}>Done</button>
+      </div>
+      <div style={{fontSize:11,color:'var(--grey-400)',marginTop:12}}>⚠ The PIN is shown once. If the client loses it, open the RFQ and use “Regenerate link &amp; PIN”.</div>
+    </div>
+  );
+}
+
+function NewRFQForm({prefill, onCreated, onCancel}){
+  const [f,setF]=React.useState({
+    contact_name:prefill?.contact_name||'', contact_phone:prefill?.contact_phone||'', contact_email:prefill?.contact_email||'',
+    secondary_contact_name:prefill?.secondary_contact_name||'', secondary_contact_phone:prefill?.secondary_contact_phone||'',
+    event_type:prefill?.event_type||'', location:prefill?.location||'', city:prefill?.city||'Hyderabad', access_mode:'pin',
+  });
+  const [saving,setSaving]=React.useState(false);
+  const set=(k,v)=>setF(s=>({...s,[k]:v}));
+  const submit=async()=>{
+    if(!f.contact_name.trim()){ notify('Enter the client name.','error'); return; }
+    if(f.access_mode==='email_otp' && !f.contact_email.trim()){ notify('Email is required for the email-OTP option.','error'); return; }
+    setSaving(true);
+    try{
+      const created=await createRfq({...f, client_id:prefill?.client_id||null, lead_id:prefill?.lead_id||null});
+      onCreated(created,{name:f.contact_name,phone:f.contact_phone});
+    }catch(e){ /* runDb already toasted */ }
+    setSaving(false);
+  };
+  return (
+    <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'18px 20px',maxWidth:600}}>
+      <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:2}}>New RFQ</div>
+      <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:14}}>{prefill?.client_id?'Linked to this client.':prefill?.lead_id?'Linked to this lead.':'A link the client opens to share their event requirements.'}</div>
+      <div className="form-grid">
+        <div><label className="field-label">Client name *</label><input className="field-input" value={f.contact_name} onChange={e=>set('contact_name',e.target.value)}/></div>
+        <div><label className="field-label">Phone</label><input className="field-input" value={f.contact_phone} onChange={e=>set('contact_phone',e.target.value)}/></div>
+        <div><label className="field-label">Email{f.access_mode==='email_otp'?' *':''}</label><input className="field-input" value={f.contact_email} onChange={e=>set('contact_email',e.target.value)}/></div>
+        <div><label className="field-label">Event type</label><input className="field-input" value={f.event_type} onChange={e=>set('event_type',e.target.value)} placeholder="e.g. Wedding"/></div>
+        <div><label className="field-label">Venue</label><input className="field-input" value={f.location} onChange={e=>set('location',e.target.value)}/></div>
+        <div><label className="field-label">City</label><input className="field-input" value={f.city} onChange={e=>set('city',e.target.value)}/></div>
+        <div><label className="field-label">Access</label><select className="field-input" value={f.access_mode} onChange={e=>set('access_mode',e.target.value)}><option value="pin">Shared PIN (no email needed)</option><option value="email_otp">Email OTP</option></select></div>
+      </div>
+      <div style={{display:'flex',gap:8,marginTop:16}}>
+        <button className="btn" onClick={onCancel}>Cancel</button>
+        <button className="btn primary" disabled={saving} onClick={submit}>{saving?'Creating…':'Create RFQ & get link'}</button>
+      </div>
+    </div>
+  );
+}
+
+function RFQsModule({nav, onNavigate, onBack}){
+  const [rfqs,setRfqs]=React.useState([]);
+  const [loading,setLoading]=React.useState(true);
+  const [statusFilter,setStatusFilter]=React.useState('');
+  const [created,setCreated]=React.useState(null);   // {ref_number, token, pin, contact}
+  const detailId = nav && nav.rfqId;
+  const isNew = !!(nav && nav.mode==='new');
+
+  const load=async()=>{ setLoading(true); const {data}=await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at').eq('is_deleted',false).order('created_at',{ascending:false}); setRfqs(data||[]); setLoading(false); };
+  React.useEffect(()=>{ if(!detailId && !isNew && !created) load(); },[detailId,isNew,created]);
+
+  if(created){ return <div><div style={{marginBottom:12}}><button className="btn sm" onClick={()=>{setCreated(null);}}>← All RFQs</button></div><RFQShareCard created={created} contact={created.contact} onDone={()=>{setCreated(null);}}/></div>; }
+  if(isNew){ return <div><div style={{marginBottom:12}}><button className="btn sm" onClick={onBack}>← Back</button></div><NewRFQForm prefill={nav&&nav.prefill} onCreated={(c,contact)=>{setCreated({...c,contact});}} onCancel={onBack}/></div>; }
+  if(detailId){ return <RFQDetail rfqId={detailId} onBack={onBack} onShare={(c,contact)=>setCreated({...c,contact})}/>; }
+
+  const needsReview=rfqs.filter(r=>r.status==='submitted').length;
+  const list=rfqs.filter(r=>!statusFilter||r.status===statusFilter);
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16,flexWrap:'wrap',gap:10}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:600,color:'var(--grey-800)'}}>RFQs</div>
+          {needsReview>0 && <div style={{fontSize:12,color:'var(--pink)',fontWeight:500,marginTop:2}}>⏳ {needsReview} submitted · awaiting review</div>}
+        </div>
+        <button className="btn primary" onClick={()=>onNavigate('rfqs',{mode:'new',label:'New RFQ'})}>+ New RFQ</button>
+      </div>
+      <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
+        <select className="field-input" style={{width:200,fontSize:13}} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          {Object.keys(RFQ_STATUS).map(s=><option key={s} value={s}>{RFQ_STATUS[s].l}</option>)}
+        </select>
+      </div>
+      {loading ? <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>
+        : list.length===0 ? <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:40,textAlign:'center',color:'var(--grey-400)'}}>No RFQs yet. Click “+ New RFQ” to send a client their requirements link.</div>
+        : <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}}>
+            {list.map((r,i)=>{ const sc=RFQ_STATUS[r.status]||RFQ_STATUS.sent; return (
+              <div key={r.rfq_id} onClick={()=>onNavigate('rfqs',{rfqId:r.rfq_id,label:r.ref_number})} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 16px',borderTop:i>0?'1px solid var(--grey-100)':'none',cursor:'pointer'}}>
+                <span style={{fontSize:13,fontWeight:500,color:'var(--pink)',width:120}}>{r.ref_number}</span>
+                <span style={{flex:1,fontSize:13,color:'var(--grey-800)'}}>{r.contact_name||'—'}{r.event_type?(' · '+r.event_type):''}</span>
+                <span style={{fontSize:11,padding:'2px 10px',borderRadius:20,fontWeight:500,background:sc.bg,color:sc.c}}>{sc.l}</span>
+              </div>
+            );})}
+          </div>}
+    </div>
+  );
+}
+
+function RFQDetail({rfqId, onBack, onShare}){
+  const [r,setR]=React.useState(null);
+  const [items,setItems]=React.useState([]);
+  const [loading,setLoading]=React.useState(true);
+  const load=async()=>{ setLoading(true);
+    const [{data:rfq},{data:its}]=await Promise.all([
+      supabase.from('rfqs').select('*').eq('rfq_id',rfqId).single(),
+      supabase.from('rfq_items').select('*').eq('rfq_id',rfqId).eq('is_deleted',false).order('sort_order'),
+    ]);
+    setR(rfq||null); setItems(its||[]); setLoading(false);
+  };
+  React.useEffect(()=>{ load(); },[rfqId]);
+  const regenerate=async()=>{
+    if(!window.confirm('Generate a NEW link & PIN? The previous link will stop working.')) return;
+    const token=genRfqToken(), pin=(r.access_mode==='email_otp')?null:genRfqPin();
+    const {error}=await runDb(supabase.from('rfqs').update({token_hash:await sha256Hex(token),access_pin_hash:pin?await sha256Hex(pin):null,token_expires_at:new Date(Date.now()+21*24*3600*1000).toISOString(),updated_at:new Date().toISOString()}).eq('rfq_id',rfqId),'regenerate link');
+    if(error) return;
+    onShare({ref_number:r.ref_number,token,pin},{name:r.contact_name,phone:r.contact_phone});
+  };
+  if(loading) return <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>;
+  if(!r) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>RFQ not found.</div>;
+  const sc=RFQ_STATUS[r.status]||RFQ_STATUS.sent;
+  const subs=Array.isArray(r.sub_events)?r.sub_events:[];
+  return (
+    <div>
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'18px 22px',marginBottom:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{r.ref_number} <span style={{fontSize:11,padding:'2px 10px',borderRadius:20,fontWeight:500,background:sc.bg,color:sc.c,marginLeft:6}}>{sc.l}</span></div>
+            <div style={{fontSize:13,color:'var(--grey-400)',marginTop:3}}>{r.contact_name||'—'}{r.contact_phone?(' · '+r.contact_phone):''}{r.event_type?(' · '+r.event_type):''}{r.city?(' · '+r.city):''}</div>
+            {(r.secondary_contact_name||r.secondary_contact_phone)&&<div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>2nd contact: {r.secondary_contact_name||''} {r.secondary_contact_phone||''}</div>}
+          </div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>
+            {/* Review / Approve / Request-changes arrive in CP4–CP5 */}
+          </div>
+        </div>
+        {subs.length>0&&<div style={{fontSize:12,color:'var(--grey-600)',marginTop:10,background:'var(--grey-50)',borderRadius:'var(--radius-sm)',padding:'8px 12px'}}>{subs.map(s=>s.name+(s.planned_date?(' '+fmtDate(s.planned_date,{day:'numeric',month:'short'})):'')).join(' · ')}</div>}
+      </div>
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px'}}>
+        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Requested items {items.length>0?('('+items.length+')'):''}</div>
+        {items.length===0?<div style={{fontSize:13,color:'var(--grey-400)'}}>Nothing submitted yet — the client hasn’t added items.</div>
+          :(()=>{ const groups={}; items.forEach(it=>{ const k=it.sub_event_name||'General'; (groups[k]=groups[k]||[]).push(it); }); return Object.keys(groups).map(k=>(
+            <div key={k} style={{marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:'var(--gold)',marginBottom:4}}>{k.toUpperCase()}</div>
+              {groups[k].map(it=>(<div key={it.rfq_item_id} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'3px 0'}}><span>{it.description}</span><span style={{color:'var(--grey-400)'}}>×{it.quantity}</span></div>))}
+            </div>
+          )); })()}
+        <div style={{fontSize:12,color:'var(--grey-400)',marginTop:8,borderTop:'1px solid var(--grey-100)',paddingTop:10}}>Review, approve and convert-to-quote actions are coming in the next update.</div>
+      </div>
+      <div style={{marginTop:14}}><button className="btn sm" onClick={onBack}>← All RFQs</button></div>
     </div>
   );
 }
@@ -8394,6 +8577,42 @@ async function getNextInvoiceRef() {
   const {data,error} = await supabase.rpc('next_counter',{p_type:'invoice',p_year:year,p_seed:1111});
   if(error||data==null){ notify("Couldn't generate an invoice number. Please try again.",'error'); throw error||new Error('counter failed'); }
   return 'I-'+year+'-'+String(data).padStart(4,'0');
+}
+
+// ── RFQ helpers (M3) ──────────────────────────────────────────────────────────
+async function getNextRfqRef(){
+  const year = new Date().getFullYear().toString().slice(-2);
+  const {data,error} = await supabase.rpc('next_counter',{p_type:'rfq',p_year:year,p_seed:1111});
+  if(error||data==null){ notify("Couldn't generate an RFQ number. Please try again.",'error'); throw error||new Error('counter failed'); }
+  return 'RFQ-'+year+'-'+data;
+}
+async function sha256Hex(s){ const b=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+function genRfqToken(){ const a=new Uint8Array(18); crypto.getRandomValues(a); return [...a].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+function genRfqPin(){ return String(Math.floor(1000+Math.random()*9000)); }
+function rfqLink(token){ try{ return new URL('rfq.html?t='+token, location.href).href; }catch(e){ return 'rfq.html?t='+token; } }
+// Create an RFQ + its access token/PIN. Returns {rfq_id, ref_number, token, pin}. Raw token/PIN are shown once; only hashes are stored.
+async function createRfq(opts={}){
+  const ref_number = await getNextRfqRef();
+  const token = genRfqToken();
+  const pin = (opts.access_mode==='email_otp') ? null : genRfqPin();
+  const uid = await _currentUid();
+  const row = {
+    ref_number, status:'sent',
+    client_id: opts.client_id||null, lead_id: opts.lead_id||null,
+    contact_name: opts.contact_name||null, contact_email: opts.contact_email||null, contact_phone: opts.contact_phone||null,
+    secondary_contact_name: opts.secondary_contact_name||null, secondary_contact_phone: opts.secondary_contact_phone||null,
+    event_type: opts.event_type||null, location: opts.location||null, city: opts.city||null,
+    access_mode: opts.access_mode||'pin',
+    access_pin_hash: pin? await sha256Hex(pin): null,
+    token_hash: await sha256Hex(token),
+    token_expires_at: new Date(Date.now()+21*24*3600*1000).toISOString(),
+    created_by: uid||null,
+    created_at:new Date().toISOString(), updated_at:new Date().toISOString(), is_deleted:false
+  };
+  const {data,error} = await runDb(supabase.from('rfqs').insert(row).select('rfq_id,ref_number').single(),'create RFQ');
+  if(error||!data) throw error||new Error('create rfq failed');
+  try{ await supabase.from('rfq_activity').insert({rfq_id:data.rfq_id,actor:uid||'staff',action:'created'}); }catch(e){}
+  return {rfq_id:data.rfq_id, ref_number:data.ref_number, token, pin};
 }
 
 // ── Invoice creation (Phase 2) ────────────────────────────────────────────────

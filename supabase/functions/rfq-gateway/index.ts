@@ -90,8 +90,10 @@ function publicRfq(r: Record<string, unknown>) {
   return {
     rfq_id: r.rfq_id, ref_number: r.ref_number, status: r.status,
     contact_name: r.contact_name, contact_email: r.contact_email, contact_phone: r.contact_phone,
-    event_type: r.event_type, event_date: r.event_date, location: r.location,
-    guest_count: r.guest_count, budget: r.budget, notes: r.notes,
+    secondary_contact_name: r.secondary_contact_name, secondary_contact_phone: r.secondary_contact_phone,
+    event_type: r.event_type, event_date: r.event_date, location: r.location, city: r.city,
+    guest_count: r.guest_count, budget: r.budget, budget_range: r.budget_range,
+    sub_events: r.sub_events, notes: r.notes,
     revision_number: r.revision_number,
   };
 }
@@ -195,11 +197,20 @@ Deno.serve(async (req) => {
         const { data: r } = await db.from("rfqs").select("*").eq("rfq_id", s.rfq_id).eq("is_deleted", false).maybeSingle();
         if (!r) return json({ error: "not_found" }, 404);
         const { data: items } = await db.from("rfq_items").select("*").eq("rfq_id", s.rfq_id).eq("is_deleted", false).order("sort_order");
-        // best-effort catalog from event templates for this event type (optional; M3 uses it more)
+        // catalog = template items for this RFQ's event type (grouped client-side by sub_event_name)
         let catalog: unknown[] = [];
         try {
-          const { data: tpl } = await db.from("event_templates").select("*").eq("is_deleted", false);
-          catalog = tpl ?? [];
+          const { data: tpls } = await db.from("event_templates")
+            .select("template_id,event_type").eq("is_deleted", false).eq("is_active", true);
+          let chosen = tpls ?? [];
+          const et = String(r.event_type || "").toLowerCase().trim();
+          if (et) { const m = chosen.filter((t: any) => String(t.event_type || "").toLowerCase().trim() === et); if (m.length) chosen = m; }
+          const ids = chosen.map((t: any) => t.template_id);
+          if (ids.length) {
+            const { data: tis } = await db.from("event_template_items")
+              .select("sub_event_name,description,default_quantity").in("template_id", ids).order("sort_order");
+            catalog = tis ?? [];
+          }
         } catch { /* templates optional */ }
         return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog });
       }
@@ -215,9 +226,11 @@ Deno.serve(async (req) => {
 
         const f = body.fields ?? {};
         const patch: Record<string, unknown> = { status: "in_progress" };
-        for (const k of ["contact_name", "contact_phone", "event_type", "event_date", "location", "guest_count", "budget", "notes"]) {
+        for (const k of ["contact_name", "contact_phone", "secondary_contact_name", "secondary_contact_phone",
+                         "event_type", "event_date", "location", "city", "guest_count", "budget", "budget_range", "notes"]) {
           if (k in f) patch[k] = f[k] === "" ? null : f[k];
         }
+        if ("sub_events" in f) patch.sub_events = f.sub_events ?? null; // jsonb [{name, planned_date}]
         await db.from("rfqs").update(patch).eq("rfq_id", s.rfq_id);
 
         if (Array.isArray(body.items)) {

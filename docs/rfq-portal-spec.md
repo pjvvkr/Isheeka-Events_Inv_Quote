@@ -199,9 +199,109 @@ Security note: a shared PIN lives as long as the link (vs. a 10-min OTP), so it'
 
 The static app deploys via GitHub Desktop as today. **Edge Functions deploy separately** (`supabase functions deploy rfq-gateway`, or paste into the Supabase dashboard's Functions editor). Secrets (`service_role`, email API key, session-signing secret) are set with `supabase secrets set` / in the dashboard — **never** in the repo. I'll provide exact commands; you run them once.
 
+**STATUS: ✅ DEPLOYED & VERIFIED LIVE (15 Jun 2026).** Migration run; `rfq-gateway` deployed via CLI (`--no-verify-jwt`) to project `jlcssesetnxulnkbrmyp`; secrets `SESSION_SECRET` + `ALLOWED_ORIGIN=*` set (Resend not yet configured → stub mode). Full loop tested with a seeded RFQ (token `isheeka-test-token-001`, PIN `4321`): ping → verify_pin → get_rfq → save_rfq → submit_rfq all succeeded; `rfq_activity` logged pin_verified/saved/submitted; items persisted. **Before go-live:** (1) add Resend key + `EMAIL_FROM` to enable real email OTP, (2) lock `ALLOWED_ORIGIN` to the GitHub Pages origin, (3) delete the test RFQ. Redeploy command: `supabase functions deploy rfq-gateway --no-verify-jwt --project-ref jlcssesetnxulnkbrmyp`.
+
 ### F.6 Decisions — RESOLVED (15 Jun 2026)
 
 1. **Email provider:** ✅ **Resend**, shared sender (`onboarding@resend.dev`) for now; switch to a branded/own-domain address before go-live. Wrapped in a swappable email adapter so changing provider later is trivial.
 2. **Access is dual-mode:** ✅ **`pin` (staff-shared) is the default**, **`email_otp` optional** when the client has/prefers email. Email is therefore never required to use an RFQ.
 3. **Posture:** ✅ holding to **token-hash + Edge-Function-only (service_role)**; RFQ tables stay authenticated-only with no anon access.
 4. **Windows (defaults, change anytime):** link validity **21 days**; OTP lifetime **10 min**; PIN valid for the link's life; **lock after 5** failed attempts on either.
+
+---
+
+## G. Milestone 3 — End-to-end MVP — *spec for approval, not yet built*
+
+**Goal:** the portal becomes real. A client opens their link, fills **"Your Event Requirements,"** and submits; staff review it in a new **RFQs** module and, on approval, the system **auto-creates the client (if new) + a draft quote with the exact items** — which then flows into the existing Quote → Event → Invoice pipeline. This is the largest milestone.
+
+### G.1 Two new surfaces
+
+1. **`rfq.html`** — a NEW standalone branded page on GitHub Pages (sibling to the app), the client-facing form. Holds no keys; talks only to `rfq-gateway`. Warm rose/champagne identity, mobile-first (works on the tablet hand-over and on a phone via the shared link).
+2. **RFQs module** — a new section inside the ERP (`isheeka-erp-v22.html`), under **Sales** near Leads. Staff create/track/review/approve RFQs here. Uses the normal authenticated Supabase client (RLS) like every other module.
+
+### G.2 Client flow (`rfq.html`)
+
+- **Branding (req 1):** the masthead mirrors the **full PDF cover header** — **"Isheeka Events" in Great Vibes** (script, rose), **"Making Every Event Memorable" in Cormorant Garamond italic** (rose), and **"Since 2017" in Great Vibes** (champagne gold) — all from Google Fonts so the page matches the PDF identity exactly. Warm rose/champagne palette throughout. (Optionally the "ie" logo mark above, as on the PDF/PWA.)
+- **Unlock screen:** branded header → "Enter your PIN" (default) or "Email me a code" (if `access_mode=email_otp`). Calls `verify_pin` / `request_otp`+`verify_otp` → session.
+- **Stepper (4 steps), autosaving each step via `save_rfq`:**
+  1. **Your details** — name, phone, email (pre-filled; editable) **+ a secondary contact (name + phone)** for the event (req 2). The secondary contact flows into the ERP so it can populate the lead/quote's alternative contact.
+  2. **Event details** — **main event** (type, e.g. Wedding) with its **Planned date**; **which sub-events apply** (Mehendi · Haldi · Sangeeth · Reception suggested as tappable chips from your templates, plus "+ add your own") — **and each selected sub-event gets its own Planned date** (req: per-function dates); **venue and city as separate fields** (req 3); guest count; **approximate budget as a dropdown of ranges** (req 4, see below); notes. The date fields are labelled **"Planned date"** (req). The chosen main + sub-events with their dates (ordered) are saved and drive Step 3 + the eventual quote/event structure.
+  3. **Your requirements (items)** — **one section per sub-event the client picked**; within each, the **catalog** (items from `event_templates` whose sub-event matches, else all items for the type) appears as add-able lines; client adjusts quantity, **adds custom lines**, removes. **No prices shown.** Items carry `sub_event_name` so the structure maps 1:1 into the quote.
+  4. **Review & submit** — full summary → **Submit** (`submit_rfq`) → branded thank-you ("Swathi will review and send your quote").
+- **Navigation, draft & resume (req 5):** the client can move **Back/Next freely** between steps; every step **autosaves** (status `in_progress`); they can **close and resume** from the same link + PIN/OTP, landing where they left off; they can **edit anything before Submit**. After Submit the form is **read-only** until staff approve or request changes.
+- **Approx-budget ranges (req 4):** Under ₹1 Lakh · ₹1–3 Lakh · ₹3–5 Lakh · ₹5–10 Lakh · ₹10–20 Lakh · ₹20–30 Lakh · Above ₹30 Lakh · "Not sure yet". Stored as `budget_range` (text); we can also keep a numeric lower-bound in `budget` for sorting/reports.
+- **Post-submit revision management** (client edits a *submitted* RFQ, list/compare/load-any-revision-as-final, dual e-sign log, item-lock to quote/invoice) — these are the richer features you called out earlier; they belong to **M4**. M3 delivers the back/forth + draft/resume + a basic staff "request changes" round-trip.
+
+### G.3 Staff RFQs module (in the ERP)
+
+- **List:** ref, client/contact, event type, date, **status chip** (draft/sent/in_progress/submitted/changes_requested/approved/converted), newest first; filter by status. A **"⏳ Needs review"** emphasis on `submitted`.
+- **+ New RFQ:** pick an **existing client** (recurring) or enter a new contact; event basics; choose access mode → **PIN auto-generated** (or email OTP). On save it mints the token and shows a **shareable link + PIN** with **Copy** and **WhatsApp** buttons. (Link = `rfq.html?t=<token>`.)
+- **RFQ detail / review:** shows submitted details + items (read-only once `submitted`); the chain back to client/lead/event if linked. Staff actions:
+  - **Request changes** → status `changes_requested`, `revision_number+1`; client can edit & resubmit. (Full diff/compare is M4; M3 just round-trips.)
+  - **Approve & create quote** → see G.4.
+
+### G.4 Approve → auto-create (the payoff)
+
+On **Approve**:
+1. **Client:** if `rfq.client_id` is null, **create a `clients` record** from the contact details (via `getNextClientRef`). **Dedupe:** if phone/email matches an existing client, surface a "use existing vs create new" choice to staff (no silent merge).
+2. **Draft quote:** create a **draft `quotations`** for that client with the RFQ items mapped **item-for-item** (description, qty, sub_event_name; **price blank** for staff to fill) — the "no drift" guarantee.
+3. Set `rfq.status='converted'`, `rfq.client_id`, `rfq.quotation_id`, `staff_approved_at`, `approved_by`; log `approved`/`converted` in `rfq_activity`.
+4. Staff lands on the familiar **quote editor** to price & send. **Event** is still created later at quote-confirm (existing flow) — M3 does not create the event, keeping the pipeline unchanged.
+
+### G.5 Build pieces
+
+- **`rfq.html`** (new file): unlock + 4-step form, all via `fetch` to the gateway; warm theme; mobile-first; autosave/resume.
+- **Gateway:** wire `get_rfq`'s catalog to `event_templates` filtered by event type (small change to the existing function).
+- **ERP (app HTML):** new `RFQsModule` (list + new + detail/review) and the **approve→create-client+draft-quote** helper, reusing `getNextClientRef`, the quote-creation path, and existing status/nav patterns. Nav entry under Sales.
+- **Migration addendum (one `alter table`, delivered with M3):** add to `rfqs` — `sub_events jsonb` (ordered list of `{name, planned_date}` for each sub-event), `event_date` already exists = the main event's Planned date, `secondary_contact_name text`, `secondary_contact_phone text`, `city text` (venue stays in `location`), `budget_range text`. Otherwise M2's tables are enough; `revision_number` already present for the M4 round-trip.
+
+### G.7 Decisions — RESOLVED (15 Jun 2026)
+
+1. **On approve:** ✅ create **client + draft quote only**; event created later at quote-confirm (existing flow unchanged).
+2. **Dedupe:** ✅ **prompt staff** to reuse the matching client or create new — no silent merge.
+3. **Catalog:** ✅ from **event templates** for the chosen type (grouped by sub-event), plus custom lines.
+4. **Form scope v1:** ✅ the **4 steps** only. **Added requirement:** Step 2 lets the client pick the **main event + sub-events** (e.g. Wedding → Mehendi/Haldi/Sangeeth/Reception), which structure Step 3 and the resulting quote.
+
+### G.8 Suggested build order (each with a checkpoint)
+
+1. ✅ **CP1** — migration + `rfq.html` unlock + Steps 1–2 + autosave (DONE & verified).
+2. ✅ **CP2** — Step 3 items + catalog + Step 4 submit (DONE & verified).
+3. **CP3** — ERP RFQs **list + New RFQ** (mint link/PIN + share) + entry points (§I).
+4. **CP4** — ERP RFQ **detail/review + Request changes**.
+5. **CP5** — **Approve → create/confirm client + freeze items**, then route to **either** "Price it myself" (manual draft quote) **or** "Source from vendors" (→ Milestone S). Dedupe prompt.
+6. Polish + end-to-end test + changelog.
+
+---
+
+## I. Staff entry points (make starting an RFQ frictionless)
+
+An RFQ can be started from **multiple places** — same New-RFQ flow underneath, pre-filled by context:
+
+1. **Client 360 / client detail** — "＋ New RFQ" in the header → pre-fills the client (the recurring-client path).
+2. **Lead detail** — "Send requirements link" → the modern replacement for WhatsApp-screenshot intake; turns a raw enquiry into a structured RFQ, then Approve creates the client.
+3. **RFQs module** (under Sales) — "＋ New RFQ" with an existing-client/lead picker **or** a brand-new contact.
+4. **Dashboard** — a "Needs review" count (submitted RFQs) + a quick "New RFQ" action.
+5. **Tablet / kiosk mode** — "Hand to client" opens the form locally for in-person fill (PIN-gated, no ERP access).
+6. (Optional later) **Events** — "Request more items" against an existing event.
+
+All routes converge on one `createRfq()` helper + the share panel (link + PIN, Copy / WhatsApp).
+
+---
+
+## J. Milestone S — Sourcing & Markup (Vendor RFQ)  — *NEW, proposed*
+
+**Business context:** Isheeka subcontracts items to vendors and profits on the **markup** (client price − vendor cost). On an event, **some items are vendor-supplied, some managed in-house.** So between *RFQ approved* and *quote sent* sits a sourcing + pricing step.
+
+**Flow (proposed):**
+1. Client RFQ approved (client + Swathi) → the **approved item list is frozen** as the sourcing basis.
+2. Swathi triggers one or more **Vendor RFQs** — each is the same engine as the client RFQ but **vendor-facing**: the vendor opens a link (token + PIN/OTP), sees the item list, and for each item enters a **unit cost** or marks **"can't supply."** Autosave, **revise**, **multiple revisions**, and **dual sign-off (vendor + Swathi)** — all reused from the client RFQ machinery.
+3. Swathi is notified when a vendor submits.
+4. **Costing & markup screen** (staff): every client item in rows; columns show **vendor cost(s)** (supports comparing multiple vendors per item), an **in-house cost** field (for items Swathi manages or vendors can't supply), a **markup %** (global default + per-item override), and the **computed client price** (`cost × (1+markup)`, with rounding). One click → **Generate quote** with these client prices, **item-for-item**.
+
+**Scalable architecture — one RFQ engine, two audiences:** generalize `rfqs` with `party_type ('client'|'vendor')`, `parent_rfq_id` (vendor RFQ → its client RFQ), and `vendor_id`; add `rfq_items.unit_cost` + `can_supply`. The gateway gains a vendor mode (items pre-populated, vendor edits costs). Costing screen joins client items ↔ vendor bids. This avoids a parallel system and inherits revisions/sign-off for free.
+
+**My suggested refinements (for your input):** (a) allow **multiple vendor RFQs per client RFQ** so Swathi can compare/split items across vendors; (b) **markup = global default with per-item override**; (c) per-item **"manage in-house"** toggle; (d) vendor "can't supply" auto-routes the item to in-house or another vendor on the costing screen.
+
+**Revised roadmap:** M3 (client RFQ + staff module + approve) → **Milestone S (Sourcing & Vendor RFQ + costing/markup → quote)** → M4 (rich revision/compare UX for both client & vendor RFQs). Milestone S is sizeable and is specced/mocked on its own before any build.
+
+**Open decisions — see chat (AskUserQuestion).**
