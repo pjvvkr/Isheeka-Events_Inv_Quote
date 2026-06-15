@@ -8542,7 +8542,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     cormorant(20); setText(ROSE_DK); doc.text('Dear '+(quot.client_name||'')+',', bx, y); y+=26;
     cormorant(15); setText(INK);
     introBody.split('\n').forEach(par=>{ if(!par.trim()){ y+=8; return; } const lines=doc.splitTextToSize(par.trim(), bw); doc.text(lines, bx, y); y+=lines.length*16+10; });
-    y+=10; cormorant(14); setText(INK); doc.text('With warm regards,', bx, y); y+=26;
+    y+=10; cormorant(14); setText(ROSE_DK); doc.text('With warm regards,', bx, y); y+=26;
     script(26); setText(PINK); doc.text(settings.founder_name||'Swathi', bx, y); y+=16;
     sans('bold',9); setText(GOLD); doc.text('Founder & CEO', bx, y);
     doc.addPage();
