@@ -1,0 +1,6 @@
+# Minimal Supabase CLI config — only the bits M2 needs.
+# `supabase functions deploy rfq-gateway` reads this. The RFQ gateway is PUBLIC
+# (clients have no Supabase JWT); it does its own token+PIN/OTP auth, so JWT
+# verification must be OFF for this function.
+[functions.rfq-gateway]
+verify_jwt = false

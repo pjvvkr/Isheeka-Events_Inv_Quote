@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RFQ gateway — test harness (M2)</title>
+<style>
+  :root{--pink:#e8185a;--rose:#A01044;--gold:#B8893A;--ink:#2A2723;--muted:#6B6660;--line:#E5DDD2;--bg:#FAF7F3;--ok:#0F6E56;--err:#A32D2D}
+  *{box-sizing:border-box}
+  body{font-family:Inter,Arial,sans-serif;color:var(--ink);background:var(--bg);margin:0;padding:24px;line-height:1.5}
+  .wrap{max-width:760px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 2px} .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+  input{width:100%;padding:9px 11px;border:1.5px solid var(--line);border-radius:8px;font-size:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}.row>div{flex:1;min-width:160px}
+  button{font-family:inherit;font-size:13px;font-weight:600;border-radius:8px;padding:9px 14px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;margin:4px 4px 0 0}
+  button.p{background:var(--pink);color:#fff;border:none}
+  .step{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--gold);margin:6px 0 2px}
+  pre{background:#1f1d1a;color:#f3efe9;border-radius:8px;padding:12px;font-size:12px;overflow:auto;max-height:340px;white-space:pre-wrap;word-break:break-word}
+  .sess{font-size:12px;color:var(--muted)} .sess b{color:var(--ok)}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;background:#FCEAF1;color:var(--rose)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>RFQ gateway — test harness <span class="pill">M2</span></h1>
+  <div class="sub">Local tool to exercise the <code>rfq-gateway</code> Edge Function. No secrets here — it only calls the public gateway. Safe to delete after testing.</div>
+
+  <div class="card">
+    <div class="row">
+      <div><label>Function URL</label><input id="url" placeholder="https://&lt;REF&gt;.supabase.co/functions/v1/rfq-gateway"/></div>
+    </div>
+    <div class="row">
+      <div><label>Link token</label><input id="token" value="isheeka-test-token-001"/></div>
+    </div>
+    <div class="sess">Session: <b id="sess">none</b></div>
+  </div>
+
+  <div class="card">
+    <div class="step">CONNECTIVITY</div>
+    <button onclick="call('ping',{})">Ping</button>
+
+    <div class="step">UNLOCK · PIN (no email)</div>
+    <div class="row"><div><label>PIN</label><input id="pin" value="4321"/></div></div>
+    <button class="p" onclick="verifyPin()">Verify PIN → session</button>
+
+    <div class="step">UNLOCK · EMAIL OTP</div>
+    <div class="row">
+      <div><label>Email (must match the RFQ's contact_email)</label><input id="email" placeholder="youraddress@example.com"/></div>
+      <div><label>Code (after you receive it)</label><input id="code" placeholder="6 digits"/></div>
+    </div>
+    <button onclick="requestOtp()">Request OTP</button>
+    <button class="p" onclick="verifyOtp()">Verify OTP → session</button>
+
+    <div class="step">FORM ACTIONS (need a session)</div>
+    <button onclick="getRfq()">Get RFQ</button>
+    <button onclick="saveRfq()">Save sample details + items</button>
+    <button onclick="submitRfq()">Submit</button>
+  </div>
+
+  <div class="card">
+    <div class="step">LAST RESPONSE</div>
+    <pre id="out">—</pre>
+  </div>
+</div>
+
+<script>
+  let session = null;
+  const $ = id => document.getElementById(id);
+  const out = o => $('out').textContent = (typeof o === 'string' ? o : JSON.stringify(o, null, 2));
+  function setSess(s){ session = s; $('sess').textContent = s ? (s.slice(0,24)+'…') : 'none'; }
+
+  async function call(action, extra){
+    const url = $('url').value.trim();
+    if(!url){ out('Enter the Function URL first.'); return; }
+    const body = Object.assign({ action, token: $('token').value.trim() }, extra||{});
+    try{
+      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const j = await r.json().catch(()=>({_status:r.status,_nonjson:true}));
+      out({ http:r.status, ...j });
+      return j;
+    }catch(e){ out('Network/CORS error: '+e+'\n\nIf CORS: set ALLOWED_ORIGIN to this page origin (or * for testing) and redeploy.'); }
+  }
+
+  async function verifyPin(){ const j = await call('verify_pin',{ pin:$('pin').value.trim() }); if(j&&j.session) setSess(j.session); }
+  async function requestOtp(){ await call('request_otp',{ email:$('email').value.trim() }); }
+  async function verifyOtp(){ const j = await call('verify_otp',{ email:$('email').value.trim(), code:$('code').value.trim() }); if(j&&j.session) setSess(j.session); }
+  function needSession(){ if(!session){ out('No session — Verify PIN or OTP first.'); return false; } return true; }
+  async function getRfq(){ if(!needSession())return; await call('get_rfq',{ session }); }
+  async function saveRfq(){ if(!needSession())return; await call('save_rfq',{ session,
+    fields:{ contact_name:'Test Client', contact_phone:'+9190000 00000', event_type:'Wedding', location:'Hyderabad', guest_count:200, budget:500000, notes:'Sample from test harness' },
+    items:[ {sub_event_name:'Haldi', description:'Marigold backdrop', quantity:1, unit:'setup'},
+            {sub_event_name:'Reception', description:'Stage floral', quantity:1, unit:'setup'} ] }); }
+  async function submitRfq(){ if(!needSession())return; await call('submit_rfq',{ session }); }
+</script>
+</body>
+</html>
