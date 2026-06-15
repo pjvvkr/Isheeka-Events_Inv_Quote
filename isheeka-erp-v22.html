@@ -5437,9 +5437,12 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       leadObj=l||null;
     }
     if(!leadObj && quot.client_id){
-      // quotes created from an RFQ link by client_id (no lead/event yet) — seed the wizard from the client
-      const {data:c}=await supabase.from('clients').select('client_id,first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',quot.client_id).single();
-      if(c) leadObj={lead_id:null,client_id:c.client_id,first_name:c.first_name,last_name:c.last_name,phone:c.phone_1||'',phone_2:c.phone_2||'',email:c.email_1||'',source:c.source||'referral',event_type:''};
+      // quotes created from an RFQ link by client_id (no lead/event yet) — seed the wizard from the client,
+      // falling back to the quote's own client fields so this can never hard-fail when a client is linked.
+      let c=null; try{ const res=await supabase.from('clients').select('client_id,first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',quot.client_id).maybeSingle(); c=res.data; }catch(e){}
+      const nm=(quot.client_name||'').trim();
+      leadObj = c ? {lead_id:null,client_id:c.client_id,first_name:c.first_name,last_name:c.last_name,phone:c.phone_1||'',phone_2:c.phone_2||'',email:c.email_1||'',source:c.source||'referral',event_type:''}
+                  : {lead_id:null,client_id:quot.client_id,first_name:nm.split(' ')[0]||nm,last_name:nm.split(' ').slice(1).join(' '),phone:'',phone_2:'',email:'',source:'referral',event_type:''};
     }
     if(!leadObj){ notify('Could not load the quote context to edit.','error'); return; }
     setWizardCtx({lead:leadObj, origin, isRevision: quot.status!=='draft'});
