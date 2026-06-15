@@ -104,6 +104,7 @@ let data = {};            // rfq fields
 let subEvents = [];       // [{name, planned_date}]
 let items = [];           // [{sub_event_name, description, quantity, source}]
 let catalog = [];         // [{sub_event_name, description, default_quantity}]
+let changeNote = null;    // staff "request changes" note, if any
 let step = 1;
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -188,6 +189,7 @@ async function loadRfq(){
   subEvents = Array.isArray(data.sub_events)? data.sub_events.slice() : [];
   items = Array.isArray(r.items)? r.items.map(it=>({sub_event_name:it.sub_event_name||'',description:it.description||'',quantity:Number(it.quantity)||1,source:it.source||'custom'})) : [];
   catalog = Array.isArray(r.catalog)? r.catalog : [];
+  changeNote = r.change_note||null;
   if(data.status==='submitted'||data.status==='converted'){ renderSubmitted(); return true; }
   step=1; renderForm();
   return true;
@@ -242,7 +244,10 @@ async function save(silent, sendItems){
 
 // ---------- form ----------
 function renderForm(){
-  app.innerHTML = stepper() + '<div class="pad" id="stepbody"></div>';
+  const banner = (data.status==='changes_requested')
+    ? '<div style="background:#FCEBEB;color:#A32D2D;padding:10px 14px;font-size:12px;border-bottom:1px solid #F1ECE4;">Isheeka Events has requested some changes'+(changeNote?(': '+esc(changeNote)):'')+'. Please update and resubmit.</div>'
+    : '';
+  app.innerHTML = banner + stepper() + '<div class="pad" id="stepbody"></div>';
   if(step===1) renderStep1();
   else if(step===2) renderStep2();
   else if(step===3) renderStep3();

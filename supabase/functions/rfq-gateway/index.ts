@@ -213,7 +213,13 @@ Deno.serve(async (req) => {
             catalog = tis ?? [];
           }
         } catch { /* templates optional */ }
-        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog });
+        let change_note: string | null = null;
+        try {
+          const { data: ca } = await db.from("rfq_activity").select("notes")
+            .eq("rfq_id", s.rfq_id).eq("action", "changes_requested").order("created_at", { ascending: false }).limit(1).maybeSingle();
+          change_note = ca ? ca.notes : null;
+        } catch { /* ignore */ }
+        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog, change_note });
       }
 
       // ── autosave / resume: write details + replace items ─────────────────

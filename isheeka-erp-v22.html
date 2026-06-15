@@ -1672,6 +1672,7 @@ function ClientDetail({clientId, onBack, onNavigate}) {
             <option value="inactive">Inactive</option>
             <option value="vip">VIP</option>
           </select>
+          <button className="btn sm" onClick={()=>onNavigate&&onNavigate('rfqs',{mode:'new',label:'New RFQ',prefill:{client_id:clientId,contact_first_name:client.first_name,contact_last_name:client.last_name,contact_phone:client.phone_1,contact_email:client.email_1,city:client.city}})} title="Send this client a requirements link">📝 New RFQ</button>
           <button className="btn sm primary" onClick={()=>setEditing(true)}>✏️ Edit client</button>
           <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={handleDeleteClient}>🗑 Delete</button>
         </div>
@@ -4393,6 +4394,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
             {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
           </span>
           {lead.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:lead.client_id,label:(lead.first_name+' '+lead.last_name).trim()||'Client'})}>👤 View client →</button>}
+          {!isLost&&<button className="btn sm" title="Send a requirements link to capture event details" onClick={()=>onNavigate&&onNavigate('rfqs',{mode:'new',label:'New RFQ',prefill:{lead_id:lead.lead_id,client_id:lead.client_id||null,contact_first_name:lead.first_name,contact_last_name:lead.last_name,contact_phone:lead.phone,contact_email:lead.email,event_type:lead.event_type,location:lead.location}})}>📝 Send RFQ</button>}
           {!isLost&&!isConverted&&(
             <>
               {/* Next action buttons — context aware per stage */}
@@ -6437,19 +6439,20 @@ function Dashboard({ user, onNavigate }) {
   const hour = new Date().getHours();
   const greeting = hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
   const firstName = user?.user_metadata?.first_name||user?.email?.split('@')[0]||'there';
-  const [stats,setStats]=React.useState({activeLeads:0,upcomingCount:0,quotedMonth:0,collectedMonth:0});
+  const [stats,setStats]=React.useState({activeLeads:0,upcomingCount:0,quotedMonth:0,collectedMonth:0,rfqReview:0});
   const [upcoming,setUpcoming]=React.useState([]);
   const [outstanding,setOutstanding]=React.useState([]);
   const [loading,setLoading]=React.useState(true);
   React.useEffect(()=>{ (async()=>{
     setLoading(true);
     const now=new Date(), _p=n=>String(n).padStart(2,'0'), todayStr=now.getFullYear()+'-'+_p(now.getMonth()+1)+'-'+_p(now.getDate()), monthStr=now.getFullYear()+'-'+_p(now.getMonth()+1);
-    const [{data:leads},{data:events},{data:quotes},{data:pays},{data:invs}] = await Promise.all([
+    const [{data:leads},{data:events},{data:quotes},{data:pays},{data:invs},{count:rfqReview}] = await Promise.all([
       supabase.from('leads').select('stage').eq('is_deleted',false),
       supabase.from('events').select('event_id,name,ref_number,main_date,status,client_name').eq('is_deleted',false),
       supabase.from('quotations').select('grand_total,doc_date,status,event_id').eq('is_deleted',false),
       supabase.from('invoice_payments').select('amount,payment_date,invoice_id'),
       supabase.from('invoices').select('invoice_id,ref_number,client_name,event_name,total_outstanding,status').eq('is_deleted',false),
+      supabase.from('rfqs').select('rfq_id',{count:'exact',head:true}).eq('is_deleted',false).eq('status','submitted'),
     ]);
     const cancelledInv={}; (invs||[]).forEach(i=>{ if(i.status==='cancelled') cancelledInv[i.invoice_id]=true; });
     const cancelledEvt={}; (events||[]).forEach(e=>{ if((e.status||'').toLowerCase()==='cancelled') cancelledEvt[e.event_id]=true; });
@@ -6458,7 +6461,7 @@ function Dashboard({ user, onNavigate }) {
     const quotedMonth=(quotes||[]).filter(q=>!['superseded','rejected'].includes(q.status)&&!(q.event_id&&cancelledEvt[q.event_id])&&q.doc_date&&q.doc_date.slice(0,7)===monthStr).reduce((s,q)=>s+(parseFloat(q.grand_total)||0),0);
     const collectedMonth=(pays||[]).filter(p=>p.payment_date&&p.payment_date.slice(0,7)===monthStr&&!cancelledInv[p.invoice_id]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
     const out=(invs||[]).filter(i=>!['paid','cancelled'].includes(i.status)&&(parseFloat(i.total_outstanding)||0)>0).sort((a,b)=>(parseFloat(b.total_outstanding)||0)-(parseFloat(a.total_outstanding)||0));
-    setStats({activeLeads,upcomingCount:up.length,quotedMonth,collectedMonth});
+    setStats({activeLeads,upcomingCount:up.length,quotedMonth,collectedMonth,rfqReview:rfqReview||0});
     setUpcoming(up.slice(0,5)); setOutstanding(out.slice(0,5)); setLoading(false);
   })(); },[]);
   const inr=n=>'₹'+(parseFloat(n)||0).toLocaleString('en-IN');
@@ -6467,6 +6470,10 @@ function Dashboard({ user, onNavigate }) {
       <div style={{marginBottom:24}}>
         <h1 style={{fontSize:22,fontWeight:600,color:'var(--grey-800)'}}>{greeting}, {firstName}! 👋</h1>
         <p style={{fontSize:14,color:'var(--grey-400)',marginTop:4}}>Here's what's happening with Isheeka Events today.</p>
+      </div>
+      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:16}}>
+        {stats.rfqReview>0 && <div onClick={()=>onNavigate&&onNavigate('rfqs')} style={{cursor:'pointer',background:'var(--pink-light)',color:'var(--pink)',borderRadius:'var(--radius-md)',padding:'10px 14px',fontSize:13,fontWeight:500}}>⏳ {stats.rfqReview} client RFQ{stats.rfqReview>1?'s':''} awaiting review — Review →</div>}
+        <button className="btn sm primary" onClick={()=>onNavigate&&onNavigate('rfqs',{mode:'new',label:'New RFQ'})}>📝 New Client RFQ</button>
       </div>
       <div className="metrics-grid">
         <div className="metric-card pink" style={{cursor:'pointer'}} onClick={()=>onNavigate&&onNavigate('leads')}><div className="metric-icon">🎯</div><div className="metric-value">{stats.activeLeads}</div><div className="metric-label">Active leads</div></div>
@@ -7687,6 +7694,15 @@ function RFQDetail({rfqId, onBack, onShare}){
     if(error) return;
     onShare({ref_number:r.ref_number,token,pin},{name:r.contact_name,phone:r.contact_phone});
   };
+  const requestChanges=async()=>{
+    const note=window.prompt('What should the client change? (optional — shown to them)','');
+    if(note===null) return;
+    const uid=await _currentUid();
+    const {error}=await runDb(supabase.from('rfqs').update({status:'changes_requested',revision_number:(r.revision_number||0)+1,updated_at:new Date().toISOString()}).eq('rfq_id',rfqId),'request changes');
+    if(error) return;
+    try{ await supabase.from('rfq_activity').insert({rfq_id:rfqId,actor:uid||'staff',action:'changes_requested',notes:note||null}); }catch(e){}
+    notify('Sent back to the client — their link reopens for edits.','success'); load();
+  };
   if(loading) return <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>;
   if(!r) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>RFQ not found.</div>;
   const sc=RFQ_STATUS[r.status]||RFQ_STATUS.sent;
@@ -7701,8 +7717,9 @@ function RFQDetail({rfqId, onBack, onShare}){
             {(r.secondary_contact_name||r.secondary_contact_phone)&&<div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>2nd contact: {r.secondary_contact_name||''} {r.secondary_contact_phone||''}</div>}
           </div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {r.status==='submitted' && <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={requestChanges}>↩ Request changes</button>}
             <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>
-            {/* Review / Approve / Request-changes arrive in CP4–CP5 */}
+            {/* Approve → create client + draft quote arrives in CP5 */}
           </div>
         </div>
         {subs.length>0&&<div style={{fontSize:12,color:'var(--grey-600)',marginTop:10,background:'var(--grey-50)',borderRadius:'var(--radius-sm)',padding:'8px 12px'}}>{subs.map(s=>s.name+(s.planned_date?(' '+fmtDate(s.planned_date,{day:'numeric',month:'short'})):'')).join(' · ')}</div>}
