@@ -2,7 +2,15 @@
 
 **Purpose:** the single durable record of every change shipped, every database migration run, and every open item — so nothing is lost between sessions. **This is the list we review together before baselining the app.** Claude maintains this; it does not rely on conversation memory.
 
-_Last updated: 13 Jun 2026._
+_Last updated: 14 Jun 2026._
+
+---
+
+## ★ BASELINE — 14 Jun 2026
+
+App baselined at change **#100** (City defaults to Hyderabad). Everything through #100 is built, verified (transpile for pre-cutoff edits; read-back for the PDF/font tail), and the authoritative `isheeka-erp-v22.html` is complete and well-formed (closing `</html>` present). The original 7-item request plus all follow-ups are done: manual total override, Path A↔B quote-revision alignment + draft-invoice sync fix, installment re-proportioning, event-header action cleanup, the full back+breadcrumb navigation (both phases + label polish), vendor dues rollup, per-block template + Excel loading (create & edit), the warm-neutral brand re-skin, and assorted PDF/UX fixes. **No pending database migrations.** Deploy = commit + push via GitHub Desktop.
+
+Open / parked (non-blocking): deeper inline-hex sweep to finish the brand palette uniformity; optional "location → Hyderabad" default for leads/events; cross-event vendor-dues export.
 
 ---
 
