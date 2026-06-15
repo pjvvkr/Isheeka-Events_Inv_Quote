@@ -5454,6 +5454,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
 
   const fmt=(d)=>fmtDate(d);
   const groups={}; items.forEach(li=>{ const k=li.sub_event_name||'General Items'; (groups[k]=groups[k]||[]).push(li); });
+  const quoteUnpriced=(parseFloat(quot.grand_total)||0)<=0;
   let ps = quot.payment_schedule; if(typeof ps==='string'){ try{ps=JSON.parse(ps||'[]');}catch(e){ps=[];} } ps=Array.isArray(ps)?ps:[];
   const sc = QUOT_STATUS_COLORS[quot.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'};
   const statusLabel = QUOT_STATUS_LABELS[quot.status]||quot.status;
@@ -5528,10 +5529,10 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           {(quot.revision_number||0)>0&&<label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}><input type="checkbox" checked={includeRevHistory} onChange={e=>setIncludeRevHistory(e.target.checked)} style={{accentColor:'var(--pink)'}}/>Revision history</label>}
         </div>
         <div style={{borderTop:'1px solid var(--grey-200)',paddingTop:12,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-          <span style={{fontSize:11,color:'var(--grey-400)',marginRight:'auto'}}>{histClosed?'Closed — print/download only (sending disabled):':'Share / export (uses the toggles above):'}</span>
-          <button className="btn sm" disabled={sharing||histClosed} title={histClosed?'This quote is closed — sending is disabled':''} onClick={()=>doShare('whatsapp')}>💬 WhatsApp</button>
-          <button className="btn sm" disabled={sharing||histClosed} title={histClosed?'This quote is closed — sending is disabled':''} onClick={()=>doShare('gmail')}>Gmail</button>
-          <button className="btn sm" disabled={sharing||histClosed} title={histClosed?'This quote is closed — sending is disabled':''} onClick={()=>doShare('email')}>Email</button>
+          <span style={{fontSize:11,color:quoteUnpriced?'var(--red)':'var(--grey-400)',marginRight:'auto'}}>{histClosed?'Closed — print/download only (sending disabled):':(quoteUnpriced?'⚠ This quote has no prices yet (₹0). Add prices before sharing — client sending is disabled.':'Share / export (uses the toggles above):')}</span>
+          <button className="btn sm" disabled={sharing||histClosed||quoteUnpriced} title={quoteUnpriced?'Add prices first — this quote total is ₹0':(histClosed?'This quote is closed — sending is disabled':'')} onClick={()=>doShare('whatsapp')}>💬 WhatsApp</button>
+          <button className="btn sm" disabled={sharing||histClosed||quoteUnpriced} title={quoteUnpriced?'Add prices first — this quote total is ₹0':(histClosed?'This quote is closed — sending is disabled':'')} onClick={()=>doShare('gmail')}>Gmail</button>
+          <button className="btn sm" disabled={sharing||histClosed||quoteUnpriced} title={quoteUnpriced?'Add prices first — this quote total is ₹0':(histClosed?'This quote is closed — sending is disabled':'')} onClick={()=>doShare('email')}>Email</button>
           <button className="btn sm" onClick={()=>doExport('print')}>Print</button>
           <button className="btn sm primary" onClick={()=>doExport('download')}>⬇ Download PDF</button>
         </div>
@@ -7757,6 +7758,7 @@ function RFQDetail({rfqId, onBack, onShare, onNavigate}){
   const [cmpB,setCmpB]=React.useState('');
   const [viewRev,setViewRev]=React.useState(null);
   const [openAct,setOpenAct]=React.useState(0);
+  const [dupe,setDupe]=React.useState(null);
   const load=async()=>{ setLoading(true);
     const [{data:rfq},{data:its},{data:act},{data:revs}]=await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id',rfqId).single(),
@@ -7783,14 +7785,21 @@ function RFQDetail({rfqId, onBack, onShare, onNavigate}){
     try{ await supabase.from('rfq_activity').insert({rfq_id:rfqId,actor:uid||'staff',action:'changes_requested',notes:note||null}); }catch(e){}
     notify('Sent back to the client — their link reopens for edits.','success'); load();
   };
+  const doApprove=async(basisItems, forced)=>{
+    setDupe(null); setApproving(true);
+    try{ const q=await approveRfqToQuote(r, basisItems, forced); notify('Approved — draft quote '+q.ref_number+' created.','success'); onNavigate&&onNavigate('quotations',{quotId:q.quotation_id,label:q.ref_number}); }
+    catch(e){ /* runDb toasted */ }
+    setApproving(false);
+  };
   const approve=async()=>{
     const basisItems = (basisRev!=null) ? ((revisions.find(x=>x.revision_number===basisRev)||{}).snapshot||{}).items||items : items;
     if(!basisItems || basisItems.length===0){ if(!window.confirm('This RFQ has no items. Create an empty draft quote anyway?')) return; }
-    if(!window.confirm('Approve and create a draft quote'+(basisRev!=null?(' from revision '+basisRev):'')+'?\n\nThis creates/links the client and opens the quote for you to price.')) return;
-    setApproving(true);
-    try{ const q=await approveRfqToQuote(r, basisItems); notify('Approved — draft quote '+q.ref_number+' created.','success'); onNavigate&&onNavigate('quotations',{quotId:q.quotation_id,label:q.ref_number}); }
-    catch(e){ /* runDb toasted */ }
-    setApproving(false);
+    if(!r.client_id){
+      const match=await findClientMatch(r);
+      if(match){ setDupe({match, items:basisItems}); return; }   // staff decides via the modal
+    }
+    if(!window.confirm('Approve and create a draft quote'+(basisRev!=null?(' from revision '+basisRev):'')+'?\n\nThis creates the client and opens the quote for you to price.')) return;
+    doApprove(basisItems, null);
   };
   if(loading) return <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>;
   if(!r) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>RFQ not found.</div>;
@@ -7801,6 +7810,21 @@ function RFQDetail({rfqId, onBack, onShare, onNavigate}){
   const actGroups=(()=>{ const asc=[...activity].reverse(); const gs=[]; let buf=[]; asc.forEach(a=>{ buf.push(a); if(a.action==='submitted'){ gs.push({label:(a.notes&&/Revision/i.test(a.notes))?a.notes:'Submitted',entries:buf}); buf=[]; } }); if(buf.length) gs.push({label:'In progress',entries:buf}); return gs.reverse(); })();
   return (
     <div>
+      {dupe&&(()=>{ const m=dupe.match; const mnm=((m.first_name||'')+' '+(m.last_name||'')).trim(); return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}} onClick={()=>setDupe(null)}>
+          <div style={{background:'white',borderRadius:'var(--radius-lg)',maxWidth:440,padding:'20px 22px'}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:8}}>An existing client matches this contact</div>
+            <div style={{fontSize:13,color:'var(--grey-600)',lineHeight:1.6,marginBottom:6}}>This RFQ is for <b>{r.contact_name||'—'}</b> ({r.contact_phone||r.contact_email||'no contact'}).</div>
+            <div style={{fontSize:13,color:'var(--grey-600)',lineHeight:1.6,background:'var(--grey-50)',borderRadius:'var(--radius-sm)',padding:'8px 12px',marginBottom:6}}>Matched by phone/email: <b>{mnm||'(unnamed client)'}</b> · {m.phone_1||m.email_1||''}</div>
+            <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:16}}>Same person? Link them. A different person who happens to share a number? Create a new client.</div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              <button className="btn primary" disabled={approving} onClick={()=>doApprove(dupe.items,{client_id:m.client_id,client_name:mnm})}>🔗 Link to {mnm||'existing client'}</button>
+              <button className="btn" disabled={approving} onClick={()=>doApprove(dupe.items,null)}>＋ Create a new client ({(r.contact_name||'this contact').trim()})</button>
+              <button className="btn" disabled={approving} style={{color:'var(--grey-400)'}} onClick={()=>setDupe(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      ); })()}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'18px 22px',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10}}>
           <div style={{minWidth:0}}>
@@ -8792,22 +8816,20 @@ async function createRfq(opts={}){
 }
 // Approve flow: ensure a client (reuse/dedupe or create), then create a DRAFT quote
 // with the RFQ items item-for-item (price blank), and mark the RFQ converted.
-async function ensureClientForRfq(r){
-  if(r.client_id) return {client_id:r.client_id, client_name:r.contact_name||''};
-  let match=null;
+// Look for an existing client matching this RFQ's phone/email (a match may be a
+// different person sharing a number — staff decides via the modal).
+async function findClientMatch(r){
   const orParts=[];
   if(r.contact_phone) orParts.push('phone_1.eq.'+r.contact_phone);
   if(r.contact_email) orParts.push('email_1.eq.'+r.contact_email);
-  if(orParts.length){
-    const {data:cands}=await supabase.from('clients').select('client_id,first_name,last_name,phone_1,email_1').eq('is_deleted',false).or(orParts.join(','));
-    if(cands&&cands.length) match=cands[0];
-  }
-  if(match){
-    const nm=((match.first_name||'')+' '+(match.last_name||'')).trim();
-    if(window.confirm('A client already matches this contact:\n\n'+nm+' · '+(match.phone_1||'')+'\n\nOK = link this RFQ to the existing client\nCancel = create a new client')){
-      return {client_id:match.client_id, client_name:nm};
-    }
-  }
+  if(!orParts.length) return null;
+  const {data}=await supabase.from('clients').select('client_id,first_name,last_name,phone_1,email_1').eq('is_deleted',false).or(orParts.join(','));
+  return (data&&data.length)?data[0]:null;
+}
+// forced: {client_id, client_name} to reuse an existing client; otherwise a new client is created.
+async function ensureClientForRfq(r, forced){
+  if(r.client_id) return {client_id:r.client_id, client_name:r.contact_name||''};
+  if(forced && forced.client_id) return {client_id:forced.client_id, client_name:forced.client_name||''};
   const ref=await getNextClientRef();
   const fn=r.contact_first_name||((r.contact_name||'').trim().split(/\s+/)[0]||'');
   const ln=r.contact_last_name||((r.contact_name||'').trim().split(/\s+/).slice(1).join(' ')||'');
@@ -8815,8 +8837,8 @@ async function ensureClientForRfq(r){
   if(error||!c) throw error||new Error('client create failed');
   return {client_id:c.client_id, client_name:(fn+' '+ln).trim()};
 }
-async function approveRfqToQuote(r, items){
-  const {client_id, client_name}=await ensureClientForRfq(r);
+async function approveRfqToQuote(r, items, forced){
+  const {client_id, client_name}=await ensureClientForRfq(r, forced);
   const refNum=await getNextQuotRef();
   const evName=(typeof defaultEventName==='function'&&r.event_type)?defaultEventName(r.event_type):((r.event_type||'Event')+' Event');
   const {data:q,error:qe}=await runDb(supabase.from('quotations').insert({
