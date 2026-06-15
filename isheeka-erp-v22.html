@@ -1465,6 +1465,23 @@ function AltContactForm({clientId, initial={}, onSave, onCancel}) {
   );
 }
 
+// ── Reusable entity links ────────────────────────────────────────────────────
+// Render a client/vendor name as a click-through link to its detail page when we
+// have its id + a navigator; otherwise fall back to plain text. stopPropagation
+// lets these sit safely inside clickable list rows. Used app-wide.
+function ClientLink({clientId, name, onNavigate, style, title, children}){
+  const label = children!=null?children:name;
+  if(!clientId || !onNavigate) return <span style={style}>{label}</span>;
+  return <a onClick={e=>{ e.stopPropagation&&e.stopPropagation(); onNavigate('clients',{clientId, label:(typeof name==='string'&&name)||'Client'}); }}
+    style={{color:'var(--pink)',cursor:'pointer',...(style||{})}} title={title||'Open client'}>{label}</a>;
+}
+function VendorLink({vendorId, name, onNavigate, style, title, children}){
+  const label = children!=null?children:name;
+  if(!vendorId || !onNavigate) return <span style={style}>{label}</span>;
+  return <a onClick={e=>{ e.stopPropagation&&e.stopPropagation(); onNavigate('vendors',{vendorId, label:(typeof name==='string'&&name)||'Vendor'}); }}
+    style={{color:'var(--pink)',cursor:'pointer',...(style||{})}} title={title||'Open vendor'}>{label}</a>;
+}
+
 // ── Client Detail ─────────────────────────────────────────────────────────────
 function ClientDetail({clientId, onBack, onNavigate}) {
   const [client, setClient] = useState(null);
@@ -3005,7 +3022,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'18px 24px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
         <div>
           <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{event.name}</div>
-          <div style={{fontSize:12,color:'var(--grey-400)'}}>{event.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{event.ref_number} · </span>}{event.type?eventTypeLabel(event.type):''} · {event.client_name}</div>
+          <div style={{fontSize:12,color:'var(--grey-400)'}}>{event.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{event.ref_number} · </span>}{event.type?eventTypeLabel(event.type):''} · <ClientLink clientId={event.client_id} name={event.client_name} onNavigate={onNavigate}>{event.client_name}</ClientLink></div>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
           {mode==='view' && <>
@@ -3081,7 +3098,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'14px 20px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
         <div>
           <div style={{fontSize:11,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:2}}>Client</div>
-          <div style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{event.client_name||'—'}</div>
+          <div style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}><ClientLink clientId={event.client_id} name={event.client_name} onNavigate={onNavigate} style={{fontSize:14,fontWeight:500}}>{event.client_name||'—'}</ClientLink></div>
         </div>
         {hasFinancialDocs
           ? <div style={{fontSize:12,color:'var(--grey-400)',display:'flex',alignItems:'center',gap:4}}>🔒 Client cannot be changed — quotations/invoices exist</div>
@@ -3264,7 +3281,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         {eventVendors.map(v=>{ const st={pending:{bg:'var(--grey-100)',color:'var(--grey-400)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'}}[v.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}; const insts=(eventInstallments[v.event_vendor_id]||[]); const anyOverdue=insts.some(isVendorInstOverdue); const open=expandedVendor===v.event_vendor_id; return (
           <div key={v.event_vendor_id} style={{borderTop:'1px solid var(--grey-100)'}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 96px 110px',gap:8,alignItems:'center',padding:'9px 0',fontSize:13}}>
-              <div><div style={{fontWeight:500,display:'flex',alignItems:'center',gap:6}}><span style={{cursor:'pointer',display:'inline-flex',alignItems:'center'}} onClick={()=>setExpandedVendor(open?null:v.event_vendor_id)}>{insts.length>0&&<span style={{color:'var(--grey-400)',marginRight:4}}>{open?'▾':'▸'}</span>}{v.vendor_name||'Vendor'}</span>{anyOverdue&&<span style={{fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--red)',color:'white'}}>OVERDUE</span>}<span title="Edit / swap / remove vendor" onClick={()=>openEditEngage(v)} style={{cursor:'pointer',color:'var(--grey-400)',fontSize:12}}>✏️</span></div>{v.service_description&&<div style={{fontSize:12,color:'var(--grey-400)',marginLeft:insts.length>0?16:0}}>{v.service_description}</div>}</div>
+              <div><div style={{fontWeight:500,display:'flex',alignItems:'center',gap:6}}>{insts.length>0&&<span style={{cursor:'pointer',color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} onClick={()=>setExpandedVendor(open?null:v.event_vendor_id)}>{open?'▾':'▸'}</span>}<VendorLink vendorId={v.vendor_id} name={v.vendor_name} onNavigate={onNavigate} style={{fontWeight:500}}>{v.vendor_name||'Vendor'}</VendorLink>{anyOverdue&&<span style={{fontSize:10,padding:'1px 7px',borderRadius:10,background:'var(--red)',color:'white'}}>OVERDUE</span>}<span title="Edit / swap / remove vendor" onClick={()=>openEditEngage(v)} style={{cursor:'pointer',color:'var(--grey-400)',fontSize:12}}>✏️</span></div>{v.service_description&&<div style={{fontSize:12,color:'var(--grey-400)',marginLeft:insts.length>0?16:0}}>{v.service_description}</div>}</div>
               <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.agreed_amount)||0).toLocaleString('en-IN')}</div>
               <div style={{textAlign:'right'}}>₹{Math.round(parseFloat(v.total_paid)||0).toLocaleString('en-IN')}</div>
               <div style={{textAlign:'right',color:(parseFloat(v.outstanding)||0)>0?'var(--red)':'var(--grey-800)'}}>₹{Math.round(parseFloat(v.outstanding)||0).toLocaleString('en-IN')}</div>
@@ -4358,7 +4375,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       {/* Header */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'18px 24px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
         <div>
-          <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{lead.first_name} {lead.last_name}{lead.ref_number&&<span style={{fontSize:13,fontWeight:400,color:'var(--grey-400)',marginLeft:8}}>{lead.ref_number}</span>}</div>
+          <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}><ClientLink clientId={lead.client_id} name={(lead.first_name+' '+lead.last_name).trim()} onNavigate={onNavigate} title="Open client (converted lead)">{lead.first_name} {lead.last_name}</ClientLink>{lead.ref_number&&<span style={{fontSize:13,fontWeight:400,color:'var(--grey-400)',marginLeft:8}}>{lead.ref_number}</span>}</div>
           <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:6}}>{lead.phone}{lead.email?' · '+lead.email:''}</div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             <span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>
@@ -5196,7 +5213,7 @@ function EventsModule({nav, onNavigate, onBack}) {
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                       {e.ref_number&&<span style={{color:'var(--pink)',fontWeight:500}}>{e.ref_number}</span>}
-                      {e.client_name&&<span>👤 {e.client_name}</span>}
+                      {e.client_name&&<span>👤 <ClientLink clientId={e.client_id} name={e.client_name} onNavigate={onNavigate}>{e.client_name}</ClientLink></span>}
                       {e.main_date&&<span>📅 {fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                       {e.location&&<span>📍 {e.location}</span>}
                       {e.guest_count&&<span>👥 {e.guest_count} guests</span>}
@@ -5415,7 +5432,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
           <div>
             <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number}{quot.revision_number>0?<span style={{fontSize:12,color:'var(--grey-400)',fontWeight:400}}> · Rev {quot.revision_number}</span>:''} <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,marginLeft:6}}>{statusLabel}</span>{isQuoteExpired(quot)&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>Expired</span>}</div>
-            <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>{quot.client_name||'—'}{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
+            <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}><ClientLink clientId={quot.client_id} name={quot.client_name} onNavigate={onNavigate}>{quot.client_name||'—'}</ClientLink>{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
             {(srcLead||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
               {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
@@ -5629,7 +5646,7 @@ function QuotationsModule({nav, onNavigate, onBack}) {
                       <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{QUOT_STATUS_LABELS[q.status]||q.status}</span>{isQuoteExpired(q)&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)'}}>Expired</span>}{q.event_id&&cancelledEvents[q.event_id]&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--red-light)',color:'var(--red)'}}>Event cancelled</span>}
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
-                      {q.client_name&&<span>👤 {q.client_name}</span>}
+                      {q.client_name&&<span>👤 <ClientLink clientId={q.client_id} name={q.client_name} onNavigate={onNavigate}>{q.client_name}</ClientLink></span>}
                       {q.event_name&&<span>🎪 {q.event_name}</span>}
                       {q.doc_date&&<span>📅 {fmtDate(q.doc_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                     </div>
@@ -5723,7 +5740,7 @@ function InvoicesModule({nav, onNavigate, onBack}) {
                       <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{INVOICE_STATUS_LABELS[est]||est}</span>
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
-                      {inv.client_name&&<span>👤 {inv.client_name}</span>}
+                      {inv.client_name&&<span>👤 <ClientLink clientId={inv.client_id} name={inv.client_name} onNavigate={onNavigate}>{inv.client_name}</ClientLink></span>}
                       {inv.event_name&&<span>🎪 {inv.event_name}</span>}
                       {inv.doc_date&&<span>📅 {fmtDate(inv.doc_date,{day:'numeric',month:'short',year:'numeric'})}</span>}
                     </div>
@@ -6057,7 +6074,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
               <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{INVOICE_STATUS_LABELS[inv.status]||inv.status}</span>
             </div>
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>
-              {inv.client_name||'—'}{inv.event_name?' · '+inv.event_name:''}{inv.doc_date?' · '+fmt(inv.doc_date):''}
+              <ClientLink clientId={inv.client_id} name={inv.client_name} onNavigate={onNavigate}>{inv.client_name||'—'}</ClientLink>{inv.event_name?' · '+inv.event_name:''}{inv.doc_date?' · '+fmt(inv.doc_date):''}
             </div>
             {(srcLead||srcQuote||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
@@ -6114,7 +6131,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
           {inv.client_id&&!locked&&<button className="btn sm" onClick={()=>setShowClientEdit(true)}>✏️ Edit client</button>}
         </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:'10px 24px',fontSize:13}}>
-          <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Name</div><div>{inv.client_name||(((clientInfo.first_name||'')+' '+(clientInfo.last_name||'')).trim())||'—'}</div></div>
+          <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Name</div><div><ClientLink clientId={inv.client_id} name={inv.client_name} onNavigate={onNavigate}>{inv.client_name||(((clientInfo.first_name||'')+' '+(clientInfo.last_name||'')).trim())||'—'}</ClientLink></div></div>
           <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Phone</div><div>{[clientInfo.phone_1,clientInfo.phone_2].filter(Boolean).join(', ')||'—'}</div></div>
           <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Email</div><div>{[clientInfo.email_1,clientInfo.email_2].filter(Boolean).join(', ')||'—'}</div></div>
           <div><div style={{fontSize:11,color:'var(--grey-400)'}}>Address</div><div>{[clientInfo.street_address,clientInfo.city,clientInfo.state,clientInfo.pincode].filter(Boolean).join(', ')||'—'}</div></div>
@@ -6846,7 +6863,7 @@ function VendorPaymentsModule({onNavigate}){
           {filtered.map(p=>{ const ev=evMap[p.event_vendor_id]; const evt=eMap[p.event_id]; return (
             <div key={p.payment_id||p.vendor_payment_id} style={{display:'grid',gridTemplateColumns:'80px 1fr 200px 90px 96px',gap:10,padding:'11px 16px',borderTop:'1px solid var(--grey-100)',alignItems:'center',fontSize:13,opacity:p.is_voided?0.75:1}}>
               <div style={{color:'var(--grey-500)'}}>{fmtDate(p.payment_date,{day:'numeric',month:'short'})}</div>
-              <div><b>{vMap[p.vendor_id]||'Vendor'}</b>{ev&&ev.service_description?(' · '+ev.service_description):''}{p.is_voided&&<div style={{fontSize:11,color:'var(--red)'}}>voided{p.voided_at?(' '+fmtDate(p.voided_at,{day:'numeric',month:'short',year:'numeric'})):''}{p.void_reason?(' — '+p.void_reason):''}</div>}</div>
+              <div><b><VendorLink vendorId={p.vendor_id} name={vMap[p.vendor_id]} onNavigate={onNavigate}>{vMap[p.vendor_id]||'Vendor'}</VendorLink></b>{ev&&ev.service_description?(' · '+ev.service_description):''}{p.is_voided&&<div style={{fontSize:11,color:'var(--red)'}}>voided{p.voided_at?(' '+fmtDate(p.voided_at,{day:'numeric',month:'short',year:'numeric'})):''}{p.void_reason?(' — '+p.void_reason):''}</div>}</div>
               <div>{evt?<><a onClick={()=>setPopupEvent(p.event_id)} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>{evt.ref_number}</a> <span style={{color:'var(--grey-400)'}}>· {evt.name}</span></>:'—'}</div>
               <div style={{textTransform:'uppercase',fontSize:11,color:'var(--grey-500)'}}>{p.payment_mode}</div>
               <div style={{textAlign:'right',fontWeight:500,textDecoration:p.is_voided?'line-through':'none',color:p.is_voided?'var(--grey-400)':'var(--grey-800)'}}>{inr(p.amount)}</div>
