@@ -215,7 +215,7 @@ const NAV = [
   {section:null,items:[{id:'dashboard',label:'Dashboard',icon:'🏠',roles:['admin','manager','staff']}]},
   {section:'SALES',items:[
     {id:'leads',label:'Leads',icon:'🎯',roles:['admin','manager','staff']},
-    {id:'rfqs',label:'RFQs',icon:'📝',roles:['admin','manager','staff']},
+    {id:'rfqs',label:'Client RFQ',icon:'📝',roles:['admin','manager','staff']},
     {id:'clients',label:'Clients',icon:'👥',roles:['admin','manager','staff']}
   ]},
   {section:'OPERATIONS',items:[
@@ -7579,20 +7579,23 @@ function RFQShareCard({created, contact, onDone}){
 }
 
 function NewRFQForm({prefill, onCreated, onCancel}){
+  const pn=(prefill?.contact_name||'').trim().split(/\s+/);
   const [f,setF]=React.useState({
-    contact_name:prefill?.contact_name||'', contact_phone:prefill?.contact_phone||'', contact_email:prefill?.contact_email||'',
+    contact_first_name:prefill?.contact_first_name||(pn[0]||''), contact_last_name:prefill?.contact_last_name||(pn.slice(1).join(' ')||''),
+    contact_phone:prefill?.contact_phone||'', contact_email:prefill?.contact_email||'',
     secondary_contact_name:prefill?.secondary_contact_name||'', secondary_contact_phone:prefill?.secondary_contact_phone||'',
     event_type:prefill?.event_type||'', location:prefill?.location||'', city:prefill?.city||'Hyderabad', access_mode:'pin',
   });
   const [saving,setSaving]=React.useState(false);
   const set=(k,v)=>setF(s=>({...s,[k]:v}));
   const submit=async()=>{
-    if(!f.contact_name.trim()){ notify('Enter the client name.','error'); return; }
+    if(!f.contact_first_name.trim()){ notify('Enter the client first name.','error'); return; }
+    if(!f.contact_last_name.trim()){ notify('Enter the client last name.','error'); return; }
     if(f.access_mode==='email_otp' && !f.contact_email.trim()){ notify('Email is required for the email-OTP option.','error'); return; }
     setSaving(true);
     try{
       const created=await createRfq({...f, client_id:prefill?.client_id||null, lead_id:prefill?.lead_id||null});
-      onCreated(created,{name:f.contact_name,phone:f.contact_phone});
+      onCreated(created,{name:(f.contact_first_name+' '+f.contact_last_name).trim(),phone:f.contact_phone});
     }catch(e){ /* runDb already toasted */ }
     setSaving(false);
   };
@@ -7601,7 +7604,8 @@ function NewRFQForm({prefill, onCreated, onCancel}){
       <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:2}}>New RFQ</div>
       <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:14}}>{prefill?.client_id?'Linked to this client.':prefill?.lead_id?'Linked to this lead.':'A link the client opens to share their event requirements.'}</div>
       <div className="form-grid">
-        <div><label className="field-label">Client name *</label><input className="field-input" value={f.contact_name} onChange={e=>set('contact_name',e.target.value)}/></div>
+        <div><label className="field-label">First name *</label><input className="field-input" value={f.contact_first_name} onChange={e=>set('contact_first_name',e.target.value)}/></div>
+        <div><label className="field-label">Last name *</label><input className="field-input" value={f.contact_last_name} onChange={e=>set('contact_last_name',e.target.value)}/></div>
         <div><label className="field-label">Phone</label><input className="field-input" value={f.contact_phone} onChange={e=>set('contact_phone',e.target.value)}/></div>
         <div><label className="field-label">Email{f.access_mode==='email_otp'?' *':''}</label><input className="field-input" value={f.contact_email} onChange={e=>set('contact_email',e.target.value)}/></div>
         <div><label className="field-label">Event type</label><input className="field-input" value={f.event_type} onChange={e=>set('event_type',e.target.value)} placeholder="e.g. Wedding"/></div>
@@ -8596,10 +8600,12 @@ async function createRfq(opts={}){
   const token = genRfqToken();
   const pin = (opts.access_mode==='email_otp') ? null : genRfqPin();
   const uid = await _currentUid();
+  const fullName = opts.contact_name || [opts.contact_first_name,opts.contact_last_name].filter(Boolean).join(' ').trim() || null;
   const row = {
     ref_number, status:'sent',
     client_id: opts.client_id||null, lead_id: opts.lead_id||null,
-    contact_name: opts.contact_name||null, contact_email: opts.contact_email||null, contact_phone: opts.contact_phone||null,
+    contact_first_name: opts.contact_first_name||null, contact_last_name: opts.contact_last_name||null,
+    contact_name: fullName, contact_email: opts.contact_email||null, contact_phone: opts.contact_phone||null,
     secondary_contact_name: opts.secondary_contact_name||null, secondary_contact_phone: opts.secondary_contact_phone||null,
     event_type: opts.event_type||null, location: opts.location||null, city: opts.city||null,
     access_mode: opts.access_mode||'pin',
