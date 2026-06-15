@@ -1301,7 +1301,7 @@ function AutocompleteInput({
 // ── Client Form ──────────────────────────────────────────────────────────────
 function ClientForm({initial={}, onSave, onCancel, title='New client'}) {
   const empty = {first_name:'',last_name:'',phone_1:'',phone_2:'',phone_3:'',
-    email_1:'',email_2:'',email_3:'',street_address:'',city:'',state:'',pincode:'',
+    email_1:'',email_2:'',email_3:'',street_address:'',city:'Hyderabad',state:'',pincode:'',
     gst_number:'',source:'',status:'active',preferred_contact:'',notes:''};
   const [form, setForm] = useState({...empty,...initial});
   const [errors, setErrors] = useState({});
@@ -6398,7 +6398,7 @@ function VendorsModule({nav, onNavigate, onBack}){
   const [showForm,setShowForm]=React.useState(false);
   const [editV,setEditV]=React.useState(null);
   const [saving,setSaving]=React.useState(false);
-  const emptyV={name:'',category:'other',contact_person:'',phone_1:'+91 ',phone_2:'',phone_3:'',email_1:'',email_2:'',email_3:'',street_address:'',city:'',state:'',gst_number:'',pan_number:'',bank_name:'',account_number:'',ifsc_code:'',upi_id:'',payment_terms:'',rating:'',is_preferred:false,status:'active',notes:''};
+  const emptyV={name:'',category:'other',contact_person:'',phone_1:'+91 ',phone_2:'',phone_3:'',email_1:'',email_2:'',email_3:'',street_address:'',city:'Hyderabad',state:'',gst_number:'',pan_number:'',bank_name:'',account_number:'',ifsc_code:'',upi_id:'',payment_terms:'',rating:'',is_preferred:false,status:'active',notes:''};
   const [form,setForm]=React.useState(emptyV);
   const [dupWarn,setDupWarn]=React.useState(null);
   const setF=(k,v)=>{ if(dupWarn) setDupWarn(null); setForm(f=>({...f,[k]:v})); };
