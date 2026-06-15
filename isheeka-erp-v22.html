@@ -7426,7 +7426,7 @@ function App() {
   const activePage = current.page;
   const navigate = useCallback((page, opts={})=>{
     const o=opts||{};
-    const rest={}; ['eventId','leadId','invoiceId','quotId','clientId','vendorId','expenseId','mode','referenceEvent','referenceData'].forEach(k=>{ if(o[k]!==undefined&&o[k]!==null) rest[k]=o[k]; });
+    const rest={}; ['eventId','leadId','invoiceId','quotId','clientId','vendorId','expenseId','rfqId','prefill','mode','referenceEvent','referenceData'].forEach(k=>{ if(o[k]!==undefined&&o[k]!==null) rest[k]=o[k]; });
     const hasPayload=Object.keys(rest).length>0;
     const label=o.label||pageTitles[page]||page;
     setNavStack(st=>{
