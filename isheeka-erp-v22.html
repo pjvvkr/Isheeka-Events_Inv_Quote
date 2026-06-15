@@ -8497,7 +8497,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     try{ doc.addImage(LOGO,'PNG',M,top,lw,lh); }catch(e){}
     const tx=M+lw+12;
     script(26); setText(PINK); doc.text('Isheeka Events', tx, top+20);
-    sans('italic',8.5); setText(MUTED); doc.text('Making Every Event Memorable', tx, top+33);
+    sans('italic',8.5); setText(GOLD); doc.text('Making Every Event Memorable', tx, top+33);
     script(11); setText(GOLD); doc.text('Since 2017', tx, top+45);
     // right doc box
     sans('bold',11); setText(ROSE_DK); doc.text(label, W-M, top+12, {align:'right'});
