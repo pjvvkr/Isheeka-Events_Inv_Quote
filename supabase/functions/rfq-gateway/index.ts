@@ -89,7 +89,8 @@ async function logActivity(rfqId: string, actor: string, action: string, notes?:
 function publicRfq(r: Record<string, unknown>) {
   return {
     rfq_id: r.rfq_id, ref_number: r.ref_number, status: r.status,
-    contact_name: r.contact_name, contact_email: r.contact_email, contact_phone: r.contact_phone,
+    contact_name: r.contact_name, contact_first_name: r.contact_first_name, contact_last_name: r.contact_last_name,
+    contact_email: r.contact_email, contact_phone: r.contact_phone,
     secondary_contact_name: r.secondary_contact_name, secondary_contact_phone: r.secondary_contact_phone,
     event_type: r.event_type, event_date: r.event_date, location: r.location, city: r.city,
     guest_count: r.guest_count, budget: r.budget, budget_range: r.budget_range,
@@ -226,7 +227,7 @@ Deno.serve(async (req) => {
 
         const f = body.fields ?? {};
         const patch: Record<string, unknown> = { status: "in_progress" };
-        for (const k of ["contact_name", "contact_phone", "secondary_contact_name", "secondary_contact_phone",
+        for (const k of ["contact_name", "contact_first_name", "contact_last_name", "contact_phone", "secondary_contact_name", "secondary_contact_phone",
                          "event_type", "event_date", "location", "city", "guest_count", "budget", "budget_range", "notes"]) {
           if (k in f) patch[k] = f[k] === "" ? null : f[k];
         }

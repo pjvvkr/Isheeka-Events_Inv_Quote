@@ -204,7 +204,9 @@ function stepper(){
 // ---------- collect current step fields into `data` ----------
 function collect(){
   if(step===1){
-    data.contact_name=$('f_name').value.trim();
+    data.contact_first_name=$('f_fname').value.trim();
+    data.contact_last_name=$('f_lname').value.trim();
+    data.contact_name=(data.contact_first_name+' '+data.contact_last_name).trim();
     data.contact_phone=$('f_phone').value.trim();
     data.contact_email=$('f_email').value.trim();
     data.secondary_contact_name=$('f_sname').value.trim();
@@ -225,7 +227,7 @@ function collect(){
 async function save(silent, sendItems){
   collect();
   const fields={
-    contact_name:data.contact_name, contact_phone:data.contact_phone,
+    contact_name:data.contact_name, contact_first_name:data.contact_first_name, contact_last_name:data.contact_last_name, contact_phone:data.contact_phone,
     secondary_contact_name:data.secondary_contact_name, secondary_contact_phone:data.secondary_contact_phone,
     event_type:data.event_type, event_date:data.event_date, location:data.location, city:data.city,
     guest_count:data.guest_count, budget_range:data.budget_range, notes:data.notes,
@@ -250,7 +252,8 @@ function renderForm(){
 function renderStep1(){
   $('stepbody').innerHTML =
     '<h1>Your details</h1><div class="sub">We\'ve pre-filled what we have — please correct anything.</div>'
-    + '<label>Full name</label><input id="f_name" value="'+esc(data.contact_name)+'">'
+    + '<div class="row"><div><label>First name</label><input id="f_fname" value="'+esc(data.contact_first_name!=null?data.contact_first_name:((data.contact_name||'').trim().split(/\s+/)[0]||''))+'"></div>'
+    + '<div><label>Last name</label><input id="f_lname" value="'+esc(data.contact_last_name!=null?data.contact_last_name:((data.contact_name||'').trim().split(/\s+/).slice(1).join(' ')))+'"></div></div>'
     + '<label>Phone</label><input id="f_phone" value="'+esc(data.contact_phone)+'">'
     + '<label>Email (optional)</label><input id="f_email" type="email" value="'+esc(data.contact_email)+'">'
     + '<div class="gold-label">SECONDARY CONTACT (optional)</div>'
@@ -355,6 +358,7 @@ function renderStep4(){
   body+='<div style="font-size:11px;color:var(--muted);background:var(--field);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
     + subEvents.map(s=>esc(s.name)+(s.planned_date?(' '+fmtD(s.planned_date)):'')).join(' · ') + '</div>';
   body+='<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Contacts: '+esc(data.contact_name||'')+(data.secondary_contact_name?(' · '+esc(data.secondary_contact_name)):'')+'</div>';
+  if(data.notes && data.notes.trim()) body+='<div style="font-size:12px;color:var(--ink);background:var(--field);border-radius:8px;padding:8px 10px;margin-bottom:8px"><b>Notes:</b> '+esc(data.notes)+'</div>';
   // items grouped
   body+='<div style="background:var(--field);border-radius:10px;padding:10px 12px;font-size:13px">';
   if(!items.length) body+='<div class="sub">No items added.</div>';
