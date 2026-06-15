@@ -744,6 +744,39 @@ function LeadSourceInput({value,onChange}) {
 }
 
 // ── Event Types Configuration Tab ────────────────────────────────────────────
+// Manage the standard functions (sub-events) under one event type. These feed the
+// RFQ chips and quote suggestions. Free-text stays allowed everywhere; this is a
+// suggestion list, not an enforced constraint.
+function SubEventEditor({eventTypeId}){
+  const [subs,setSubs]=React.useState([]);
+  const [val,setVal]=React.useState('');
+  const [loading,setLoading]=React.useState(true);
+  const load=async()=>{ setLoading(true); const {data}=await supabase.from('event_type_subevents').select('*').eq('event_type_id',eventTypeId).order('sort_order'); setSubs(data||[]); setLoading(false); };
+  React.useEffect(()=>{ load(); },[eventTypeId]);
+  const add=async()=>{ const n=val.trim(); if(!n) return; if(subs.some(s=>(s.name||'').toLowerCase()===n.toLowerCase())){ notify('That function already exists.','error'); return; } const {error}=await runDb(supabase.from('event_type_subevents').insert({event_type_id:eventTypeId,name:n,sort_order:subs.length,is_active:true}),'add function'); if(error) return; setVal(''); load(); };
+  const remove=async(s)=>{ if(!window.confirm('Remove "'+s.name+'"?')) return; const {error}=await runDb(supabase.from('event_type_subevents').delete().eq('subevent_id',s.subevent_id),'remove function'); if(error) return; load(); };
+  const toggle=async(s)=>{ const {error}=await runDb(supabase.from('event_type_subevents').update({is_active:!s.is_active}).eq('subevent_id',s.subevent_id),'update function'); if(error) return; load(); };
+  const moveUp=async(i)=>{ if(i===0) return; const a=subs[i],b=subs[i-1]; await runDb(supabase.from('event_type_subevents').update({sort_order:b.sort_order}).eq('subevent_id',a.subevent_id),'reorder'); await runDb(supabase.from('event_type_subevents').update({sort_order:a.sort_order}).eq('subevent_id',b.subevent_id),'reorder'); load(); };
+  return (
+    <div>
+      <div style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:'var(--gold)',marginBottom:6}}>FUNCTIONS (SUB-EVENTS)</div>
+      {loading? <div style={{fontSize:12,color:'var(--grey-400)'}}>Loading…</div> :
+        subs.length===0? <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:8}}>No functions yet — add the typical ones (e.g. Mehendi, Haldi).</div> :
+        subs.map((s,i)=>(
+          <div key={s.subevent_id} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,opacity:s.is_active?1:.5}}>
+            <button className="btn sm" style={{padding:'1px 7px'}} disabled={i===0} onClick={()=>moveUp(i)}>↑</button>
+            <span style={{flex:1}}>{s.name}</span>
+            <button className="btn sm" style={{fontSize:11,padding:'1px 8px',color:s.is_active?'var(--green)':'var(--grey-400)'}} onClick={()=>toggle(s)}>{s.is_active?'Active':'Inactive'}</button>
+            <button className="btn sm" style={{fontSize:11,padding:'1px 8px',color:'var(--red)'}} onClick={()=>remove(s)}>✕</button>
+          </div>
+        ))}
+      <div style={{display:'flex',gap:8,marginTop:8}}>
+        <input className="field-input" style={{flex:1,fontSize:13,padding:'6px 10px'}} value={val} onChange={e=>setVal(e.target.value)} placeholder="Add a function (e.g. Sangeeth)" onKeyDown={e=>{if(e.key==='Enter')add();}}/>
+        <button className="btn sm primary" onClick={add}>+ Add</button>
+      </div>
+    </div>
+  );
+}
 function EventTypesTab() {
   const [types, setTypes] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -751,6 +784,7 @@ function EventTypesTab() {
   const [addError, setAddError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [successMsg, setSuccessMsg] = React.useState('');
+  const [expanded, setExpanded] = React.useState(null);
 
   React.useEffect(()=>{ loadTypes(); },[]);
 
@@ -815,7 +849,8 @@ function EventTypesTab() {
               <div>Label</div><div>Order</div><div>Status</div><div></div>
             </div>
             {types.map((t,i)=>(
-              <div key={t.event_type_id} style={{display:'grid',gridTemplateColumns:'1fr auto auto auto',gap:8,alignItems:'center',padding:'10px 16px',borderBottom:'1px solid var(--grey-100)',opacity:t.is_active?1:.5}}>
+              <React.Fragment key={t.event_type_id}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr auto auto auto',gap:8,alignItems:'center',padding:'10px 16px',borderBottom:'1px solid var(--grey-100)',opacity:t.is_active?1:.5}}>
                 <div>
                   <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{t.label}</div>
                   <div style={{fontSize:11,color:'var(--grey-400)',fontFamily:'monospace'}}>{t.value}</div>
@@ -825,8 +860,10 @@ function EventTypesTab() {
                   onClick={()=>toggleActive(t)}>
                   {t.is_active?'Active':'Inactive'}
                 </button>
-                <div style={{width:20}}/>
+                <button className="btn sm" style={{padding:'2px 8px'}} title="Manage functions (sub-events)" onClick={()=>setExpanded(expanded===t.event_type_id?null:t.event_type_id)}>{expanded===t.event_type_id?'▾':'▸'}</button>
               </div>
+              {expanded===t.event_type_id&&<div style={{borderBottom:'1px solid var(--grey-100)',background:'var(--grey-50)',padding:'10px 16px'}}><SubEventEditor eventTypeId={t.event_type_id}/></div>}
+              </React.Fragment>
             ))}
             {types.length===0&&<div style={{padding:20,textAlign:'center',color:'var(--grey-400)',fontSize:13}}>No event types yet</div>}
           </div>
@@ -7585,7 +7622,15 @@ function RFQShareCard({created, contact, onDone}){
   );
 }
 
-function NewRFQForm({prefill, onCreated, onCancel}){
+function NewRFQForm({prefill, onCreated, onCancel, onNavigate}){
+  const [existingRfqs,setExistingRfqs]=React.useState([]);
+  React.useEffect(()=>{ (async()=>{
+    if(!prefill||(!prefill.client_id&&!prefill.lead_id)) return;
+    let q=supabase.from('rfqs').select('rfq_id,ref_number,status').eq('is_deleted',false).not('status','in','("converted","withdrawn")');
+    q = prefill.client_id ? q.eq('client_id',prefill.client_id) : q.eq('lead_id',prefill.lead_id);
+    const {data}=await q.order('created_at',{ascending:false});
+    setExistingRfqs(data||[]);
+  })(); },[]);
   const pn=(prefill?.contact_name||'').trim().split(/\s+/);
   const [f,setF]=React.useState({
     contact_first_name:prefill?.contact_first_name||(pn[0]||''), contact_last_name:prefill?.contact_last_name||(pn.slice(1).join(' ')||''),
@@ -7610,6 +7655,9 @@ function NewRFQForm({prefill, onCreated, onCancel}){
     <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'18px 20px',maxWidth:600}}>
       <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:2}}>New RFQ</div>
       <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:14}}>{prefill?.client_id?'Linked to this client.':prefill?.lead_id?'Linked to this lead.':'A link the client opens to share their event requirements.'}</div>
+      {existingRfqs.length>0&&<div style={{background:'var(--orange-light)',color:'#854F0B',borderRadius:'var(--radius-md)',padding:'10px 12px',marginBottom:14,fontSize:12.5}}>
+        ⚠ This {prefill&&prefill.lead_id&&!prefill.client_id?'lead':'client'} already has {existingRfqs.length} open RFQ{existingRfqs.length>1?'s':''}: {existingRfqs.map((x,i)=>(<span key={x.rfq_id}>{i>0?', ':''}<a onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:x.rfq_id,label:x.ref_number})} style={{color:'var(--pink)',cursor:'pointer',textDecoration:'underline'}}>{x.ref_number}</a> ({(RFQ_STATUS[x.status]||{}).l||x.status})</span>))}. You can still create a new one below (e.g. for a different event).
+      </div>}
       <div className="form-grid">
         <div><label className="field-label">First name *</label><input className="field-input" value={f.contact_first_name} onChange={e=>set('contact_first_name',e.target.value)}/></div>
         <div><label className="field-label">Last name *</label><input className="field-input" value={f.contact_last_name} onChange={e=>set('contact_last_name',e.target.value)}/></div>
@@ -7640,8 +7688,8 @@ function RFQsModule({nav, onNavigate, onBack}){
   React.useEffect(()=>{ if(!detailId && !isNew && !created) load(); },[detailId,isNew,created]);
 
   if(created){ return <div><div style={{marginBottom:12}}><button className="btn sm" onClick={()=>{setCreated(null);}}>← All RFQs</button></div><RFQShareCard created={created} contact={created.contact} onDone={()=>{setCreated(null);}}/></div>; }
-  if(isNew){ return <div><div style={{marginBottom:12}}><button className="btn sm" onClick={onBack}>← Back</button></div><NewRFQForm prefill={nav&&nav.prefill} onCreated={(c,contact)=>{setCreated({...c,contact});}} onCancel={onBack}/></div>; }
-  if(detailId){ return <RFQDetail rfqId={detailId} onBack={onBack} onShare={(c,contact)=>setCreated({...c,contact})}/>; }
+  if(isNew){ return <div><div style={{marginBottom:12}}><button className="btn sm" onClick={onBack}>← Back</button></div><NewRFQForm prefill={nav&&nav.prefill} onCreated={(c,contact)=>{setCreated({...c,contact});}} onCancel={onBack} onNavigate={onNavigate}/></div>; }
+  if(detailId){ return <RFQDetail rfqId={detailId} onBack={onBack} onShare={(c,contact)=>setCreated({...c,contact})} onNavigate={onNavigate}/>; }
 
   const needsReview=rfqs.filter(r=>r.status==='submitted').length;
   const list=rfqs.filter(r=>!statusFilter||r.status===statusFilter);
@@ -7675,16 +7723,37 @@ function RFQsModule({nav, onNavigate, onBack}){
   );
 }
 
-function RFQDetail({rfqId, onBack, onShare}){
+const RFQ_ACTION_LABEL={created:'Created',sent:'Sent',otp_sent:'OTP emailed',otp_verified:'Client verified (email)',pin_verified:'Client verified (PIN)',saved:'Client saved a draft',submitted:'Client submitted',changes_requested:'Changes requested',approved:'Approved → quote',converted:'Converted'};
+function rfqItemsGrouped(list){ const g={}; (list||[]).forEach(it=>{ const k=it.sub_event_name||'General'; (g[k]=g[k]||[]).push(it); }); return g; }
+// diff two item arrays by sub_event_name+description
+function diffRevItems(aItems,bItems){
+  const key=it=>(it.sub_event_name||'')+'||'+(it.description||'');
+  const am={},bm={}; (aItems||[]).forEach(i=>am[key(i)]=i); (bItems||[]).forEach(i=>bm[key(i)]=i);
+  const added=[],removed=[],changed=[];
+  Object.keys(bm).forEach(k=>{ if(!am[k]) added.push(bm[k]); else if((parseFloat(am[k].quantity)||0)!==(parseFloat(bm[k].quantity)||0)) changed.push({from:am[k],to:bm[k]}); });
+  Object.keys(am).forEach(k=>{ if(!bm[k]) removed.push(am[k]); });
+  return {added,removed,changed};
+}
+
+function RFQDetail({rfqId, onBack, onShare, onNavigate}){
   const [r,setR]=React.useState(null);
   const [items,setItems]=React.useState([]);
+  const [activity,setActivity]=React.useState([]);
+  const [revisions,setRevisions]=React.useState([]);
   const [loading,setLoading]=React.useState(true);
+  const [approving,setApproving]=React.useState(false);
+  const [basisRev,setBasisRev]=React.useState(null);   // revision_number used as quote basis (null = latest/current)
+  const [cmpA,setCmpA]=React.useState('');
+  const [cmpB,setCmpB]=React.useState('');
+  const [viewRev,setViewRev]=React.useState(null);
   const load=async()=>{ setLoading(true);
-    const [{data:rfq},{data:its}]=await Promise.all([
+    const [{data:rfq},{data:its},{data:act},{data:revs}]=await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id',rfqId).single(),
       supabase.from('rfq_items').select('*').eq('rfq_id',rfqId).eq('is_deleted',false).order('sort_order'),
+      supabase.from('rfq_activity').select('*').eq('rfq_id',rfqId).order('created_at',{ascending:false}),
+      supabase.from('rfq_revisions').select('*').eq('rfq_id',rfqId).order('revision_number',{ascending:false}),
     ]);
-    setR(rfq||null); setItems(its||[]); setLoading(false);
+    setR(rfq||null); setItems(its||[]); setActivity(act||[]); setRevisions(revs||[]); setLoading(false);
   };
   React.useEffect(()=>{ load(); },[rfqId]);
   const regenerate=async()=>{
@@ -7698,44 +7767,108 @@ function RFQDetail({rfqId, onBack, onShare}){
     const note=window.prompt('What should the client change? (optional — shown to them)','');
     if(note===null) return;
     const uid=await _currentUid();
-    const {error}=await runDb(supabase.from('rfqs').update({status:'changes_requested',revision_number:(r.revision_number||0)+1,updated_at:new Date().toISOString()}).eq('rfq_id',rfqId),'request changes');
+    const {error}=await runDb(supabase.from('rfqs').update({status:'changes_requested',updated_at:new Date().toISOString()}).eq('rfq_id',rfqId),'request changes');
     if(error) return;
     try{ await supabase.from('rfq_activity').insert({rfq_id:rfqId,actor:uid||'staff',action:'changes_requested',notes:note||null}); }catch(e){}
     notify('Sent back to the client — their link reopens for edits.','success'); load();
+  };
+  const approve=async()=>{
+    const basisItems = (basisRev!=null) ? ((revisions.find(x=>x.revision_number===basisRev)||{}).snapshot||{}).items||items : items;
+    if(!basisItems || basisItems.length===0){ if(!window.confirm('This RFQ has no items. Create an empty draft quote anyway?')) return; }
+    if(!window.confirm('Approve and create a draft quote'+(basisRev!=null?(' from revision '+basisRev):'')+'?\n\nThis creates/links the client and opens the quote for you to price.')) return;
+    setApproving(true);
+    try{ const q=await approveRfqToQuote(r, basisItems); notify('Approved — draft quote '+q.ref_number+' created.','success'); onNavigate&&onNavigate('quotations',{quotId:q.quotation_id,label:q.ref_number}); }
+    catch(e){ /* runDb toasted */ }
+    setApproving(false);
   };
   if(loading) return <div style={{padding:40,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>;
   if(!r) return <div style={{padding:40,textAlign:'center',color:'var(--grey-400)'}}>RFQ not found.</div>;
   const sc=RFQ_STATUS[r.status]||RFQ_STATUS.sent;
   const subs=Array.isArray(r.sub_events)?r.sub_events:[];
+  const canApprove=['submitted','changes_requested'].includes(r.status);
+  const groups=rfqItemsGrouped(items);
   return (
     <div>
       <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'18px 22px',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10}}>
-          <div>
+          <div style={{minWidth:0}}>
             <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{r.ref_number} <span style={{fontSize:11,padding:'2px 10px',borderRadius:20,fontWeight:500,background:sc.bg,color:sc.c,marginLeft:6}}>{sc.l}</span></div>
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:3}}>{r.contact_name||'—'}{r.contact_phone?(' · '+r.contact_phone):''}{r.event_type?(' · '+r.event_type):''}{r.city?(' · '+r.city):''}</div>
             {(r.secondary_contact_name||r.secondary_contact_phone)&&<div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>2nd contact: {r.secondary_contact_name||''} {r.secondary_contact_phone||''}</div>}
           </div>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            {r.status==='submitted' && <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={requestChanges}>↩ Request changes</button>}
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+            {canApprove&&revisions.length>1&&<select className="field-input" style={{width:150,fontSize:12,padding:'6px 8px'}} value={basisRev==null?'':String(basisRev)} onChange={e=>setBasisRev(e.target.value===''?null:parseInt(e.target.value,10))} title="Which version to quote">
+              <option value="">Latest (v{r.revision_number||revisions[0].revision_number})</option>
+              {revisions.map(rv=><option key={rv.revision_id} value={rv.revision_number}>Use v{rv.revision_number}</option>)}
+            </select>}
+            {canApprove&&<button className="btn sm" style={{background:'var(--green-light)',color:'var(--green)',borderColor:'#86EFAC'}} disabled={approving} onClick={approve}>{approving?'Approving…':'✅ Approve → create quote'}</button>}
+            {r.status==='submitted'&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={requestChanges}>↩ Request changes</button>}
+            {r.quotation_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('quotations',{quotId:r.quotation_id,label:'Quote'})}>📄 Go to quote →</button>}
             <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>
-            {/* Approve → create client + draft quote arrives in CP5 */}
           </div>
         </div>
         {subs.length>0&&<div style={{fontSize:12,color:'var(--grey-600)',marginTop:10,background:'var(--grey-50)',borderRadius:'var(--radius-sm)',padding:'8px 12px'}}>{subs.map(s=>s.name+(s.planned_date?(' '+fmtDate(s.planned_date,{day:'numeric',month:'short'})):'')).join(' · ')}</div>}
+        {r.notes&&<div style={{fontSize:13,color:'var(--grey-700)',marginTop:10,background:'var(--grey-50)',borderRadius:'var(--radius-sm)',padding:'8px 12px',overflowWrap:'anywhere',wordBreak:'break-word'}}><b style={{color:'var(--grey-800)'}}>Notes:</b> {r.notes}</div>}
       </div>
-      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px'}}>
+
+      {/* Requested items */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
         <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Requested items {items.length>0?('('+items.length+')'):''}</div>
         {items.length===0?<div style={{fontSize:13,color:'var(--grey-400)'}}>Nothing submitted yet — the client hasn’t added items.</div>
-          :(()=>{ const groups={}; items.forEach(it=>{ const k=it.sub_event_name||'General'; (groups[k]=groups[k]||[]).push(it); }); return Object.keys(groups).map(k=>(
+          :Object.keys(groups).map(k=>(
             <div key={k} style={{marginBottom:10}}>
               <div style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:'var(--gold)',marginBottom:4}}>{k.toUpperCase()}</div>
-              {groups[k].map(it=>(<div key={it.rfq_item_id} style={{display:'flex',justifyContent:'space-between',fontSize:13,padding:'3px 0'}}><span>{it.description}</span><span style={{color:'var(--grey-400)'}}>×{it.quantity}</span></div>))}
+              {groups[k].map(it=>(<div key={it.rfq_item_id} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,fontSize:13,padding:'3px 0'}}><span style={{overflowWrap:'anywhere',wordBreak:'break-word',minWidth:0}}>{it.description}</span><span style={{color:'var(--grey-400)',whiteSpace:'nowrap'}}>×{it.quantity}</span></div>))}
             </div>
-          )); })()}
-        <div style={{fontSize:12,color:'var(--grey-400)',marginTop:8,borderTop:'1px solid var(--grey-100)',paddingTop:10}}>Review, approve and convert-to-quote actions are coming in the next update.</div>
+          ))}
       </div>
-      <div style={{marginTop:14}}><button className="btn sm" onClick={onBack}>← All RFQs</button></div>
+
+      {/* Revisions */}
+      {revisions.length>0&&<div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Revisions ({revisions.length})</div>
+        {revisions.map(rv=>(
+          <div key={rv.revision_id} style={{display:'flex',alignItems:'center',gap:10,padding:'7px 0',borderBottom:'1px solid var(--grey-50)',fontSize:13}}>
+            <span style={{fontWeight:500,color:'var(--grey-800)',width:46}}>v{rv.revision_number}</span>
+            <span style={{flex:1,color:'var(--grey-400)'}}>{fmtDate(rv.submitted_at,{day:'numeric',month:'short',year:'numeric'})} · {((rv.snapshot||{}).items||[]).length} items</span>
+            <button className="btn sm" onClick={()=>setViewRev(viewRev===rv.revision_number?null:rv.revision_number)}>{viewRev===rv.revision_number?'Hide':'View'}</button>
+          </div>
+        ))}
+        {viewRev!=null&&(()=>{ const rv=revisions.find(x=>x.revision_number===viewRev); const g=rfqItemsGrouped((rv.snapshot||{}).items); return (
+          <div style={{marginTop:10,background:'var(--grey-50)',borderRadius:'var(--radius-sm)',padding:'10px 12px'}}>
+            {Object.keys(g).map(k=>(<div key={k} style={{marginBottom:6}}><div style={{fontSize:10,fontWeight:700,color:'var(--gold)'}}>{k.toUpperCase()}</div>{g[k].map((it,i)=>(<div key={i} style={{display:'flex',justifyContent:'space-between',gap:10,fontSize:12}}><span style={{overflowWrap:'anywhere',minWidth:0}}>{it.description}</span><span style={{color:'var(--grey-400)'}}>×{it.quantity}</span></div>))}</div>))}
+          </div>
+        ); })()}
+        {revisions.length>1&&<div style={{marginTop:12,borderTop:'1px solid var(--grey-100)',paddingTop:10}}>
+          <div style={{fontSize:12,fontWeight:600,color:'var(--grey-600)',marginBottom:6}}>Compare</div>
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <select className="field-input" style={{width:90,fontSize:12,padding:'5px 8px'}} value={cmpA} onChange={e=>setCmpA(e.target.value)}><option value="">From…</option>{revisions.map(rv=><option key={rv.revision_id} value={rv.revision_number}>v{rv.revision_number}</option>)}</select>
+            <span style={{color:'var(--grey-400)'}}>→</span>
+            <select className="field-input" style={{width:90,fontSize:12,padding:'5px 8px'}} value={cmpB} onChange={e=>setCmpB(e.target.value)}><option value="">To…</option>{revisions.map(rv=><option key={rv.revision_id} value={rv.revision_number}>v{rv.revision_number}</option>)}</select>
+          </div>
+          {cmpA&&cmpB&&cmpA!==cmpB&&(()=>{ const a=(revisions.find(x=>String(x.revision_number)===cmpA)||{}).snapshot||{}; const b=(revisions.find(x=>String(x.revision_number)===cmpB)||{}).snapshot||{}; const d=diffRevItems(a.items,b.items); return (
+            <div style={{marginTop:10,fontSize:12}}>
+              {d.added.length===0&&d.removed.length===0&&d.changed.length===0&&<div style={{color:'var(--grey-400)'}}>No item differences.</div>}
+              {d.added.map((it,i)=><div key={'a'+i} style={{color:'var(--green)'}}>+ {it.sub_event_name?it.sub_event_name+' · ':''}{it.description} ×{it.quantity}</div>)}
+              {d.removed.map((it,i)=><div key={'r'+i} style={{color:'var(--red)'}}>− {it.sub_event_name?it.sub_event_name+' · ':''}{it.description} ×{it.quantity}</div>)}
+              {d.changed.map((c,i)=><div key={'c'+i} style={{color:'#854F0B'}}>~ {c.to.sub_event_name?c.to.sub_event_name+' · ':''}{c.to.description}: ×{c.from.quantity} → ×{c.to.quantity}</div>)}
+            </div>
+          ); })()}
+        </div>}
+      </div>}
+
+      {/* Activity timeline */}
+      {activity.length>0&&<div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Activity</div>
+        {activity.map(a=>(
+          <div key={a.activity_id} style={{display:'flex',gap:10,fontSize:12,padding:'5px 0',borderBottom:'1px solid var(--grey-50)'}}>
+            <span style={{color:'var(--grey-800)',fontWeight:500,minWidth:170}}>{RFQ_ACTION_LABEL[a.action]||a.action}</span>
+            <span style={{flex:1,color:'var(--grey-400)',overflowWrap:'anywhere'}}>{a.notes||''}</span>
+            <span style={{color:'var(--grey-400)',whiteSpace:'nowrap'}}>{fmtDate(a.created_at,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+          </div>
+        ))}
+      </div>}
+
+      <div style={{marginTop:4}}><button className="btn sm" onClick={onBack}>← All RFQs</button></div>
     </div>
   );
 }
@@ -8636,6 +8769,51 @@ async function createRfq(opts={}){
   if(error||!data) throw error||new Error('create rfq failed');
   try{ await supabase.from('rfq_activity').insert({rfq_id:data.rfq_id,actor:uid||'staff',action:'created'}); }catch(e){}
   return {rfq_id:data.rfq_id, ref_number:data.ref_number, token, pin};
+}
+// Approve flow: ensure a client (reuse/dedupe or create), then create a DRAFT quote
+// with the RFQ items item-for-item (price blank), and mark the RFQ converted.
+async function ensureClientForRfq(r){
+  if(r.client_id) return {client_id:r.client_id, client_name:r.contact_name||''};
+  let match=null;
+  const orParts=[];
+  if(r.contact_phone) orParts.push('phone_1.eq.'+r.contact_phone);
+  if(r.contact_email) orParts.push('email_1.eq.'+r.contact_email);
+  if(orParts.length){
+    const {data:cands}=await supabase.from('clients').select('client_id,first_name,last_name,phone_1,email_1').eq('is_deleted',false).or(orParts.join(','));
+    if(cands&&cands.length) match=cands[0];
+  }
+  if(match){
+    const nm=((match.first_name||'')+' '+(match.last_name||'')).trim();
+    if(window.confirm('A client already matches this contact:\n\n'+nm+' · '+(match.phone_1||'')+'\n\nOK = link this RFQ to the existing client\nCancel = create a new client')){
+      return {client_id:match.client_id, client_name:nm};
+    }
+  }
+  const ref=await getNextClientRef();
+  const fn=r.contact_first_name||((r.contact_name||'').trim().split(/\s+/)[0]||'');
+  const ln=r.contact_last_name||((r.contact_name||'').trim().split(/\s+/).slice(1).join(' ')||'');
+  const {data:c,error}=await runDb(supabase.from('clients').insert({ref_number:ref,first_name:fn,last_name:ln,phone_1:r.contact_phone||null,email_1:r.contact_email||null,city:r.city||null,source:'referral',status:'active',client_since:new Date().toISOString().slice(0,10),created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false}).select('client_id').single(),'create client');
+  if(error||!c) throw error||new Error('client create failed');
+  return {client_id:c.client_id, client_name:(fn+' '+ln).trim()};
+}
+async function approveRfqToQuote(r, items){
+  const {client_id, client_name}=await ensureClientForRfq(r);
+  const refNum=await getNextQuotRef();
+  const evName=(typeof defaultEventName==='function'&&r.event_type)?defaultEventName(r.event_type):((r.event_type||'Event')+' Event');
+  const {data:q,error:qe}=await runDb(supabase.from('quotations').insert({
+    ref_number:refNum,status:'draft',client_id,client_name,lead_id:r.lead_id||null,event_id:null,
+    event_name:evName,doc_date:new Date().toISOString().slice(0,10),valid_until:null,
+    subtotal:0,discount_pct:0,discount_amount:0,grand_total:0,
+    additional_notes:r.notes||null,payment_terms:null,additional_terms:null,
+    payment_schedule:'[]',display_options:'{}',parent_quotation_id:null,revision_number:0,
+    created_at:new Date().toISOString(),updated_at:new Date().toISOString(),is_deleted:false
+  }).select('quotation_id,ref_number').single(),'create draft quote');
+  if(qe||!q) throw qe||new Error('quote create failed');
+  const li=(items||[]).filter(it=>(it.description||'').trim()).map((it,i)=>({quotation_id:q.quotation_id,sub_event_name:it.sub_event_name||null,description:it.description,quantity:parseFloat(it.quantity)||1,unit_price:0,sort_order:i}));
+  if(li.length){ const {error:lie}=await runDb(supabase.from('quotation_line_items').insert(li),'add quote items'); if(lie) throw lie; }
+  const uid=await _currentUid();
+  await runDb(supabase.from('rfqs').update({status:'converted',client_id,quotation_id:q.quotation_id,staff_approved_at:new Date().toISOString(),approved_by:uid||null,updated_at:new Date().toISOString()}).eq('rfq_id',r.rfq_id),'approve rfq');
+  try{ await supabase.from('rfq_activity').insert({rfq_id:r.rfq_id,actor:uid||'staff',action:'approved',notes:'→ '+q.ref_number}); }catch(e){}
+  return q;
 }
 
 // ── Invoice creation (Phase 2) ────────────────────────────────────────────────

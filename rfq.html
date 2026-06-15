@@ -58,7 +58,9 @@
   .toast.show{opacity:1;}
   .itemrow{display:flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:8px;padding:7px 10px;margin-bottom:6px;}
   .itemrow.off{opacity:.72;}
-  .itemrow .idesc{flex:1;font-size:13px;}
+  .itemrow .idesc{flex:1;min-width:0;font-size:13px;overflow-wrap:anywhere;word-break:break-word;}
+  .itemrow{align-items:flex-start;}
+  textarea,input{max-width:100%;}
   .addbtn{font-size:12px;color:var(--rose);background:#fff;border:1px solid var(--pink-mid);border-radius:6px;padding:3px 10px;cursor:pointer;font-family:inherit;}
   .qty{display:inline-flex;align-items:center;gap:8px;}
   .qty button{width:24px;height:24px;border:1px solid var(--line);background:#fff;border-radius:6px;color:var(--rose);font-size:14px;cursor:pointer;line-height:1;}
@@ -105,6 +107,8 @@ let subEvents = [];       // [{name, planned_date}]
 let items = [];           // [{sub_event_name, description, quantity, source}]
 let catalog = [];         // [{sub_event_name, description, default_quantity}]
 let changeNote = null;    // staff "request changes" note, if any
+let subSuggest = [];      // configured sub-events for this event type (Settings)
+let subSuggestType = '';  // the event type subSuggest was fetched for
 let step = 1;
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -190,7 +194,10 @@ async function loadRfq(){
   items = Array.isArray(r.items)? r.items.map(it=>({sub_event_name:it.sub_event_name||'',description:it.description||'',quantity:Number(it.quantity)||1,source:it.source||'custom'})) : [];
   catalog = Array.isArray(r.catalog)? r.catalog : [];
   changeNote = r.change_note||null;
-  if(data.status==='submitted'||data.status==='converted'){ renderSubmitted(); return true; }
+  subSuggest = Array.isArray(r.subevent_suggestions)? r.subevent_suggestions : [];
+  subSuggestType = (data.event_type||'').toLowerCase();
+  if(data.status==='converted'||data.status==='approved'){ renderSubmitted(false); return true; }
+  if(data.status==='submitted'){ renderSubmitted(true); return true; }
   step=1; renderForm();
   return true;
 }
@@ -269,9 +276,10 @@ function renderStep1(){
   $('next1').onclick=async()=>{ await save(true); step=2; renderForm(); };
 }
 
+function suggFor(type){ const t=(type||'').toLowerCase(); if(subSuggest.length && t===subSuggestType) return subSuggest; return SUBEVENT_SUGGEST[t]||SUBEVENT_SUGGEST.default; }
 function renderStep2(){
   const type=(data.event_type||'').toLowerCase();
-  const sugg=SUBEVENT_SUGGEST[type]||SUBEVENT_SUGGEST.default;
+  const sugg=suggFor(type);
   $('stepbody').innerHTML =
     '<h1>Event details</h1>'
     + '<label>Main event</label><select id="f_type">'+EVENT_TYPES.map(t=>'<option '+(data.event_type===t?'selected':'')+'>'+t+'</option>').join('')+'</select>'
@@ -286,7 +294,7 @@ function renderStep2(){
     + '<div class="nav"><button class="btn ghost" id="back2">← Back</button><button class="btn primary" id="next2">Next →</button></div>'
     + '<div class="save-hint">✓ Saved automatically</div>';
   renderChips(sugg);
-  $('f_type').onchange=()=>{ const t=$('f_type').value.toLowerCase(); renderChips(SUBEVENT_SUGGEST[t]||SUBEVENT_SUGGEST.default); };
+  $('f_type').onchange=()=>{ renderChips(suggFor($('f_type').value)); };
   $('back2').onclick=async()=>{ await save(true); step=1; renderForm(); };
   $('next2').onclick=async()=>{ collect(); if(!subEvents.length){ toast('Pick at least one function'); return; } await save(true); step=3; renderForm(); };
 }
@@ -303,7 +311,7 @@ function renderChips(sugg){
 function toggleSub(name){
   const i=subEvents.findIndex(s=>s.name.toLowerCase()===name.toLowerCase());
   if(i>=0) subEvents.splice(i,1); else subEvents.push({name,planned_date:null});
-  const t=($('f_type').value||'').toLowerCase(); renderChips(SUBEVENT_SUGGEST[t]||SUBEVENT_SUGGEST.default);
+  renderChips(suggFor($('f_type').value));
 }
 function renderSubDates(){
   $('subdates').innerHTML = subEvents.map((s,i)=>
@@ -371,7 +379,7 @@ function renderStep4(){
     const its=items.filter(it=>it.sub_event_name===se.name);
     if(!its.length) return;
     body+='<div class="gold-label" style="margin-top:6px">'+esc(se.name.toUpperCase())+'</div>';
-    its.forEach(it=>{ body+='<div style="display:flex;justify-content:space-between"><span>'+esc(it.description)+'</span><span style="color:var(--muted)">×'+it.quantity+'</span></div>'; });
+    its.forEach(it=>{ body+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><span style="overflow-wrap:anywhere;word-break:break-word;min-width:0">'+esc(it.description)+'</span><span style="color:var(--muted);white-space:nowrap">×'+it.quantity+'</span></div>'; });
   });
   body+='</div>';
   body+='<div class="note">Isheeka Events will review and send your quote.</div>';
@@ -390,8 +398,13 @@ function renderStep4(){
 
 function fmtD(s){ try{ const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }catch(e){ return s; } }
 
-function renderSubmitted(){
-  app.innerHTML='<div class="pad center"><h1>Thank you!</h1><div class="sub">Your requirements have been submitted. Isheeka Events will review them and send your quote shortly.</div><p style="font-size:34px">💐</p></div>';
+function renderSubmitted(editable){
+  app.innerHTML='<div class="pad center"><h1>Thank you!</h1>'
+    +'<div class="sub">Your requirements have been submitted. Isheeka Events will review them and send your quote shortly.</div>'
+    +'<p style="font-size:34px">💐</p>'
+    +(editable?'<button class="btn ghost" id="editAgain" style="max-width:260px;margin:0 auto">✏️ Edit my submission</button><div class="note">Need to change something? You can edit and resubmit until we start your quote.</div>':'')
+    +'</div>';
+  if(editable){ const b=document.getElementById('editAgain'); if(b) b.onclick=()=>{ step=1; renderForm(); }; }
 }
 
 function esc(v){ return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

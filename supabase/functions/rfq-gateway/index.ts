@@ -219,7 +219,18 @@ Deno.serve(async (req) => {
             .eq("rfq_id", s.rfq_id).eq("action", "changes_requested").order("created_at", { ascending: false }).limit(1).maybeSingle();
           change_note = ca ? ca.notes : null;
         } catch { /* ignore */ }
-        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog, change_note });
+        // configured sub-event suggestions for this event type (Settings → Sub-events)
+        let subevent_suggestions: string[] = [];
+        try {
+          if (r.event_type) {
+            const { data: et } = await db.from("event_types").select("event_type_id").ilike("label", String(r.event_type)).limit(1).maybeSingle();
+            if (et) {
+              const { data: subs } = await db.from("event_type_subevents").select("name").eq("event_type_id", et.event_type_id).eq("is_active", true).order("sort_order");
+              subevent_suggestions = (subs ?? []).map((x: any) => x.name);
+            }
+          }
+        } catch { /* optional */ }
+        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog, change_note, subevent_suggestions });
       }
 
       // ── autosave / resume: write details + replace items ─────────────────
@@ -228,7 +239,8 @@ Deno.serve(async (req) => {
         if (!s) return json({ error: "no_session" }, 401);
         const { data: r } = await db.from("rfqs").select("status").eq("rfq_id", s.rfq_id).eq("is_deleted", false).maybeSingle();
         if (!r) return json({ error: "not_found" }, 404);
-        if (!["draft", "sent", "in_progress"].includes(r.status))
+        // editable until staff lock it; clients may revise even after submitting
+        if (["approved", "converted", "withdrawn"].includes(r.status))
           return json({ error: "not_editable", status: r.status }, 409);
 
         const f = body.fields ?? {};
@@ -263,13 +275,29 @@ Deno.serve(async (req) => {
       case "submit_rfq": {
         const s = await readSession(body.session);
         if (!s) return json({ error: "no_session" }, 401);
-        const { data: r } = await db.from("rfqs").select("status").eq("rfq_id", s.rfq_id).eq("is_deleted", false).maybeSingle();
+        const { data: r } = await db.from("rfqs").select("*").eq("rfq_id", s.rfq_id).eq("is_deleted", false).maybeSingle();
         if (!r) return json({ error: "not_found" }, 404);
-        if (!["sent", "in_progress", "draft", "changes_requested"].includes(r.status))
+        if (["approved", "converted", "withdrawn"].includes(r.status))
           return json({ error: "not_submittable", status: r.status }, 409);
-        await db.from("rfqs").update({ status: "submitted", client_submitted_at: new Date().toISOString() }).eq("rfq_id", s.rfq_id);
-        await logActivity(s.rfq_id, "client", "submitted");
-        return json({ ok: true });
+        // snapshot this submission as a revision (item-for-item history)
+        const { data: its } = await db.from("rfq_items")
+          .select("sub_event_name,description,quantity,unit,source,sort_order").eq("rfq_id", s.rfq_id).eq("is_deleted", false).order("sort_order");
+        const revNo = (r.revision_number || 0) + 1;
+        const snapshot = {
+          details: {
+            contact_name: r.contact_name, contact_first_name: r.contact_first_name, contact_last_name: r.contact_last_name,
+            contact_phone: r.contact_phone, contact_email: r.contact_email,
+            secondary_contact_name: r.secondary_contact_name, secondary_contact_phone: r.secondary_contact_phone,
+            event_type: r.event_type, event_date: r.event_date, location: r.location, city: r.city,
+            guest_count: r.guest_count, budget_range: r.budget_range, notes: r.notes,
+          },
+          sub_events: r.sub_events || [],
+          items: its || [],
+        };
+        await db.from("rfq_revisions").insert({ rfq_id: s.rfq_id, revision_number: revNo, snapshot, submitted_by: "client" });
+        await db.from("rfqs").update({ status: "submitted", revision_number: revNo, client_submitted_at: new Date().toISOString() }).eq("rfq_id", s.rfq_id);
+        await logActivity(s.rfq_id, "client", "submitted", "Revision " + revNo);
+        return json({ ok: true, revision_number: revNo });
       }
 
       default:
