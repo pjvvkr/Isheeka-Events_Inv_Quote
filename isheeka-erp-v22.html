@@ -4390,6 +4390,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
           <span style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,background:sc.bg,color:sc.color}}>
             {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
           </span>
+          {lead.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:lead.client_id,label:(lead.first_name+' '+lead.last_name).trim()||'Client'})}>👤 View client →</button>}
           {!isLost&&!isConverted&&(
             <>
               {/* Next action buttons — context aware per stage */}
