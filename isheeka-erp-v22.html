@@ -17,9 +17,10 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',sans-serif;background:#f8f4f6;color:#1a1a1a;min-height:100vh}
 :root{
-  --pink:#e8185a;--pink-dark:#993556;--pink-light:#FBEAF0;--pink-mid:#F4C0D1;
-  --white:#ffffff;--grey-50:#f8f4f6;--grey-100:#f0e8ec;--grey-200:#e0d0d8;
-  --grey-400:#9e8a94;--grey-600:#5a4a52;--grey-800:#2a1a22;
+  --pink:#e8185a;--pink-dark:#A01044;--pink-light:#FCEAF1;--pink-mid:#F4C0D1;
+  --gold:#B8893A;--gold-light:#F3E8CF;
+  --white:#ffffff;--grey-50:#FAF7F3;--grey-100:#F1ECE4;--grey-200:#E5DDD2;--grey-300:#CFC6BA;
+  --grey-400:#9A938A;--grey-500:#7C766D;--grey-600:#6B6660;--grey-700:#46423C;--grey-800:#2A2723;
   --green:#0F6E56;--green-light:#E1F5EE;--orange:#854F0B;--orange-light:#FAEEDA;
   --red:#A32D2D;--red-light:#FCEBEB;--blue:#185FA5;--blue-light:#E6F1FB;
   --shadow-sm:0 1px 3px rgba(232,24,90,0.08);--shadow-md:0 4px 12px rgba(232,24,90,0.12);
@@ -3356,8 +3357,8 @@ const LEAD_STAGE_COLORS = {
   quote_sent:{bg:'#E1F5EE',color:'#0F6E56'},
   quote_revision_pending:{bg:'#FCEBEB',color:'#A32D2D'},
   revised_quote_sent:{bg:'#FFF8E1',color:'#F57F17'},
-  quote_confirmed:{bg:'#FBEAF0',color:'#993556'},
-  event_triggered:{bg:'#FBEAF0',color:'#993556'},
+  quote_confirmed:{bg:'#FAEEDA',color:'#854F0B'},
+  event_triggered:{bg:'#E1F5EE',color:'#0F6E56'},
   completed:{bg:'#E1F5EE',color:'#0F6E56'},
 };
 const LEAD_LOSS_REASONS = [
@@ -4727,9 +4728,9 @@ function LeadsModule({nav, onNavigate, onBack}) {
 const EVENT_STATUS_ORDER = ['in_progress','confirmed','planning','completed','cancelled'];
 const EVENT_STATUS_LABELS = {in_progress:'In Progress',confirmed:'Confirmed',planning:'Planning',completed:'Completed',cancelled:'Cancelled'};
 const EVENT_STATUS_COLORS = {
-  in_progress:{bg:'#FBEAF0',color:'#993556',dot:'#e8185a'},
-  confirmed:{bg:'#FAEEDA',color:'#854F0B',dot:'#c87d2a'},
-  planning:{bg:'#E6F1FB',color:'#185FA5',dot:'#185FA5'},
+  planning:{bg:'#F1ECE4',color:'#6B6660',dot:'#9A938A'},
+  confirmed:{bg:'#E6F1FB',color:'#185FA5',dot:'#185FA5'},
+  in_progress:{bg:'#FAEEDA',color:'#854F0B',dot:'#c87d2a'},
   completed:{bg:'#E1F5EE',color:'#0F6E56',dot:'#0F6E56'},
   cancelled:{bg:'#FCEBEB',color:'#A32D2D',dot:'#A32D2D'},
 };
@@ -7528,6 +7529,27 @@ function ItemNumInput({value, onChange, align}) {
   return <input type="number" style={{border:'none',background:'transparent',fontSize:12,width:'100%',outline:'none',textAlign:align||'left',color:'var(--grey-800)',MozAppearance:'textfield'}} value={value} onChange={e=>onChange(e.target.value)}/>;
 }
 
+// Per-sub-event "Load template" dropdown (event wizard). Loads a template's items into one block.
+function SubEventTplBtn({templates, onPick}) {
+  const [open,setOpen]=React.useState(false);
+  return (
+    <div style={{position:'relative',flexShrink:0}}>
+      <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>setOpen(v=>!v)} onBlur={()=>setTimeout(()=>setOpen(false),180)}>📋 Template ▾</button>
+      {open&&(
+        <div style={{position:'absolute',top:'100%',right:0,zIndex:120,background:'white',border:'1px solid var(--grey-200)',borderRadius:'var(--radius-md)',boxShadow:'var(--shadow-md)',minWidth:190,marginTop:4}}>
+          {(templates||[]).length===0&&<div style={{padding:'10px 14px',fontSize:13,color:'var(--grey-400)'}}>No templates</div>}
+          {(templates||[]).map(t=>(
+            <div key={t.template_id} style={{padding:'9px 14px',fontSize:13,cursor:'pointer',color:'var(--grey-800)',borderBottom:'1px solid var(--grey-100)'}}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'} onMouseLeave={e=>e.currentTarget.style.background='white'}
+              onMouseDown={()=>{ setOpen(false); onPick(t); }}>
+              {t.event_type==='wedding'?'💍':t.event_type==='corporate'?'🏢':t.event_type==='birthday'?'🎂':t.event_type==='anniversary'?'💑':'🎪'} {t.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 // ── New Event Wizard ─────────────────────────────────────────────────────────
 function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
   const eventTypes = useEventTypes();
@@ -7667,6 +7689,20 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
     const ses = Object.values(groups).filter(g=>g.name!=='Main Event');
     setSubEvents(ses.length>0?ses:[{id:'se-'+Date.now(),name:'',date:'',location:'',items:[]}]);
     setMainItems(mainEventItems);
+  };
+  // Load a template's items into ONE sub-event block (matched by sub-event name, else all template items).
+  const loadTemplateIntoSubEvent = async (seId, tpl) => {
+    const se = subEvents.find(s=>s.id===seId);
+    if(se && (se.items||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace this sub-event’s items with the template?')) return;
+    const {data} = await supabase.from('event_template_items').select('*').eq('template_id',tpl.template_id).order('sort_order');
+    if(!data) return;
+    const seName=((se&&se.name)||'').trim().toLowerCase();
+    let src = data.filter(i=>i.sub_event_name!=='Main Event');
+    const matched = src.filter(i=>(i.sub_event_name||'').trim().toLowerCase()===seName);
+    if(seName && matched.length) src = matched;
+    if(src.length===0) src = data; // template had only Main Event items — still let the user pull them in
+    const newItems = src.map(i=>({id:'i-'+i.item_id+'-'+Math.random(),description:i.description,quantity:i.default_quantity,unit_price:0}));
+    setSubEvents(s=>s.map(x=>x.id===seId?{...x,items:newItems}:x));
   };
 
   const handleExcelImport = (e) => {
@@ -7924,8 +7960,8 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
             {/* Toolbar */}
             <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
               <div style={{position:'relative'}}>
-                <button className="btn sm" onClick={()=>setShowTplMenu(v=>!v)} style={{display:'flex',alignItems:'center',gap:4}}>
-                  📋 Load template <span style={{fontSize:10}}>▼</span>
+                <button className="btn sm" onClick={()=>setShowTplMenu(v=>!v)} style={{display:'flex',alignItems:'center',gap:4}} title="Replace all sub-events with this template's full structure">
+                  📋 Load full template <span style={{fontSize:10}}>▼</span>
                 </button>
                 {showTplMenu&&(
                   <div style={{position:'absolute',top:'100%',left:0,zIndex:100,background:'white',border:'1px solid var(--grey-200)',borderRadius:'var(--radius-md)',boxShadow:'var(--shadow-md)',minWidth:180,marginTop:4}}>
@@ -7959,6 +7995,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
                   <SubEventNameInput value={se.name} onChange={v=>updateSubEvent(se.id,'name',v)}/>
                   <SubEventDateInput value={se.date} onChange={v=>updateSubEvent(se.id,'date',v)}/>
                   <SubEventLocInput value={se.location} onChange={v=>updateSubEvent(se.id,'location',v)}/>
+                  <SubEventTplBtn templates={templates} onPick={tpl=>loadTemplateIntoSubEvent(se.id,tpl)}/>
                   {subEvents.length>1&&<button style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14,flexShrink:0}} onClick={()=>removeSubEvent(se.id)}>🗑</button>}
                 </div>
                 <FastEntryTable items={se.items} onChange={items=>updateSubItems(se.id,items)}/>
@@ -8393,7 +8430,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
     sans('normal',8); setText(MUTED);
     doc.text('Date: '+fmt(quot.doc_date), W-M, top+40, {align:'right'});
     { if(isInv && quot.due_date) doc.text('Due date: '+fmt(quot.due_date), W-M, top+51, {align:'right'}); }
-    { if(_evDate){ setText(PINK); doc.text('Event date: '+fmt(_evDate), W-M, top+62, {align:'right'}); setText(MUTED); } }
+    { if(_evDate){ const evY=(isInv && quot.due_date)?(top+62):(top+51); setText(PINK); doc.text('Event date: '+fmt(_evDate), W-M, evY, {align:'right'}); setText(MUTED); } }
     setDraw(PINK); doc.setLineWidth(1.4); doc.line(M, HDR_BOTTOM-12, W-M, HDR_BOTTOM-12);
   };
 
