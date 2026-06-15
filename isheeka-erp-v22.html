@@ -4126,7 +4126,7 @@ function QuotationDetailModal(){ return null; /* dead code removed — supersede
                 ))}
               </div>
             )}
-            {quot.additional_notes&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Notes</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.additional_notes}</div></div>}
+            {quot.additional_notes&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Notes</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word'}}>{quot.additional_notes}</div></div>}
             {quot.payment_terms&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Payment terms</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.payment_terms}</div></div>}
             {quot.additional_terms&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Additional terms &amp; conditions</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.additional_terms}</div></div>}
           </>}
@@ -5364,6 +5364,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     if(sharing||!quot) return;
     if(channel==='whatsapp' && !validClientPhone(quot.client_phone)){ notify("This client's phone number looks invalid — please update it before sharing on WhatsApp.",'error'); return; }
     if((channel==='gmail'||channel==='email') && !quot.client_email){ notify('This client has no email address on file.','error'); return; }
+    if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. Send it to the client anyway?')) return;
     setSharing(true);
     notify('Preparing the quotation PDF…','info',2500);
     const url = await uploadQuotePdf(quot, items, displayOpts, qSettings, {showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
@@ -5377,6 +5378,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   };
   const doExport = async (action) => {
     if(!quot) return;
+    if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. '+(action==='download'?'Download':action==='print'?'Print':'Open')+' it anyway?')) return;
     buildQuotationPDF(quot, items, {action, displayOpts, settings:qSettings, showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
   };
   const doConfirmQuote = async () => {
@@ -5433,6 +5435,11 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     } else if(quot.lead_id){
       const {data:l}=await supabase.from('leads').select('*').eq('lead_id',quot.lead_id).single();
       leadObj=l||null;
+    }
+    if(!leadObj && quot.client_id){
+      // quotes created from an RFQ link by client_id (no lead/event yet) — seed the wizard from the client
+      const {data:c}=await supabase.from('clients').select('client_id,first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',quot.client_id).single();
+      if(c) leadObj={lead_id:null,client_id:c.client_id,first_name:c.first_name,last_name:c.last_name,phone:c.phone_1||'',phone_2:c.phone_2||'',email:c.email_1||'',source:c.source||'referral',event_type:''};
     }
     if(!leadObj){ notify('Could not load the quote context to edit.','error'); return; }
     setWizardCtx({lead:leadObj, origin, isRevision: quot.status!=='draft'});
@@ -5567,7 +5574,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
               </div>
             ))}
           </div>}
-          {quot.additional_notes&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Notes</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.additional_notes}</div></div>}
+          {quot.additional_notes&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Notes</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word'}}>{quot.additional_notes}</div></div>}
           {quot.payment_terms&&<div style={{marginBottom:10}}><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Payment terms</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.payment_terms}</div></div>}
           {quot.additional_terms&&<div><div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>Additional terms &amp; conditions</div><div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap'}}>{quot.additional_terms}</div></div>}
         </div>
@@ -7746,6 +7753,7 @@ function RFQDetail({rfqId, onBack, onShare, onNavigate}){
   const [cmpA,setCmpA]=React.useState('');
   const [cmpB,setCmpB]=React.useState('');
   const [viewRev,setViewRev]=React.useState(null);
+  const [openAct,setOpenAct]=React.useState(0);
   const load=async()=>{ setLoading(true);
     const [{data:rfq},{data:its},{data:act},{data:revs}]=await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id',rfqId).single(),
@@ -7787,6 +7795,7 @@ function RFQDetail({rfqId, onBack, onShare, onNavigate}){
   const subs=Array.isArray(r.sub_events)?r.sub_events:[];
   const canApprove=['submitted','changes_requested'].includes(r.status);
   const groups=rfqItemsGrouped(items);
+  const actGroups=(()=>{ const asc=[...activity].reverse(); const gs=[]; let buf=[]; asc.forEach(a=>{ buf.push(a); if(a.action==='submitted'){ gs.push({label:(a.notes&&/Revision/i.test(a.notes))?a.notes:'Submitted',entries:buf}); buf=[]; } }); if(buf.length) gs.push({label:'In progress',entries:buf}); return gs.reverse(); })();
   return (
     <div>
       <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'18px 22px',marginBottom:16}}>
@@ -7857,13 +7866,21 @@ function RFQDetail({rfqId, onBack, onShare, onNavigate}){
       </div>}
 
       {/* Activity timeline */}
-      {activity.length>0&&<div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Activity</div>
-        {activity.map(a=>(
-          <div key={a.activity_id} style={{display:'flex',gap:10,fontSize:12,padding:'5px 0',borderBottom:'1px solid var(--grey-50)'}}>
-            <span style={{color:'var(--grey-800)',fontWeight:500,minWidth:170}}>{RFQ_ACTION_LABEL[a.action]||a.action}</span>
-            <span style={{flex:1,color:'var(--grey-400)',overflowWrap:'anywhere'}}>{a.notes||''}</span>
-            <span style={{color:'var(--grey-400)',whiteSpace:'nowrap'}}>{fmtDate(a.created_at,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+      {actGroups.length>0&&<div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
+        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>Activity</div>
+        {actGroups.map((g,gi)=>(
+          <div key={gi} style={{borderBottom:'1px solid var(--grey-50)'}}>
+            <div onClick={()=>setOpenAct(openAct===gi?-1:gi)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer',padding:'9px 0',fontSize:13}}>
+              <span style={{fontWeight:600,color:'var(--grey-800)'}}>{g.label}</span>
+              <span style={{color:'var(--grey-400)',fontSize:12}}>{g.entries.length} event{g.entries.length>1?'s':''} {openAct===gi?'▾':'▸'}</span>
+            </div>
+            {openAct===gi&&g.entries.map(a=>(
+              <div key={a.activity_id} style={{display:'flex',gap:10,fontSize:12,padding:'4px 0 4px 12px'}}>
+                <span style={{color:'var(--grey-700)',fontWeight:500,minWidth:160}}>{RFQ_ACTION_LABEL[a.action]||a.action}</span>
+                <span style={{flex:1,color:'var(--grey-400)',overflowWrap:'anywhere'}}>{a.notes||''}</span>
+                <span style={{color:'var(--grey-400)',whiteSpace:'nowrap'}}>{fmtDate(a.created_at,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+              </div>
+            ))}
           </div>
         ))}
       </div>}

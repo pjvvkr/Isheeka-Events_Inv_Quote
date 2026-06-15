@@ -109,6 +109,7 @@ let catalog = [];         // [{sub_event_name, description, default_quantity}]
 let changeNote = null;    // staff "request changes" note, if any
 let subSuggest = [];      // configured sub-events for this event type (Settings)
 let subSuggestType = '';  // the event type subSuggest was fetched for
+let evTypes = [];         // configured event types (Settings)
 let step = 1;
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -196,6 +197,7 @@ async function loadRfq(){
   changeNote = r.change_note||null;
   subSuggest = Array.isArray(r.subevent_suggestions)? r.subevent_suggestions : [];
   subSuggestType = (data.event_type||'').toLowerCase();
+  evTypes = Array.isArray(r.event_types)? r.event_types : [];
   if(data.status==='converted'||data.status==='approved'){ renderSubmitted(false); return true; }
   if(data.status==='submitted'){ renderSubmitted(true); return true; }
   step=1; renderForm();
@@ -282,7 +284,7 @@ function renderStep2(){
   const sugg=suggFor(type);
   $('stepbody').innerHTML =
     '<h1>Event details</h1>'
-    + '<label>Main event</label><select id="f_type">'+EVENT_TYPES.map(t=>'<option '+(data.event_type===t?'selected':'')+'>'+t+'</option>').join('')+'</select>'
+    + '<label>Main event</label><select id="f_type">'+(()=>{ let types=evTypes.length?evTypes.slice():EVENT_TYPES.slice(); if(data.event_type&&!types.includes(data.event_type)) types.unshift(data.event_type); return types.map(t=>'<option '+(data.event_type===t?'selected':'')+'>'+esc(t)+'</option>').join(''); })()+'</select>'
     + '<label>Planned date (main event)</label><input id="f_date" type="date" value="'+esc(data.event_date)+'">'
     + '<label>Functions &amp; their planned dates</label><div class="chips" id="chips"></div>'
     + '<div id="subdates"></div>'
@@ -371,7 +373,7 @@ function renderStep4(){
   body+='<div style="font-size:11px;color:var(--muted);background:var(--field);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
     + subEvents.map(s=>esc(s.name)+(s.planned_date?(' '+fmtD(s.planned_date)):'')).join(' · ') + '</div>';
   body+='<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Contacts: '+esc(data.contact_name||'')+(data.secondary_contact_name?(' · '+esc(data.secondary_contact_name)):'')+'</div>';
-  if(data.notes && data.notes.trim()) body+='<div style="font-size:12px;color:var(--ink);background:var(--field);border-radius:8px;padding:8px 10px;margin-bottom:8px"><b>Notes:</b> '+esc(data.notes)+'</div>';
+  if(data.notes && data.notes.trim()) body+='<div style="font-size:12px;color:var(--ink);background:var(--field);border-radius:8px;padding:8px 10px;margin-bottom:8px;overflow-wrap:anywhere;word-break:break-word"><b>Notes:</b> '+esc(data.notes)+'</div>';
   // items grouped
   body+='<div style="background:var(--field);border-radius:10px;padding:10px 12px;font-size:13px">';
   if(!items.length) body+='<div class="sub">No items added.</div>';

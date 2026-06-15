@@ -230,7 +230,9 @@ Deno.serve(async (req) => {
             }
           }
         } catch { /* optional */ }
-        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog, change_note, subevent_suggestions });
+        let event_types: string[] = [];
+        try { const { data: ets } = await db.from("event_types").select("label").eq("is_active", true).order("sort_order"); event_types = (ets ?? []).map((x: any) => x.label).filter(Boolean); } catch { /* optional */ }
+        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog, change_note, subevent_suggestions, event_types });
       }
 
       // ── autosave / resume: write details + replace items ─────────────────
