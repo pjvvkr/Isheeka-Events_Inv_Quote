@@ -7730,6 +7730,15 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
     const newItems = src.map(i=>({id:'i-'+i.item_id+'-'+Math.random(),description:i.description,quantity:i.default_quantity,unit_price:0}));
     setSubEvents(s=>s.map(x=>x.id===seId?{...x,items:newItems}:x));
   };
+  // Load a template's items into the Main event items block (Main Event group, else all template items).
+  const loadTemplateIntoMain = async (tpl) => {
+    if((mainItems||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace the main event items with the template?')) return;
+    const {data} = await supabase.from('event_template_items').select('*').eq('template_id',tpl.template_id).order('sort_order');
+    if(!data) return;
+    let src = data.filter(i=>(i.sub_event_name||'')==='Main Event');
+    if(src.length===0) src = data;
+    setMainItems(src.map(i=>({id:'i-'+i.item_id+'-'+Math.random(),description:i.description,quantity:i.default_quantity,unit_price:0})));
+  };
 
   const handleExcelImport = (e) => {
     const file = e.target.files[0];
@@ -7985,25 +7994,6 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
 
             {/* Toolbar */}
             <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
-              <div style={{position:'relative'}}>
-                <button className="btn sm" onClick={()=>setShowTplMenu(v=>!v)} style={{display:'flex',alignItems:'center',gap:4}} title="Replace all sub-events with this template's full structure">
-                  📋 Load full template <span style={{fontSize:10}}>▼</span>
-                </button>
-                {showTplMenu&&(
-                  <div style={{position:'absolute',top:'100%',left:0,zIndex:100,background:'white',border:'1px solid var(--grey-200)',borderRadius:'var(--radius-md)',boxShadow:'var(--shadow-md)',minWidth:180,marginTop:4}}>
-                    {templates.length===0&&<div style={{padding:'10px 14px',fontSize:13,color:'var(--grey-400)'}}>No templates found</div>}
-                    {templates.map(t=>(
-                      <div key={t.template_id} style={{padding:'10px 14px',fontSize:13,cursor:'pointer',color:'var(--grey-800)',borderBottom:'1px solid var(--grey-100)',display:'flex',alignItems:'center',gap:8}}
-                        onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'}
-                        onMouseLeave={e=>e.currentTarget.style.background='white'}
-                        onClick={()=>loadTemplate(t)}>
-                        <span>{t.event_type==='wedding'?'💍':t.event_type==='corporate'?'🏢':t.event_type==='birthday'?'🎂':t.event_type==='anniversary'?'💑':'🎪'}</span>
-                        {t.name}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
               <button className="btn sm" onClick={()=>excelFileRef.current?.click()}>⬆️ Import Excel</button>
               <input ref={excelFileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleExcelImport}/>
               <div style={{flex:1}}/>
@@ -8034,6 +8024,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
                 <div style={{width:9,height:9,borderRadius:'50%',background:'#888780',flexShrink:0}}></div>
                 <span style={{fontSize:13,fontWeight:500,color:'var(--grey-800)',flex:1}}>Main event items</span>
                 <span style={{fontSize:11,color:'var(--grey-400)'}}>Items not tied to a specific sub-event</span>
+                <SubEventTplBtn templates={templates} onPick={tpl=>loadTemplateIntoMain(tpl)}/>
               </div>
               <FastEntryTable items={mainItems} onChange={setMainItems}/>
             </div>
