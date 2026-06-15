@@ -3030,6 +3030,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               {EVENT_STATUS_LABELS[event.status?.toLowerCase()]||event.status}
             </span>
             {!['cancelled'].includes(event.status?.toLowerCase())&&<EventFunnelBadge funnel={event.status?.toLowerCase()==='completed'?{...funnel,label:null}:funnel}/>}
+            {event.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:event.client_id,label:event.client_name||'Client'})}>👤 View client →</button>}
             {!['completed','cancelled'].includes(event.status?.toLowerCase())&&(
               funnel.canComplete
                 ? <button className="btn sm" onClick={markEventCompleted} title="Client invoice fully paid — marks the event delivered and closes the source lead">✅ Mark completed</button>
@@ -5443,6 +5444,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           </div>
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
+          {quot.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:quot.client_id,label:quot.client_name||'Client'})}>👤 View client →</button>}
           {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
           {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
@@ -6087,6 +6089,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             </div>}
           </div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+            {inv.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:inv.client_id,label:inv.client_name||'Client'})}>👤 View client →</button>}
             {inv.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id,label:inv.event_name||'Event'})}>Go to event →</button>}
             {inv.status==='draft'&&<button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
             {!locked&&<button className="btn sm" disabled={saving} onClick={openRevise}>✏️ Revise</button>}
