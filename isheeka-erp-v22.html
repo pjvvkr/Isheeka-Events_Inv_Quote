@@ -1466,7 +1466,7 @@ function AltContactForm({clientId, initial={}, onSave, onCancel}) {
 }
 
 // ── Client Detail ─────────────────────────────────────────────────────────────
-function ClientDetail({clientId, onBack}) {
+function ClientDetail({clientId, onBack, onNavigate}) {
   const [client, setClient] = useState(null);
   const [altContacts, setAltContacts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1474,7 +1474,72 @@ function ClientDetail({clientId, onBack}) {
   const [showAltForm, setShowAltForm] = useState(false);
   const [editingAlt, setEditingAlt] = useState(null);
 
-  useEffect(()=>{ loadClient(); }, [clientId]);
+  // ── M1 — Client 360 ────────────────────────────────────────────────────────
+  // Read-only, event-grouped relationship view. Recurring-aware (a client may
+  // engage us for many events over time). One batched load of the client's
+  // events + linked quotes/invoices/payments/vendors/leads; everything is
+  // derived live (no schema change, nothing stored). Cancelled invoices are
+  // excluded from money totals, consistent with the rest of the app.
+  const [c360, setC360] = useState(null);
+  const [c360Loading, setC360Loading] = useState(true);
+  const [expanded, setExpanded] = useState({}); // event_id -> bool
+
+  useEffect(()=>{ loadClient(); load360(); }, [clientId]);
+
+  const load360 = async () => {
+    setC360Loading(true);
+    const today = new Date().toISOString().slice(0,10);
+    const [{data:events},{data:quotes},{data:invoices},{data:leads}] = await Promise.all([
+      supabase.from('events').select('event_id,ref_number,name,type,status,main_date,location').eq('client_id',clientId).eq('is_deleted',false),
+      supabase.from('quotations').select('quotation_id,ref_number,status,grand_total,event_id,lead_id,revision_number,doc_date,created_at').eq('client_id',clientId).eq('is_deleted',false),
+      supabase.from('invoices').select('invoice_id,ref_number,status,grand_total,total_received,total_outstanding,event_id,revision_number,doc_date').eq('client_id',clientId).eq('is_deleted',false),
+      supabase.from('leads').select('lead_id,ref_number,stage,event_id,budget,created_at').eq('client_id',clientId).eq('is_deleted',false),
+    ]);
+    const evs=events||[], qs=quotes||[], invs=invoices||[], lds=leads||[];
+    const eventIds=evs.map(e=>e.event_id), invoiceIds=invs.map(i=>i.invoice_id);
+    const [{data:vendors},{data:vpays},{data:ipays}] = await Promise.all([
+      eventIds.length? supabase.from('event_vendors').select('event_id,outstanding').in('event_id',eventIds).eq('is_deleted',false) : Promise.resolve({data:[]}),
+      eventIds.length? supabase.from('vendor_payments').select('amount,event_id,is_voided').in('event_id',eventIds) : Promise.resolve({data:[]}),
+      invoiceIds.length? supabase.from('invoice_payments').select('invoice_id').in('invoice_id',invoiceIds) : Promise.resolve({data:[]}),
+    ]);
+    const isActive=i=>(i.status||'').toLowerCase()!=='cancelled';
+    const num=v=>parseFloat(v)||0;
+    const invOut=i=>num(i.total_outstanding!=null?i.total_outstanding:(num(i.grand_total)-num(i.total_received)));
+    // invoice_id -> payment count
+    const payCountByInv={}; (ipays||[]).forEach(p=>{payCountByInv[p.invoice_id]=(payCountByInv[p.invoice_id]||0)+1;});
+    // event_id -> vendor outstanding
+    const vendOutByEvt={}; (vendors||[]).forEach(v=>{vendOutByEvt[v.event_id]=(vendOutByEvt[v.event_id]||0)+num(v.outstanding);});
+    // build per-event cards
+    const eventCards=evs.map(e=>{
+      const eq=qs.filter(q=>q.event_id===e.event_id);
+      const ei=invs.filter(i=>i.event_id===e.event_id);
+      const eiActive=ei.filter(isActive);
+      const invoiced=eiActive.reduce((s,i)=>s+num(i.grand_total),0);
+      const received=eiActive.reduce((s,i)=>s+num(i.total_received),0);
+      const outstanding=eiActive.reduce((s,i)=>s+invOut(i),0);
+      const payCount=ei.reduce((s,i)=>s+(payCountByInv[i.invoice_id]||0),0);
+      return {...e, quotes:eq, invoices:ei, invoiced, received, outstanding, vendorOut:vendOutByEvt[e.event_id]||0, payCount};
+    }).sort((a,b)=>String(b.main_date||'').localeCompare(String(a.main_date||'')));
+    // lifetime KPIs
+    const activeInvs=invs.filter(isActive);
+    const kpis={
+      events:evs.length,
+      upcoming:evs.filter(e=>e.main_date&&e.main_date>=today&&!['completed','cancelled'].includes((e.status||'').toLowerCase())).length,
+      invoiced:activeInvs.reduce((s,i)=>s+num(i.grand_total),0),
+      received:activeInvs.reduce((s,i)=>s+num(i.total_received),0),
+      outstanding:activeInvs.reduce((s,i)=>s+invOut(i),0),
+      vendorDue:(vendors||[]).reduce((s,v)=>s+num(v.outstanding),0),
+    };
+    // open opportunities — quotes/leads not yet tied to an event
+    const liveQuote=q=>!['superseded','rejected','expired','converted','invoiced'].includes((q.status||'').toLowerCase());
+    const openQuotes=qs.filter(q=>!q.event_id&&liveQuote(q)).map(q=>({kind:'quote',id:q.quotation_id,ref:q.ref_number,status:q.status,amount:num(q.grand_total),lead_id:q.lead_id}));
+    const openLeads=lds.filter(l=>!l.event_id&&!openQuotes.some(q=>q.lead_id===l.lead_id)).map(l=>({kind:'lead',id:l.lead_id,ref:l.ref_number,stage:l.stage,amount:num(l.budget)}));
+    const opportunities=[...openQuotes,...openLeads];
+    setC360({eventCards, kpis, opportunities});
+    // expand the most recent event by default
+    if(eventCards.length) setExpanded({[eventCards[0].event_id]:true});
+    setC360Loading(false);
+  };
 
   const loadClient = async () => {
     setLoading(true);
@@ -1557,6 +1622,8 @@ function ClientDetail({clientId, onBack}) {
   const statusColors = {active:{bg:'var(--green-light)',color:'var(--green)'},inactive:{bg:'var(--grey-100)',color:'var(--grey-400)'},vip:{bg:'var(--pink-light)',color:'var(--pink)'}};
   const sc = statusColors[client.status?.toLowerCase()]||statusColors.active;
   const relLabels = {spouse:'Spouse',parent:'Parent',sibling:'Sibling',friend:'Friend',other:'Other'};
+  const inr = n => '₹'+Math.round(n||0).toLocaleString('en-IN');
+  const inrShort = n => { n=Math.round(n||0); if(n>=10000000) return '₹'+(n/10000000).toFixed(n%10000000?2:0)+'Cr'; if(n>=100000) return '₹'+(n/100000).toFixed(n%100000?2:1)+'L'; if(n>=1000) return '₹'+(n/1000).toFixed(n%1000?1:0)+'k'; return '₹'+n.toLocaleString('en-IN'); };
 
   return (
     <div>
@@ -1577,6 +1644,7 @@ function ClientDetail({clientId, onBack}) {
               <span style={{display:'inline-block',padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--blue-light)',color:'var(--blue)'}}>
                 {client.source}
               </span>
+              {c360&&c360.kpis.events>1&&<span style={{display:'inline-block',padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--pink-light)',color:'var(--pink)'}}>Repeat client</span>}
             </div>
           </div>
         </div>
@@ -1590,6 +1658,102 @@ function ClientDetail({clientId, onBack}) {
           <button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={handleDeleteClient}>🗑 Delete</button>
         </div>
       </div>
+
+      {/* ── M1 — Client 360 (relationship view) ─────────────────────────────── */}
+      {c360Loading ? (
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'28px',border:'1px solid var(--grey-100)',marginBottom:16,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}></div></div>
+      ) : c360 && (c360.kpis.events>0 || c360.opportunities.length>0) ? (
+        <div style={{marginBottom:16}}>
+
+          {/* Lifetime KPIs across ALL the client's events */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8,marginBottom:16}}>
+            {[
+              {l:'Events',v:c360.kpis.events,sub:c360.kpis.upcoming>0?c360.kpis.upcoming+' upcoming':null,c:'var(--grey-800)'},
+              {l:'Invoiced',v:inrShort(c360.kpis.invoiced),c:'var(--grey-800)'},
+              {l:'Received',v:inrShort(c360.kpis.received),c:'var(--green)'},
+              {l:'Outstanding',v:inrShort(c360.kpis.outstanding),c:c360.kpis.outstanding>0?'var(--red)':'var(--grey-800)'},
+              {l:'Vendor due',v:inrShort(c360.kpis.vendorDue),c:c360.kpis.vendorDue>0?'#854F0B':'var(--grey-800)'},
+            ].map(k=>(
+              <div key={k.l} style={{background:'white',border:'1px solid var(--grey-100)',borderRadius:'var(--radius-md)',padding:'12px 14px'}}>
+                <div style={{fontSize:11,color:'var(--grey-400)'}}>{k.l}</div>
+                <div style={{fontSize:19,fontWeight:600,color:k.c,marginTop:2}}>{k.v}</div>
+                {k.sub&&<div style={{fontSize:10,color:'var(--grey-400)',marginTop:1}}>{k.sub}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* Per-event cards (newest first) — the recurring core */}
+          {c360.eventCards.length>0&&<div style={{fontSize:12,fontWeight:600,letterSpacing:'.05em',color:'var(--gold)',marginBottom:10}}>EVENTS &amp; TRANSACTIONS</div>}
+          {c360.eventCards.map(ev=>{
+            const esc=EVENT_STATUS_COLORS[(ev.status||'').toLowerCase()]||EVENT_STATUS_COLORS.planning;
+            const open=!!expanded[ev.event_id];
+            const liveQuotes=ev.quotes.filter(q=>!['superseded','rejected','expired'].includes((q.status||'').toLowerCase()));
+            const aq=liveQuotes[0]||ev.quotes[0];
+            const activeInvs=ev.invoices.filter(i=>(i.status||'').toLowerCase()!=='cancelled');
+            const iv=activeInvs[0]||ev.invoices[0];
+            const fullyPaid=ev.invoiced>0&&ev.outstanding<=0.5;
+            return (
+              <div key={ev.event_id} style={{background:'white',border:'1px solid var(--grey-100)',borderRadius:'var(--radius-lg)',overflow:'hidden',marginBottom:10}}>
+                <div style={{height:4,background:esc.dot}}/>
+                <div style={{padding:'12px 16px'}}>
+                  {/* header row — click toggles expand */}
+                  <div onClick={()=>setExpanded(x=>({...x,[ev.event_id]:!x[ev.event_id]}))} style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',cursor:'pointer'}}>
+                    <span onClick={e=>{e.stopPropagation();onNavigate&&onNavigate('events',{eventId:ev.event_id,label:ev.name||ev.ref_number||'Event'});}} style={{fontSize:14,fontWeight:600,color:'var(--grey-800)',textDecoration:'underline',textDecorationColor:'var(--grey-200)'}}>{ev.name||eventTypeLabel(ev.type)||'Event'}</span>
+                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:20,fontWeight:500,background:esc.bg,color:esc.color}}>{EVENT_STATUS_LABELS[(ev.status||'').toLowerCase()]||ev.status}</span>
+                    {!open&&<span style={{marginLeft:'auto',fontSize:12,color:'var(--grey-600)'}}>{inr(ev.invoiced)}{fullyPaid?<span style={{color:'var(--green)'}}> · fully paid</span>:ev.outstanding>0?<span style={{color:'var(--red)'}}> · {inr(ev.outstanding)} due</span>:null}</span>}
+                    <span style={{marginLeft:open?'auto':0,color:'var(--grey-400)',fontSize:12}}>{open?'▾':'▸'}</span>
+                  </div>
+                  <div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>{ev.ref_number}{ev.type?' · '+eventTypeLabel(ev.type):''}{ev.main_date?' · '+fmtDate(ev.main_date):''}{ev.location?' · '+ev.location:''}</div>
+
+                  {open&&<>
+                    {/* the chain: RFQ → Quote → Invoice → Payments → Vendors */}
+                    <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',margin:'12px 0',fontSize:12}}>
+                      <span title="Client RFQ portal — coming soon" style={{padding:'4px 10px',border:'1px dashed var(--grey-200)',borderRadius:20,color:'var(--grey-400)'}}>RFQ —</span>
+                      <span style={{color:'var(--grey-300)'}}>→</span>
+                      {aq?<span onClick={()=>onNavigate&&onNavigate('quotations',{quotId:aq.quotation_id,label:aq.ref_number})} style={{padding:'4px 10px',border:'1px solid var(--pink-mid)',borderRadius:20,color:'var(--pink)',cursor:'pointer'}}>{ev.quotes.length>1?ev.quotes.length+' quotes':aq.ref_number}</span>:<span style={{padding:'4px 10px',border:'1px solid var(--grey-200)',borderRadius:20,color:'var(--grey-400)'}}>No quote</span>}
+                      <span style={{color:'var(--grey-300)'}}>→</span>
+                      {iv?<span onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:iv.invoice_id,label:iv.ref_number})} style={{padding:'4px 10px',border:'1px solid var(--pink-mid)',borderRadius:20,color:'var(--pink)',cursor:'pointer'}}>{activeInvs.length>1?activeInvs.length+' invoices':iv.ref_number}</span>:<span style={{padding:'4px 10px',border:'1px solid var(--grey-200)',borderRadius:20,color:'var(--grey-400)'}}>No invoice</span>}
+                      <span style={{color:'var(--grey-300)'}}>→</span>
+                      <span style={{padding:'4px 10px',border:'1px solid var(--grey-200)',borderRadius:20,color:'var(--grey-600)'}}>{ev.payCount} payment{ev.payCount===1?'':'s'}</span>
+                      {ev.vendorOut>0&&<><span style={{color:'var(--grey-300)'}}>→</span><span style={{padding:'4px 10px',border:'1px solid var(--grey-200)',borderRadius:20,color:'#854F0B'}}>Vendors {inr(ev.vendorOut)} due</span></>}
+                    </div>
+                    {/* money line */}
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8,background:'var(--grey-50)',borderRadius:'var(--radius-sm)',padding:'10px 12px'}}>
+                      {[['Invoiced',inr(ev.invoiced),'var(--grey-800)'],['Received',inr(ev.received),'var(--green)'],['Outstanding',inr(ev.outstanding),ev.outstanding>0?'var(--red)':'var(--grey-800)'],['Vendor bal.',inr(ev.vendorOut),ev.vendorOut>0?'#854F0B':'var(--grey-800)']].map(([l,v,c])=>(
+                        <div key={l}><div style={{fontSize:10,color:'var(--grey-400)'}}>{l}</div><div style={{fontSize:13,fontWeight:500,color:c}}>{v}</div></div>
+                      ))}
+                    </div>
+                  </>}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Open opportunities — not yet an event */}
+          {c360.opportunities.length>0&&<>
+            <div style={{fontSize:12,fontWeight:600,letterSpacing:'.05em',color:'var(--gold)',margin:'14px 0 8px'}}>OPEN — NOT YET AN EVENT</div>
+            {c360.opportunities.map(o=>(
+              <div key={o.kind+o.id} onClick={()=>o.kind==='quote'?onNavigate&&onNavigate('quotations',{quotId:o.id,label:o.ref}):onNavigate&&onNavigate('leads',{leadId:o.id,label:o.ref})} style={{background:'white',border:'1px dashed var(--grey-200)',borderRadius:'var(--radius-md)',padding:'10px 14px',display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',cursor:'pointer',marginBottom:8}}>
+                {o.kind==='quote'?<>
+                  <span style={{fontSize:13,fontWeight:500,color:'var(--pink)'}}>{o.ref}</span>
+                  {(()=>{const qc=QUOT_STATUS_COLORS[o.status]||QUOT_STATUS_COLORS.draft;return <span style={{fontSize:11,padding:'2px 8px',borderRadius:20,fontWeight:500,background:qc.bg,color:qc.color}}>{QUOT_STATUS_LABELS[o.status]||o.status}</span>;})()}
+                  <span style={{marginLeft:'auto',fontSize:12,color:'var(--grey-400)'}}>{inr(o.amount)}</span>
+                </>:<>
+                  <span style={{fontSize:11,fontWeight:600,color:'var(--gold)'}}>LEAD</span>
+                  <span style={{fontSize:13,color:'var(--grey-800)'}}>{o.ref}</span>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:20,background:'var(--grey-100)',color:'var(--grey-600)'}}>{leadStageDisplay(o.stage)}</span>
+                  {o.amount>0&&<span style={{marginLeft:'auto',fontSize:12,color:'var(--grey-400)'}}>{inr(o.amount)}</span>}
+                </>}
+              </div>
+            ))}
+          </>}
+
+        </div>
+      ) : c360 ? (
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'24px',border:'1px solid var(--grey-100)',marginBottom:16,textAlign:'center',color:'var(--grey-400)',fontSize:13}}>
+          No events, quotes or invoices for this client yet.
+        </div>
+      ) : null}
 
       <div className="form-grid">
         {/* Contact details */}
@@ -1999,7 +2163,7 @@ function ClientsModule({nav, onNavigate, onBack}) {
   const statusColors = {active:{bg:'var(--green-light)',color:'var(--green)'},inactive:{bg:'var(--grey-100)',color:'var(--grey-400)'},vip:{bg:'var(--pink-light)',color:'var(--pink)'}};
 
   if(isNew) return <ClientForm onSave={handleSaveNew} onCancel={onBack}/>;
-  if(detailId) return <ClientDetail clientId={detailId} onBack={onBack}/>;
+  if(detailId) return <ClientDetail clientId={detailId} onBack={onBack} onNavigate={onNavigate}/>;
 
   return (
     <div>
