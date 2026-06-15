@@ -8646,7 +8646,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   // Terms
   if(quot.additional_terms){
     if(H-58-y<40){ doc.addPage(); drawFrame(); drawHeaderBand(); y=HDR_BOTTOM+8; }
-    sans('bold',8.5); setText(PINK); doc.text('TERMS & CONDITIONS', M, y); y+=14;
+    sans('bold',8.5); setText(GOLD); doc.text('TERMS & CONDITIONS', M, y); y+=14;
     sans('normal',9); setText(MUTED);
     quot.additional_terms.split('\n').filter(l=>l.trim()).forEach(l=>{ const wl=doc.splitTextToSize('- '+l.trim(), W-2*M); doc.text(wl, M, y); y+=wl.length*12+2; });
   }
@@ -8654,7 +8654,7 @@ function buildQuotationPDF(quot, lineItems, opts={}){
   // Revision history (only on revised docs, when the sender opts to include it)
   if(opts.showRevisionHistory && Array.isArray(opts.revisionHistory) && opts.revisionHistory.length){
     if(H-58-y<60){ doc.addPage(); drawFrame(); drawHeaderBand(); y=HDR_BOTTOM+8; } else { y+=12; }
-    sans('bold',8.5); setText(PINK); doc.text('REVISION HISTORY', M, y); y+=6;
+    sans('bold',8.5); setText(GOLD); doc.text('REVISION HISTORY', M, y); y+=6;
     setDraw(PINK); doc.setLineWidth(1); doc.line(M,y,W-M,y); y+=14;
     sans('normal',9);
     opts.revisionHistory.forEach(r=>{
