@@ -2811,12 +2811,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const header = (
     <div>
       {showChangeClient && <ChangeClientModal currentClient={{client_id:event.client_id}} onSave={handleChangeClient} onCancel={()=>setShowChangeClient(false)}/>}
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,fontSize:13,color:'var(--grey-400)'}}>
-        <button onClick={onBack} style={{background:'none',border:'none',cursor:'pointer',color:'var(--pink)',fontSize:13,padding:0,fontFamily:'Inter,sans-serif'}}>← Events</button>
-        <span>/</span>
-        <span style={{color:'var(--grey-800)',fontWeight:500}}>{event.name}</span>
-        {mode==='edit'&&<span> / Editing</span>}
-      </div>
+      {mode==='edit'&&<div style={{fontSize:12,color:'var(--grey-400)',marginBottom:10}}>Editing · {event.name}</div>}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'18px 24px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
         <div>
           <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{event.name}</div>
@@ -4836,12 +4831,13 @@ function matchesBudget(budget, range) {
   return b >= min && b <= max;
 }
 
-function EventsModule({initialEventId, onConsumed, onNavigate}) {
+function EventsModule({nav, onNavigate, onBack}) {
   const eventTypes = useEventTypes();
-  const [view, setView] = useState('list'); // list | new | detail
   const [events, setEvents] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [referenceEvent, setReferenceEvent] = useState(null);
+  // Stack-driven view: nav carries {eventId} (detail), {mode:'new', referenceEvent} (wizard), or null (list).
+  const detailId = nav && nav.eventId;
+  const isNew = !!(nav && nav.mode==='new');
+  const referenceEvent = (nav && nav.referenceEvent) || null;
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -4853,10 +4849,8 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
   const [eventFunnels, setEventFunnels] = useState({});
 
   useEffect(()=>{ loadEvents(); loadStaff(); },[]);
-
-  useEffect(()=>{
-    if(initialEventId){ setSelectedId(initialEventId); setView('detail'); onConsumed&&onConsumed(); }
-  },[initialEventId]);
+  // Reload the list whenever we return to it (detail/wizard closed) so funnel badges + rows stay fresh.
+  useEffect(()=>{ if(!detailId && !isNew) loadEvents(); },[detailId, isNew]);
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
@@ -4899,11 +4893,10 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
   };
 
   const handleSaveNew = async (eventData) => {
-    setReferenceEvent(null);
-    setView('list');
     setSaveSuccess(`Event "${eventData.name}" created successfully!`);
     setTimeout(()=>setSaveSuccess(''),4000);
     loadEvents();
+    onBack&&onBack();
   };
 
   const filtered = events.filter(e=>{
@@ -4916,18 +4909,18 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
     return matchSearch && matchStatus && matchType && matchStaff && matchBudget;
   });
 
-  if(view==='detail') return (
+  if(detailId) return (
     <EventDetail
-      eventId={selectedId}
-      onBack={()=>{setView('list');setSelectedId(null);loadEvents();}}
-      onUseAsReference={(evt)=>{setReferenceEvent(evt);setView('new');}}
+      eventId={detailId}
+      onBack={onBack}
+      onUseAsReference={(evt)=>onNavigate('events',{mode:'new',referenceEvent:evt,label:'New event'})}
       onNavigate={onNavigate}
     />
   );
-  if(view==='new') return <NewEventWizard
+  if(isNew) return <NewEventWizard
     referenceEvent={referenceEvent}
     onSave={handleSaveNew}
-    onCancel={()=>{setView('list');setReferenceEvent(null);}}
+    onCancel={onBack}
   />;
 
   return (
@@ -4963,7 +4956,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
         <select className="field-input" style={{width:160}} value={budgetFilter} onChange={e=>setBudgetFilter(e.target.value)}>
           {BUDGET_RANGES.map(r=><option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
-        <button className="btn primary" onClick={()=>setView('new')}>+ New event</button>
+        <button className="btn primary" onClick={()=>onNavigate('events',{mode:'new',label:'New event'})}>+ New event</button>
       </div>
 
       {/* Events list */}
@@ -4974,7 +4967,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
           <div style={{fontSize:48,marginBottom:12}}>🎪</div>
           <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>{search||statusFilter||typeFilter?'No events found':'No events yet'}</div>
           <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:16}}>{search||statusFilter||typeFilter?'Try adjusting your search or filters':'Create your first event to get started'}</div>
-          {!search&&!statusFilter&&!typeFilter&&<button className="btn primary" onClick={()=>setView('new')}>+ Create first event</button>}
+          {!search&&!statusFilter&&!typeFilter&&<button className="btn primary" onClick={()=>onNavigate('events',{mode:'new',label:'New event'})}>+ Create first event</button>}
         </div>
       ) : (
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -4984,7 +4977,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
               <div key={e.event_id} style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden',cursor:'pointer',transition:'border-color .15s'}}
                 onMouseEnter={ev=>ev.currentTarget.style.borderColor='var(--grey-200)'}
                 onMouseLeave={ev=>ev.currentTarget.style.borderColor='var(--grey-100)'}
-                onClick={()=>{setSelectedId(e.event_id);setView('detail');}}>
+                onClick={()=>onNavigate('events',{eventId:e.event_id,label:e.name})}>
                 <div style={{display:'grid',gridTemplateColumns:'6px 1fr auto auto',alignItems:'stretch'}}>
                   <div style={{background:sc.dot,borderRadius:'var(--radius-lg) 0 0 var(--radius-lg)'}}></div>
                   <div style={{padding:'14px 16px'}}>
@@ -5008,7 +5001,7 @@ function EventsModule({initialEventId, onConsumed, onNavigate}) {
                   </div>
                   <div style={{padding:'0 6px',display:'flex',alignItems:'center',gap:6}}>
                     <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}}
-                      onClick={ev=>{ev.stopPropagation();setReferenceEvent(e);setView('new');}}>
+                      onClick={ev=>{ev.stopPropagation();onNavigate('events',{mode:'new',referenceEvent:e,label:'New event'});}}>
                       📋
                     </button>
                     <span style={{color:'var(--grey-400)',fontSize:18}}>›</span>
@@ -7134,12 +7127,52 @@ function ComingSoon({ page }) {
 }
 
 // ── Main App ─────────────────────────────────────────────────────────────────
+function NavBar({stack, onBack, onJump}){
+  if(!stack || stack.length<=1) return null;
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',marginBottom:16,background:'white',border:'1px solid var(--grey-100)',borderRadius:'var(--radius-md)',flexWrap:'wrap'}}>
+      <button className="btn sm" onClick={onBack} title="Back one step" style={{display:'inline-flex',alignItems:'center',gap:4}}>← Back</button>
+      <div style={{width:1,height:18,background:'var(--grey-200)'}}/>
+      <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',fontSize:13}}>
+        {stack.map((n,i)=>{
+          const last=i===stack.length-1;
+          return (
+            <React.Fragment key={i}>
+              {i>0&&<span style={{color:'var(--grey-300)',margin:'0 2px'}}>›</span>}
+              {last
+                ? <span style={{fontWeight:500,color:'var(--pink)',background:'var(--pink-light)',padding:'3px 8px',borderRadius:'var(--radius-sm)'}}>{n.label}</span>
+                : <button onClick={()=>onJump(i)} style={{border:'none',background:'none',cursor:'pointer',color:'var(--grey-400)',fontSize:13,padding:'3px 6px',fontFamily:'Inter,sans-serif'}} onMouseEnter={e=>e.currentTarget.style.color='var(--pink)'} onMouseLeave={e=>e.currentTarget.style.color='var(--grey-400)'}>{n.label}</button>}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activePage, setActivePage] = useState('dashboard');
-  const [navTarget, setNavTarget] = useState(null);
-  const navigate = useCallback((page, opts={})=>{ setNavTarget((opts&&(opts.eventId||opts.leadId||opts.invoiceId||opts.quotId))?{page, eventId:opts.eventId, leadId:opts.leadId, invoiceId:opts.invoiceId, quotId:opts.quotId}:null); setActivePage(page); },[]);
+  // Global navigation history stack. Each entry: {page, opts?, label}. Top entry = current screen.
+  // Back pops; a breadcrumb click truncates; a sidebar click resets to a fresh single-entry trail.
+  const [navStack, setNavStack] = useState([{page:'dashboard', label:'Dashboard'}]);
+  const current = navStack[navStack.length-1];
+  const activePage = current.page;
+  // Legacy target shape kept for not-yet-converted modules (they read navTarget.<id>).
+  const navTarget = {page:current.page, eventId:current.opts&&current.opts.eventId, leadId:current.opts&&current.opts.leadId, invoiceId:current.opts&&current.opts.invoiceId, quotId:current.opts&&current.opts.quotId};
+  const navigate = useCallback((page, opts={})=>{
+    const o=opts||{};
+    const rest={}; ['eventId','leadId','invoiceId','quotId','mode','referenceEvent'].forEach(k=>{ if(o[k]!==undefined&&o[k]!==null) rest[k]=o[k]; });
+    const hasPayload=Object.keys(rest).length>0;
+    const label=o.label||pageTitles[page]||page;
+    setNavStack(st=>{
+      const top=st[st.length-1];
+      if(top&&top.page===page&&(top.label||'')===label&&JSON.stringify(top.opts||{})===JSON.stringify(rest)) return st;
+      return [...st,{page,opts:hasPayload?rest:undefined,label}];
+    });
+  },[]);
+  const goBack = useCallback(()=>{ setNavStack(st=>st.length>1?st.slice(0,-1):st); },[]);
+  const jumpTo = useCallback((i)=>{ setNavStack(st=>(i>=0&&i<st.length-1)?st.slice(0,i+1):st); },[]);
+  const resetTo = useCallback((page)=>{ setNavStack([{page,label:pageTitles[page]||page}]); },[]);
   const [showWarning, setShowWarning] = useState(false);
   const lastActivity = useRef(Date.now());
   const warningTimer = useRef(null);
@@ -7200,7 +7233,7 @@ function App() {
             <div key={gi} className="nav-section">
               {group.section && <div className="nav-section-title">{group.section}</div>}
               {group.items.filter(item=>item.roles.includes(role)).map(item=>(
-                <button key={item.id} className={`nav-item ${activePage===item.id?'active':''}`} onClick={()=>setActivePage(item.id)}>
+                <button key={item.id} className={`nav-item ${activePage===item.id?'active':''}`} onClick={()=>resetTo(item.id)}>
                   <span className="nav-icon">{item.icon}</span>{item.label}
                 </button>
               ))}
@@ -7227,13 +7260,14 @@ function App() {
           </div>
         </div>
         <div className="page-body">
+          <NavBar stack={navStack} onBack={goBack} onJump={jumpTo}/>
           {activePage==='dashboard' && <Dashboard user={user} onNavigate={navigate}/>}
           {activePage==='settings' && <SettingsModule/>}
           {activePage==='clients' && <ClientsModule/>}
-          {activePage==='events' && <EventsModule initialEventId={navTarget&&navTarget.page==='events'?navTarget.eventId:null} onConsumed={()=>setNavTarget(null)} onNavigate={navigate}/>}
-          {activePage==='leads' && <LeadsModule onNavigate={navigate} initialLeadId={navTarget&&navTarget.page==='leads'?navTarget.leadId:null} onConsumed={()=>setNavTarget(null)}/>}
-          {activePage==='invoices' && <InvoicesModule onNavigate={navigate} initialInvoiceId={navTarget&&navTarget.page==='invoices'?navTarget.invoiceId:null} onConsumed={()=>setNavTarget(null)}/>}
-          {activePage==='quotations' && <QuotationsModule onNavigate={navigate} initialQuotId={navTarget&&navTarget.page==='quotations'?navTarget.quotId:null} onConsumed={()=>setNavTarget(null)}/>}
+          {activePage==='events' && <EventsModule nav={current.opts||null} onNavigate={navigate} onBack={goBack}/>}
+          {activePage==='leads' && <LeadsModule key={'leads:'+(navTarget.leadId||'')} onNavigate={navigate} initialLeadId={navTarget.leadId||null} onConsumed={()=>{}}/>}
+          {activePage==='invoices' && <InvoicesModule key={'inv:'+(navTarget.invoiceId||'')} onNavigate={navigate} initialInvoiceId={navTarget.invoiceId||null} onConsumed={()=>{}}/>}
+          {activePage==='quotations' && <QuotationsModule key={'quot:'+(navTarget.quotId||'')} onNavigate={navigate} initialQuotId={navTarget.quotId||null} onConsumed={()=>{}}/>}
           {activePage==='expenses' && <ExpensesModule onNavigate={navigate}/>}
           {activePage==='vendors' && <VendorsModule onNavigate={navigate}/>}
           {activePage==='vendor-payments' && <VendorPaymentsModule onNavigate={navigate}/>}
