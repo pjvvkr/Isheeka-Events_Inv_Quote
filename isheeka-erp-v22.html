@@ -2982,13 +2982,13 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Workflow</div>
         {/* Lead → Quote → Event → Invoice chain */}
         <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',fontSize:12,color:'var(--grey-400)',marginBottom:14,paddingBottom:12,borderBottom:'1px solid var(--grey-100)'}}>
-          {linkedLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:linkedLead.lead_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {linkedLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
+          {linkedLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:linkedLead.lead_id,label:linkedLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {linkedLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
           <span>→</span>
-          {quotations.length>0?<a onClick={()=>{const aq=quotations.find(q=>!['superseded','rejected','expired'].includes(q.status))||quotations[0];onNavigate&&onNavigate('quotations',{quotId:aq.quotation_id});}} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>📄 {quotations.length>1?(quotations.length+' quotes'):(quotations[0].ref_number)}</a>:<span>📄 —</span>}
+          {quotations.length>0?<a onClick={()=>{const aq=quotations.find(q=>!['superseded','rejected','expired'].includes(q.status))||quotations[0];onNavigate&&onNavigate('quotations',{quotId:aq.quotation_id,label:aq.ref_number});}} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>📄 {quotations.length>1?(quotations.length+' quotes'):(quotations[0].ref_number)}</a>:<span>📄 —</span>}
           <span>→</span>
           <span style={{color:'var(--grey-700)',fontWeight:500}}>🎪 {event.ref_number} (this event)</span>
           <span>→</span>
-          {invoices.length>0?<a onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:(invoices.find(i=>i.status!=='cancelled')||invoices[0]).invoice_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🧾 {invoices.length>1?(invoices.length+' invoices'):(invoices[0].ref_number)}</a>:<span>🧾 —</span>}
+          {invoices.length>0?<a onClick={()=>{const iv=(invoices.find(i=>i.status!=='cancelled')||invoices[0]);onNavigate&&onNavigate('invoices',{invoiceId:iv.invoice_id,label:iv.ref_number});}} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🧾 {invoices.length>1?(invoices.length+' invoices'):(invoices[0].ref_number)}</a>:<span>🧾 —</span>}
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
           <div>
@@ -2998,14 +2998,14 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                 ? <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>launchQuoteWizard(null)}>+ Create</button>
                 : invoiceIssued
                   ? <span style={{fontSize:11,color:'var(--grey-400)',display:'inline-flex',alignItems:'center',gap:4}} title="An invoice has already been issued for this event. To change scope or pricing, revise the invoice instead — revising the quote now would diverge from the issued invoice.">🔒 Invoice issued — revise the invoice</span>
-                  : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:(activeQuote||quotations[0]).quotation_id})} title="Open the quote — revise it here until the invoice is issued">✏️ Revise quote →</button>}
+                  : <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>{const aq=(activeQuote||quotations[0]);onNavigate&&onNavigate('quotations',{quotId:aq.quotation_id,label:aq.ref_number});}} title="Open the quote — revise it here until the invoice is issued">✏️ Revise quote →</button>}
             </div>
             {quotations.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No quotations yet</div>}
             {(()=>{
               const qs={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},approved:{bg:'var(--green-light)',color:'var(--green)'},converted:{bg:'var(--green-light)',color:'var(--green)'},rejected:{bg:'var(--red-light)',color:'var(--red)'},expired:{bg:'var(--orange-light)',color:'var(--orange)'},revised:{bg:'var(--orange-light)',color:'var(--orange)'},superseded:{bg:'var(--grey-100)',color:'var(--grey-400)'}};
               const renderRow=q=>{
                 const s=qs[q.status?.toLowerCase()]||qs.draft;
-                return <div key={q.quotation_id} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:q.quotation_id})} title="Open quotation" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer',opacity:q.status==='superseded'?0.6:1}}>
+                return <div key={q.quotation_id} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:q.quotation_id,label:q.ref_number})} title="Open quotation" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer',opacity:q.status==='superseded'?0.6:1}}>
                   <div><div style={{fontSize:13,fontWeight:500}}>{q.ref_number}{q.revision_number>0?' · Rev '+q.revision_number:''}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{parseFloat(q.grand_total||0).toLocaleString('en-IN')}</div></div>
                   <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{q.status}</span>
                 </div>;
@@ -3030,7 +3030,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               const is={draft:{bg:'var(--grey-100)',color:'var(--grey-400)'},sent:{bg:'var(--blue-light)',color:'var(--blue)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'},overdue:{bg:'var(--red-light)',color:'var(--red)'},cancelled:{bg:'var(--grey-100)',color:'var(--grey-400)'}};
               const s=is[inv.status?.toLowerCase()]||is.draft;
               const recvd=parseFloat(inv.total_received||0); const tot=parseFloat(inv.grand_total||0);
-              return <div key={inv.invoice_id} onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:inv.invoice_id})} title="View invoice" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer'}}>
+              return <div key={inv.invoice_id} onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:inv.invoice_id,label:inv.ref_number})} title="View invoice" style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:'var(--grey-50)',borderRadius:'var(--radius-sm)',marginBottom:6,cursor:'pointer'}}>
                 <div><div style={{fontSize:13,fontWeight:500}}>{inv.ref_number}{inv.revision_number>0?' · Rev '+inv.revision_number:''}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>₹{tot.toLocaleString('en-IN')}{recvd>0?' · ₹'+recvd.toLocaleString('en-IN')+' received':''}</div></div>
                 <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:s.bg,color:s.color,textTransform:'capitalize'}}>{(inv.status||'').replace('_',' ')}</span>
               </div>;
@@ -3916,7 +3916,7 @@ function QuotationDetailModal(){ return null; /* dead code removed — supersede
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('gmail')}>Gmail</button>
               <button className="btn sm" disabled={sharing} onClick={()=>doShare('email')}>Email</button>
               {quot.event_id&&!['approved','converted','rejected','expired','superseded'].includes(quot.status)&&<button className="btn primary" disabled={confirming} onClick={doConfirmQuote} title="Mark the quote confirmed and create the draft invoice">{confirming?'Confirming\u2026':'\u2705 Confirm & create invoice'}</button>}
-              {(quot.status==='converted'||quot.event_id)&&<button className="btn sm" onClick={()=>{onClose&&onClose();onNavigate&&onNavigate('events',{eventId:quot.event_id});}}>Go to event {'\u2192'}</button>}
+              {(quot.status==='converted'||quot.event_id)&&<button className="btn sm" onClick={()=>{onClose&&onClose();onNavigate&&onNavigate('events',{eventId:quot.event_id,label:quot.event_name||'Event'});}}>Go to event {'\u2192'}</button>}
               <button className="btn" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();buildQuotationPDF(quot,items,{action:'print',displayOpts:modalDisplayOpts,settings:s||{}});}}>Print</button>
               <button className="btn primary" onClick={async()=>{const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();buildQuotationPDF(quot,items,{action:'download',displayOpts:modalDisplayOpts,settings:s||{}});}}>{'\u2B07'} Download PDF</button>
             </div>
@@ -4186,7 +4186,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
               )}
               {/* Once a quote exists, all quote work lives on the quote page — the lead just links to it. */}
               {['quote_generation_in_progress','quote_sent','quote_revision_pending','revised_quote_sent','quote_confirmed'].includes(lead.stage)&&lead.active_quotation_id&&(
-                <button className="btn sm primary" onClick={()=>onNavigate&&onNavigate('quotations',{quotId:lead.active_quotation_id})}>📄 Open active quote →</button>
+                <button className="btn sm primary" onClick={()=>onNavigate&&onNavigate('quotations',{quotId:lead.active_quotation_id,label:(leadQuotations.find(q=>q.quotation_id===lead.active_quotation_id)||{}).ref_number||'Quote'})}>📄 Open active quote →</button>
               )}
               <button className="btn sm" style={{color:'#A32D2D',border:'1px solid #FCEBEB'}}
                 onClick={()=>setShowLoss(true)}>✕ Lost</button>
@@ -4281,7 +4281,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
               const sc=QUOT_STATUS_COLORS?QUOT_STATUS_COLORS[q.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}:{bg:'var(--grey-100)',color:'var(--grey-400)'};
               const statusLabel=QUOT_STATUS_LABELS?QUOT_STATUS_LABELS[q.status]||q.status:q.status;
               return (
-                <div key={q.quotation_id} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:q.quotation_id})} title="Open quotation"
+                <div key={q.quotation_id} onClick={()=>onNavigate&&onNavigate('quotations',{quotId:q.quotation_id,label:q.ref_number})} title="Open quotation"
                   style={{display:'flex',alignItems:'center',gap:12,padding:'10px 8px',margin:'0 -8px',borderRadius:'var(--radius-sm)',cursor:'pointer',borderBottom:showBorder?'1px solid var(--grey-100)':'none',opacity:q.status==='superseded'?0.5:1}}
                   onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'}
                   onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
@@ -4328,7 +4328,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
                 {linkedEvent.location&&(' · '+linkedEvent.location)}
               </div>
             </div>
-            <button className="btn primary" onClick={()=>onNavigate&&onNavigate('events',{eventId:linkedEvent.event_id})}>View event →</button>
+            <button className="btn primary" onClick={()=>onNavigate&&onNavigate('events',{eventId:linkedEvent.event_id,label:linkedEvent.name||linkedEvent.ref_number||'Event'})}>View event →</button>
           </div>
         </div>
       )}
@@ -5192,9 +5192,9 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>{quot.client_name||'—'}{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
             {(srcLead||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
-              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
+              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
               <span>→</span><span style={{color:'var(--grey-600)'}}>📄 {quot.ref_number}</span>
-              {srcEvent&&<><span>→</span><a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎪 {srcEvent.ref_number||'Event'}</a></>}
+              {srcEvent&&<><span>→</span><a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id,label:srcEvent.name||srcEvent.ref_number||'Event'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎪 {srcEvent.ref_number||'Event'}</a></>}
             </div>}
           </div>
         </div>
@@ -5202,7 +5202,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
           {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
-          {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id})}>Go to event →</button>}
+          {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id,label:quot.event_name||'Event'})}>Go to event →</button>}
           {!quot.event_id&&!['rejected','converted','expired','superseded'].includes(quot.status)&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={()=>{setCloseForm({outcome:'client',reason:'',notes:''});setShowClose(true);}} title="Client declined or we can't fulfil — close this quote">✕ Close — not proceeding</button>}
         </div>
       </div>
@@ -5835,15 +5835,15 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             </div>
             {(srcLead||srcQuote||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
-              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={LEAD_STAGE_LABELS[srcLead.stage]||srcLead.stage}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
+              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={LEAD_STAGE_LABELS[srcLead.stage]||srcLead.stage}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
               <span>→</span>
-              {srcQuote?<a onClick={()=>onNavigate&&onNavigate('quotations',{quotId:srcQuote.quotation_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={(QUOT_STATUS_LABELS[srcQuote.status]||srcQuote.status)+' · ₹'+parseFloat(srcQuote.grand_total||0).toLocaleString('en-IN')}>📄 {srcQuote.ref_number}</a>:<span>📄 —</span>}
+              {srcQuote?<a onClick={()=>onNavigate&&onNavigate('quotations',{quotId:srcQuote.quotation_id,label:srcQuote.ref_number})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={(QUOT_STATUS_LABELS[srcQuote.status]||srcQuote.status)+' · ₹'+parseFloat(srcQuote.grand_total||0).toLocaleString('en-IN')}>📄 {srcQuote.ref_number}</a>:<span>📄 —</span>}
               <span>→</span>
-              {srcEvent?<a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={srcEvent.name||''}>🎪 {srcEvent.ref_number||'Event'}</a>:<span>🎪 —</span>}
+              {srcEvent?<a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id,label:srcEvent.name||srcEvent.ref_number||'Event'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={srcEvent.name||''}>🎪 {srcEvent.ref_number||'Event'}</a>:<span>🎪 —</span>}
             </div>}
           </div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-            {inv.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id})}>Go to event →</button>}
+            {inv.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:inv.event_id,label:inv.event_name||'Event'})}>Go to event →</button>}
             {inv.status==='draft'&&<button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
             {!locked&&<button className="btn sm" disabled={saving} onClick={openRevise}>✏️ Revise</button>}
             {canShare&&<button className="btn sm" disabled={sharing} onClick={()=>shareInvoice('whatsapp')}>💬 WhatsApp</button>}
@@ -6230,7 +6230,7 @@ function Dashboard({ user, onNavigate }) {
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
           <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Upcoming events</div>
           {loading?<div style={{fontSize:13,color:'var(--grey-400)'}}>Loading…</div>:upcoming.length===0?<div style={{fontSize:13,color:'var(--grey-400)'}}>No upcoming events.</div>:upcoming.map(e=>(
-            <div key={e.event_id} onClick={()=>onNavigate&&onNavigate('events',{eventId:e.event_id})} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid var(--grey-50)',cursor:'pointer'}}>
+            <div key={e.event_id} onClick={()=>onNavigate&&onNavigate('events',{eventId:e.event_id,label:e.name||e.ref_number||'Event'})} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid var(--grey-50)',cursor:'pointer'}}>
               <div><div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{e.name}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>{e.client_name||''}{e.ref_number?' · '+e.ref_number:''}</div></div>
               <div style={{fontSize:12,color:'var(--pink)',fontWeight:500,whiteSpace:'nowrap'}}>{fmtDate(e.main_date,{day:'numeric',month:'short'})}</div>
             </div>
@@ -6239,7 +6239,7 @@ function Dashboard({ user, onNavigate }) {
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
           <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Outstanding invoices</div>
           {loading?<div style={{fontSize:13,color:'var(--grey-400)'}}>Loading…</div>:outstanding.length===0?<div style={{fontSize:13,color:'var(--grey-400)'}}>Nothing outstanding. 🎉</div>:outstanding.map(i=>(
-            <div key={i.invoice_id} onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:i.invoice_id})} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid var(--grey-50)',cursor:'pointer'}}>
+            <div key={i.invoice_id} onClick={()=>onNavigate&&onNavigate('invoices',{invoiceId:i.invoice_id,label:i.ref_number})} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid var(--grey-50)',cursor:'pointer'}}>
               <div><div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{i.ref_number}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>{i.client_name||''}{i.event_name?' · '+i.event_name:''}</div></div>
               <div style={{fontSize:12,color:'var(--red)',fontWeight:500,whiteSpace:'nowrap'}}>{inr(i.total_outstanding)}</div>
             </div>
@@ -6325,7 +6325,7 @@ function EventQuickView({eventId, onClose, onNavigate}){
           {[['Client',ev.client_name],['Main date',ev.main_date?fmtDate(ev.main_date,{day:'numeric',month:'long',year:'numeric'}):'—'],['Location',ev.location||'—']].map(([l,v])=>(
             <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid var(--grey-50)'}}><span style={{color:'var(--grey-400)'}}>{l}</span><span style={{fontWeight:500}}>{v}</span></div>
           ))}
-          <button className="btn primary" style={{marginTop:14,width:'100%'}} onClick={()=>{onClose();onNavigate&&onNavigate('events',{eventId:ev.event_id});}}>Open full event →</button>
+          <button className="btn primary" style={{marginTop:14,width:'100%'}} onClick={()=>{onClose();onNavigate&&onNavigate('events',{eventId:ev.event_id,label:ev.name||ev.ref_number||'Event'});}}>Open full event →</button>
         </div>}
       </div>
     </div>
@@ -6515,6 +6515,8 @@ function VendorPaymentsModule({onNavigate}){
   const [evtFilter,setEvtFilter]=React.useState('');
   const [range,setRange]=React.useState('month');
   const [showVoided,setShowVoided]=React.useState(false);
+  const [duesView,setDuesView]=React.useState(false);
+  const [expVendor,setExpVendor]=React.useState(null);
   const [popupEvent,setPopupEvent]=React.useState(null);
   const [showRec,setShowRec]=React.useState(false);
   const [saving,setSaving]=React.useState(false);
@@ -6545,6 +6547,8 @@ function VendorPaymentsModule({onNavigate}){
   const mYear=live.filter(p=>String(p.payment_date||'').slice(0,4)===yr).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
   const outstanding=evs.reduce((s,x)=>s+(parseFloat(x.outstanding)||0),0);
   const voidedCount=pays.filter(p=>p.is_voided).length;
+  // Cross-event dues rollup: what's still owed to each vendor, summed across all their engagements.
+  const duesByVendor=(()=>{ const m={}; evs.forEach(x=>{ const out=parseFloat(x.outstanding)||0; const vid=x.vendor_id?('id:'+x.vendor_id):('nm:'+(x.vendor_name||'?')); const name=vMap[x.vendor_id]||x.vendor_name||'Unknown vendor'; if(!m[vid]) m[vid]={key:vid, vid:x.vendor_id||null, name, agreed:0, paid:0, outstanding:0, events:[]}; m[vid].agreed+=parseFloat(x.agreed_amount)||0; m[vid].paid+=parseFloat(x.total_paid)||0; m[vid].outstanding+=out; if(out>0.5){ m[vid].events.push({eid:x.event_id, ev:eMap[x.event_id], outstanding:out, service:x.service_description}); } }); return Object.values(m).filter(r=>r.outstanding>0.5).sort((a,b)=>b.outstanding-a.outstanding); })();
   const filtered=pays.filter(p=>{
     if(showVoided ? !p.is_voided : p.is_voided) return false;
     const q=search.toLowerCase();
@@ -6593,9 +6597,10 @@ function VendorPaymentsModule({onNavigate}){
         </div>
         <select className="field-input" style={{width:200}} value={evtFilter} onChange={e=>setEvtFilter(e.target.value)}><option value="">All events</option>{events.map(e=><option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name?(' · '+e.client_name):''}{e.main_date?(' · '+fmtDate(e.main_date,{day:'numeric',month:'short',year:'numeric'})):''}</option>)}</select>
         <select className="field-input" style={{width:130}} value={range} onChange={e=>setRange(e.target.value)}><option value="month">This month</option><option value="year">This year</option><option value="all">All time</option></select>
+        <button className="btn sm" onClick={()=>setDuesView(v=>!v)} title="Outstanding owed to each vendor across all their events" style={{background:duesView?'var(--grey-100)':undefined,color:duesView?'var(--grey-800)':'var(--grey-400)'}}>{duesView?'← Payments':('Dues by vendor'+(duesByVendor.length?(' ('+duesByVendor.length+')'):''))}</button>
         <button className="btn sm" onClick={()=>setShowVoided(v=>!v)} title="Audit trail of voided payments" style={{background:showVoided?'var(--grey-100)':undefined,color:showVoided?'var(--grey-800)':'var(--grey-400)'}}>{showVoided?'← Active':('Voided'+(voidedCount?(' ('+voidedCount+')'):''))}</button>
       </div>
-      {loading? <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>
+      {!duesView && (loading? <div style={{padding:60,textAlign:'center'}}><div className="spinner" style={{margin:'0 auto'}}/></div>
        : filtered.length===0? <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:50,textAlign:'center',border:'1px solid var(--grey-100)',color:'var(--grey-400)'}}>No vendor payments for this view. <button className="btn sm" onClick={openRec}>+ Record one</button></div>
        : <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}}>
           <div style={{display:'grid',gridTemplateColumns:'80px 1fr 200px 90px 96px',gap:10,padding:'9px 16px',background:'var(--grey-50)',fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em'}}>
@@ -6610,7 +6615,34 @@ function VendorPaymentsModule({onNavigate}){
               <div style={{textAlign:'right',fontWeight:500,textDecoration:p.is_voided?'line-through':'none',color:p.is_voided?'var(--grey-400)':'var(--grey-800)'}}>{inr(p.amount)}</div>
             </div>
           ); })}
-        </div>}
+        </div>)}
+
+      {duesView && (
+        duesByVendor.length===0
+          ? <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:50,textAlign:'center',border:'1px solid var(--grey-100)',color:'var(--grey-400)'}}>No outstanding vendor dues — everyone's settled. 🎉</div>
+          : <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 70px 110px 110px 120px',gap:10,padding:'9px 16px',background:'var(--grey-50)',fontSize:11,fontWeight:600,color:'var(--grey-400)',textTransform:'uppercase',letterSpacing:'.04em'}}>
+                <div>Vendor</div><div style={{textAlign:'center'}}>Events</div><div style={{textAlign:'right'}}>Agreed</div><div style={{textAlign:'right'}}>Paid</div><div style={{textAlign:'right'}}>Outstanding</div>
+              </div>
+              {duesByVendor.map(r=>{ const open=expVendor===r.key; return (
+                <div key={r.key} style={{borderTop:'1px solid var(--grey-100)'}}>
+                  <div onClick={()=>setExpVendor(open?null:r.key)} style={{display:'grid',gridTemplateColumns:'1fr 70px 110px 110px 120px',gap:10,padding:'11px 16px',alignItems:'center',fontSize:13,cursor:'pointer'}}>
+                    <div style={{fontWeight:600,color:'var(--grey-800)'}}>{open?'▾':'▸'} {r.name}</div>
+                    <div style={{textAlign:'center',color:'var(--grey-500)'}}>{r.events.length}</div>
+                    <div style={{textAlign:'right',color:'var(--grey-500)'}}>{inr(r.agreed)}</div>
+                    <div style={{textAlign:'right',color:'var(--grey-500)'}}>{inr(r.paid)}</div>
+                    <div style={{textAlign:'right',fontWeight:600,color:'var(--red)'}}>{inr(r.outstanding)}</div>
+                  </div>
+                  {open&&r.events.map((e,i)=>(
+                    <div key={i} style={{display:'grid',gridTemplateColumns:'1fr 120px',gap:10,padding:'8px 16px 8px 32px',alignItems:'center',fontSize:12,background:'var(--grey-50)',borderTop:'1px solid var(--grey-100)'}}>
+                      <div>{e.ev?<a onClick={()=>onNavigate&&onNavigate('events',{eventId:e.eid,label:e.ev.name||e.ev.ref_number||'Event'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>{e.ev.ref_number}</a>:'—'}{e.ev?(' · '+e.ev.name):''}{e.service?(' · '+e.service):''}</div>
+                      <div style={{textAlign:'right',color:'var(--red)'}}>{inr(e.outstanding)}</div>
+                    </div>
+                  ))}
+                </div>
+              ); })}
+            </div>
+      )}
 
       {showRec&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'40px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget)setShowRec(false);}}>
@@ -6752,7 +6784,7 @@ function ExpensesModule({onNavigate}){
             <div key={r.expense_id} style={{display:'grid',gridTemplateColumns:'80px 1fr 150px 130px 96px 64px',gap:10,padding:'11px 16px',borderTop:'1px solid var(--grey-100)',alignItems:'center',fontSize:13}}>
               <div style={{color:'var(--grey-500)'}}>{fmtDate(r.date,{day:'numeric',month:'short'})}</div>
               <div style={{color:'var(--grey-800)'}}>{r.description}{r.receipt_url&&<a href={r.receipt_url} target="_blank" rel="noreferrer" style={{color:'var(--pink)',marginLeft:6}}>📎</a>}</div>
-              <div>{ev?<a onClick={()=>onNavigate&&onNavigate('events',{eventId:ev.event_id})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>{ev.ref_number}</a>:<span style={{color:'var(--grey-400)'}}>General</span>}</div>
+              <div>{ev?<a onClick={()=>onNavigate&&onNavigate('events',{eventId:ev.event_id,label:ev.name||ev.ref_number||'Event'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>{ev.ref_number}</a>:<span style={{color:'var(--grey-400)'}}>General</span>}</div>
               <div><span style={{fontSize:11,padding:'2px 8px',borderRadius:12,background:'var(--blue-light)',color:'var(--blue)'}}>{EXPENSE_CAT_LABEL(r.category)}</span></div>
               <div style={{textAlign:'right',fontWeight:500}}>{inr(r.amount)}</div>
               <div style={{textAlign:'right'}}><button className="btn sm" style={{fontSize:11,padding:'2px 6px'}} onClick={()=>openEdit(r)}>✏️</button> <button style={{background:'none',border:'none',cursor:'pointer',color:'var(--grey-300)'}} onClick={()=>del(r)}>🗑</button></div>
