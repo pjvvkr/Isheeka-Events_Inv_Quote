@@ -2693,6 +2693,18 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     setEvent(ev=>({...ev,status:'planning'})); setRebuildDismissed(false);
     notify('Event reopened to Planning. Use the banner to regenerate what you need.','success');
   };
+  // Undo an accidental/early completion → return the event to an active state (and reopen the source lead).
+  const doReopenCompleted = async () => {
+    if(!window.confirm('Reopen this completed event?\n\nIt returns to an active state so you can edit it again.'+(linkedLead&&linkedLead.stage==='completed'?(' The source lead '+(linkedLead.ref_number||'')+' is reopened too.'):''))) return;
+    const target = (event.main_date && event.main_date<=todayLocalStr()) ? 'in_progress' : 'confirmed';
+    const {error:ese}=await runDb(supabase.from('events').update({status:target,updated_at:new Date().toISOString()}).eq('event_id',eventId),'reopen completed event'); if(ese) return;
+    setEvent(ev=>({...ev,status:target}));
+    if(linkedLead&&linkedLead.lead_id&&linkedLead.stage==='completed'){
+      const {error:lse}=await runDb(supabase.from('leads').update({stage:'event_triggered',updated_at:new Date().toISOString()}).eq('lead_id',linkedLead.lead_id),'reopen source lead');
+      if(!lse) setLinkedLead(l=>l?{...l,stage:'event_triggered'}:l);
+    }
+    notify('Event reopened — you can edit it again.','success');
+  };
   const rebuildRegenInvoice = async () => {
     const q=(quotations||[]).find(x=>['approved','converted','invoiced','sent'].includes(x.status))||(quotations||[])[0];
     if(!q){ notify('No source quotation to regenerate from.','error'); return; }
@@ -2821,10 +2833,15 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                 ? <button className="btn sm" onClick={markEventCompleted} title="Client invoice fully paid — marks the event delivered and closes the source lead">✅ Mark completed</button>
                 : <button className="btn sm" disabled style={{opacity:0.5,cursor:'not-allowed'}} title={'Can’t complete yet — '+(funnel.blocker||'client invoice not fully paid.')+(funnel.vendorBalance>0?' (Vendor balance ₹'+Math.round(funnel.vendorBalance).toLocaleString('en-IN')+' can be settled later — it doesn’t block.)':'')}>✅ Mark completed</button>
             )}
-            {event.status?.toLowerCase()!=='cancelled'&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={openCancel} title="Cancel this event and reconcile its invoices, vendors and schedules">⛔ Cancel event</button>}
+            {!['completed','cancelled'].includes(event.status?.toLowerCase())&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={openCancel} title="Cancel this event and reconcile its invoices, vendors and schedules">⛔ Cancel event</button>}
             {event.status?.toLowerCase()==='cancelled'&&<button className="btn sm" onClick={doReopenEvent} title="Reopen to Planning (status only)">↩ Reopen event</button>}
+            {event.status?.toLowerCase()==='completed'&&<button className="btn sm" onClick={doReopenCompleted} title="Undo completion — returns the event to an active state so you can edit it">↩ Reopen</button>}
             <button className="btn sm" onClick={()=>onUseAsReference(event)}>📋 Use as reference</button>
-            <button className="btn sm primary" onClick={enterEditMode}>✏️ Edit</button>
+            {!['completed','cancelled'].includes(event.status?.toLowerCase())
+              ? <button className="btn sm primary" onClick={enterEditMode}>✏️ Edit</button>
+              : event.status?.toLowerCase()==='completed'
+                ? <span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="Completed events are locked. Reopen to edit.">🔒 Completed — reopen to edit</span>
+                : null}
           </>}
           {mode==='edit' && <>
             <button className="btn sm" onClick={cancelEdit}>✕ Cancel</button>
