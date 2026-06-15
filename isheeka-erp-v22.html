@@ -2471,6 +2471,28 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [editMainItems, setEditMainItems] = React.useState([]);
   const [errors, setErrors] = React.useState({});
   const [mainItemsView, setMainItemsView] = React.useState([]);
+  const [evTemplates, setEvTemplates] = React.useState([]);
+  React.useEffect(()=>{ supabase.from('event_templates').select('*').eq('is_deleted',false).eq('is_active',true).order('sort_order').then(({data})=>{ if(data) setEvTemplates(data); }); },[]);
+  // Load a template's items into one editable sub-event (matched by name, else all), or the main block.
+  const loadTplItems = async (tpl, want) => {
+    const {data} = await supabase.from('event_template_items').select('*').eq('template_id',tpl.template_id).order('sort_order');
+    if(!data) return [];
+    let src = want==='main' ? data.filter(i=>(i.sub_event_name||'')==='Main Event') : data.filter(i=>i.sub_event_name!=='Main Event');
+    if(want && want!=='main'){ const m=src.filter(i=>(i.sub_event_name||'').trim().toLowerCase()===String(want).trim().toLowerCase()); if(m.length) src=m; }
+    if(src.length===0) src = data;
+    return src.map(i=>({id:'i-'+i.item_id+'-'+Math.random(),description:i.description,quantity:i.default_quantity,unit_price:0}));
+  };
+  const loadTemplateIntoEditSub = async (si, tpl) => {
+    const se=editSubEvents[si];
+    if(se && (se.items||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace this sub-event’s items with the template?')) return;
+    const items=await loadTplItems(tpl, (se&&se.name)||'');
+    setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,items}:x));
+  };
+  const loadTemplateIntoEditMain = async (tpl) => {
+    if((editMainItems||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace the main event items with the template?')) return;
+    const items=await loadTplItems(tpl, 'main');
+    setEditMainItems(items);
+  };
 
   React.useEffect(()=>{ loadAll(); },[eventId]);
 
@@ -3313,6 +3335,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               <SubEventNameInput value={se.name} onChange={v=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,name:v}:x))}/>
               <SubEventDateInput value={se.date} onChange={v=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,date:v}:x))}/>
               <SubEventLocInput value={se.location} onChange={v=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,location:v}:x))}/>
+              <SubEventTplBtn templates={evTemplates} onPick={tpl=>loadTemplateIntoEditSub(si,tpl)} onImport={items=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,items}:x))}/>
               <button style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14}}
                 onClick={()=>setEditSubEvents(s=>s.filter((_,i)=>i!==si))}>🗑</button>
             </div>
@@ -3320,7 +3343,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           </div>
         ))}
         <div style={{marginTop:8,paddingTop:8,borderTop:'1px dashed var(--grey-200)'}}>
-          <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:6}}>Main event items</div>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
+            <div style={{fontSize:12,color:'var(--grey-400)',flex:1}}>Main event items</div>
+            <SubEventTplBtn templates={evTemplates} onPick={tpl=>loadTemplateIntoEditMain(tpl)} onImport={items=>setEditMainItems(items)}/>
+          </div>
           <FastEntryTable key="main-items" items={editMainItems} onChange={setEditMainItems}/>
         </div>
       </div>
@@ -7555,24 +7581,46 @@ function ItemNumInput({value, onChange, align}) {
   return <input type="number" style={{border:'none',background:'transparent',fontSize:12,width:'100%',outline:'none',textAlign:align||'left',color:'var(--grey-800)',MozAppearance:'textfield'}} value={value} onChange={e=>onChange(e.target.value)}/>;
 }
 
-// Per-sub-event "Load template" dropdown (event wizard). Loads a template's items into one block.
-function SubEventTplBtn({templates, onPick}) {
+// Per-block toolbar (one per sub-event + the main block): load a template's items into THIS block,
+// and import an Excel file into THIS block. Both replace the block's items.
+function SubEventTplBtn({templates, onPick, onImport}) {
   const [open,setOpen]=React.useState(false);
+  const fileRef=React.useRef(null);
+  const parseExcel=(e)=>{
+    const file=e.target.files&&e.target.files[0]; if(e.target) e.target.value='';
+    if(!file||!onImport) return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const wb=XLSX.read(ev.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        let rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        if(rows.length&&String((rows[0]||[])[0]||'').trim().toLowerCase().startsWith('desc')) rows=rows.slice(1);
+        const items=rows.filter(r=>String(r[0]).trim()).map(r=>({id:'i-'+Date.now()+Math.random(),description:String(r[0]).trim(),quantity:parseFloat(String(r[1]).replace(/[^0-9.]/g,''))||1,unit_price:parseFloat(String(r[2]).replace(/[^0-9.]/g,''))||0}));
+        if(items.length){ onImport(items); notify(items.length+' row'+(items.length>1?'s':'')+' imported into this section.','success'); } else notify('No rows found in the file.','error');
+      }catch(err){ console.error('[Isheeka ERP] excel import failed:',err); notify('Could not read the Excel file.','error'); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
   return (
-    <div style={{position:'relative',flexShrink:0}}>
-      <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>setOpen(v=>!v)} onBlur={()=>setTimeout(()=>setOpen(false),180)}>📋 Template ▾</button>
-      {open&&(
-        <div style={{position:'absolute',top:'100%',right:0,zIndex:120,background:'white',border:'1px solid var(--grey-200)',borderRadius:'var(--radius-md)',boxShadow:'var(--shadow-md)',minWidth:190,marginTop:4}}>
-          {(templates||[]).length===0&&<div style={{padding:'10px 14px',fontSize:13,color:'var(--grey-400)'}}>No templates</div>}
-          {(templates||[]).map(t=>(
-            <div key={t.template_id} style={{padding:'9px 14px',fontSize:13,cursor:'pointer',color:'var(--grey-800)',borderBottom:'1px solid var(--grey-100)'}}
-              onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'} onMouseLeave={e=>e.currentTarget.style.background='white'}
-              onMouseDown={()=>{ setOpen(false); onPick(t); }}>
-              {t.event_type==='wedding'?'💍':t.event_type==='corporate'?'🏢':t.event_type==='birthday'?'🎂':t.event_type==='anniversary'?'💑':'🎪'} {t.name}
-            </div>
-          ))}
-        </div>
-      )}
+    <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'center'}}>
+      <div style={{position:'relative'}}>
+        <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>setOpen(v=>!v)} onBlur={()=>setTimeout(()=>setOpen(false),180)}>📋 Template ▾</button>
+        {open&&(
+          <div style={{position:'absolute',top:'100%',right:0,zIndex:120,background:'white',border:'1px solid var(--grey-200)',borderRadius:'var(--radius-md)',boxShadow:'var(--shadow-md)',minWidth:190,marginTop:4}}>
+            {(templates||[]).length===0&&<div style={{padding:'10px 14px',fontSize:13,color:'var(--grey-400)'}}>No templates</div>}
+            {(templates||[]).map(t=>(
+              <div key={t.template_id} style={{padding:'9px 14px',fontSize:13,cursor:'pointer',color:'var(--grey-800)',borderBottom:'1px solid var(--grey-100)'}}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'} onMouseLeave={e=>e.currentTarget.style.background='white'}
+                onMouseDown={()=>{ setOpen(false); onPick(t); }}>
+                {t.event_type==='wedding'?'💍':t.event_type==='corporate'?'🏢':t.event_type==='birthday'?'🎂':t.event_type==='anniversary'?'💑':'🎪'} {t.name}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {onImport&&<><button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>fileRef.current&&fileRef.current.click()} title="Import line items from an Excel file into this section">⬆️ Excel</button>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={parseExcel}/></>}
     </div>
   );
 }
@@ -7994,8 +8042,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
 
             {/* Toolbar */}
             <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
-              <button className="btn sm" onClick={()=>excelFileRef.current?.click()}>⬆️ Import Excel</button>
-              <input ref={excelFileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleExcelImport}/>
+              <div style={{fontSize:12,color:'var(--grey-400)'}}>Use the <b>Template</b> / <b>Excel</b> buttons on each section below.</div>
               <div style={{flex:1}}/>
               <div style={{background:'white',borderRadius:'var(--radius-md)',padding:'6px 14px',border:'1px solid var(--grey-100)',fontSize:13}}>
                 Grand total: <span style={{fontWeight:600,color:'var(--green)'}}>₹{grandTotal.toLocaleString('en-IN')}</span>
@@ -8011,7 +8058,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
                   <SubEventNameInput value={se.name} onChange={v=>updateSubEvent(se.id,'name',v)}/>
                   <SubEventDateInput value={se.date} onChange={v=>updateSubEvent(se.id,'date',v)}/>
                   <SubEventLocInput value={se.location} onChange={v=>updateSubEvent(se.id,'location',v)}/>
-                  <SubEventTplBtn templates={templates} onPick={tpl=>loadTemplateIntoSubEvent(se.id,tpl)}/>
+                  <SubEventTplBtn templates={templates} onPick={tpl=>loadTemplateIntoSubEvent(se.id,tpl)} onImport={items=>updateSubItems(se.id,items)}/>
                   {subEvents.length>1&&<button style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14,flexShrink:0}} onClick={()=>removeSubEvent(se.id)}>🗑</button>}
                 </div>
                 <FastEntryTable items={se.items} onChange={items=>updateSubItems(se.id,items)}/>
@@ -8024,7 +8071,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
                 <div style={{width:9,height:9,borderRadius:'50%',background:'#888780',flexShrink:0}}></div>
                 <span style={{fontSize:13,fontWeight:500,color:'var(--grey-800)',flex:1}}>Main event items</span>
                 <span style={{fontSize:11,color:'var(--grey-400)'}}>Items not tied to a specific sub-event</span>
-                <SubEventTplBtn templates={templates} onPick={tpl=>loadTemplateIntoMain(tpl)}/>
+                <SubEventTplBtn templates={templates} onPick={tpl=>loadTemplateIntoMain(tpl)} onImport={items=>setMainItems(items)}/>
               </div>
               <FastEntryTable items={mainItems} onChange={setMainItems}/>
             </div>
