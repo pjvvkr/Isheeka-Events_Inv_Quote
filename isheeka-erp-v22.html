@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <title>Isheeka Events — ERP</title>
+<!-- PWA: installable on phones -->
+<link rel="manifest" href="manifest.webmanifest"/>
+<meta name="theme-color" content="#E8185A"/>
+<link rel="apple-touch-icon" href="apple-touch-icon.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Isheeka"/>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(e){console.warn('[Isheeka ERP] SW registration failed',e);});});}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
@@ -5834,7 +5843,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
         const path='receipts/'+String(inv.ref_number||'inv').replace(/[^A-Za-z0-9_-]/g,'')+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,6)+'.'+ext;
         const {error:ue}=await supabase.storage.from('quotations').upload(path, payFile, {contentType:payFile.type||'application/octet-stream', upsert:true});
         if(ue){ notify('Couldn\'t upload the attachment — recording the payment without it.','error'); }
-        else { const {data:pu}=supabase.storage.from('quotations').getPublicUrl(path); receiptUrl=(pu&&pu.publicUrl)||null; }
+        else { const {data:pu}=await supabase.storage.from('quotations').createSignedUrl(path, 60*60*24*365); receiptUrl=(pu&&pu.signedUrl)||null; }
       }catch(e){ notify('Attachment upload failed — recording the payment without it.','error'); }
     }
     const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:invoiceId, installment_id:payForm.installment_id, amount:amt, payment_date:payForm.date, payment_mode:payForm.mode, reference_number:payForm.reference||null, notes:payForm.notes||null, recorded_by:uid, receipt_url:receiptUrl});
@@ -8380,8 +8389,10 @@ async function uploadQuotePdf(quot, items, displayOpts, settings, extra){
     const path = 'quotes/Quotation_'+_ref+_rev+'_'+_stamp+'_'+_code+'.pdf';
     const {error:upErr} = await supabase.storage.from('quotations').upload(path, blob, {contentType:'application/pdf', upsert:true});
     if(upErr){ console.error('[Isheeka ERP] PDF upload failed:', upErr); return null; }
-    const {data} = supabase.storage.from('quotations').getPublicUrl(path);
-    return (data && data.publicUrl) || null;
+    // Private bucket: time-limited signed link (30 days) instead of a permanent public URL.
+    const {data, error:sErr} = await supabase.storage.from('quotations').createSignedUrl(path, 60*60*24*30);
+    if(sErr){ console.error('[Isheeka ERP] signed URL failed:', sErr); return null; }
+    return (data && data.signedUrl) || null;
   }catch(err){ console.error('[Isheeka ERP] uploadQuotePdf error:', err); return null; }
 }
 function buildQuoteShareMsg(quot, settings, url){
@@ -8416,8 +8427,10 @@ async function uploadInvoicePdf(inv, items, settings, displayOpts, extra){
     const path = 'invoices/Invoice_'+_ref+_rev+'_'+_stamp+'_'+_code+'.pdf';
     const {error:upErr} = await supabase.storage.from('quotations').upload(path, blob, {contentType:'application/pdf', upsert:true});
     if(upErr){ console.error('[Isheeka ERP] invoice PDF upload failed:', upErr); return null; }
-    const {data} = supabase.storage.from('quotations').getPublicUrl(path);
-    return (data && data.publicUrl) || null;
+    // Private bucket: time-limited signed link (30 days) instead of a permanent public URL.
+    const {data, error:sErr} = await supabase.storage.from('quotations').createSignedUrl(path, 60*60*24*30);
+    if(sErr){ console.error('[Isheeka ERP] signed URL failed:', sErr); return null; }
+    return (data && data.signedUrl) || null;
   }catch(err){ console.error('[Isheeka ERP] uploadInvoicePdf error:', err); return null; }
 }
 function buildInvoiceShareMsg(inv, settings, url){

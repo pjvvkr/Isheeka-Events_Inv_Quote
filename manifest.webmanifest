@@ -1,0 +1,17 @@
+{
+  "name": "Isheeka Events ERP",
+  "short_name": "Isheeka",
+  "description": "Leads, quotes, events, invoices and vendor payments for Isheeka Events.",
+  "start_url": "isheeka-erp-v22.html",
+  "scope": ".",
+  "id": "isheeka-erp",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#E8185A",
+  "background_color": "#FFFDFB",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
