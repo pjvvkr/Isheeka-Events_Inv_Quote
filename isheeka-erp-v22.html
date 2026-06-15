@@ -4830,6 +4830,8 @@ function EventsModule({nav, onNavigate, onBack}) {
   const [saveSuccess, setSaveSuccess] = useState('');
   const [staffList, setStaffList] = useState([]);
   const [eventFunnels, setEventFunnels] = useState({});
+  const [refPicker, setRefPicker] = useState(false);
+  const [refSearch, setRefSearch] = useState('');
 
   useEffect(()=>{ loadEvents(); loadStaff(); },[]);
   // Reload the list whenever we return to it (detail/wizard closed) so funnel badges + rows stay fresh.
@@ -4910,6 +4912,29 @@ function EventsModule({nav, onNavigate, onBack}) {
     <div>
       {saveSuccess&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:16,border:'1px solid rgba(15,110,86,0.2)'}}>✅ {saveSuccess}</div>}
 
+      {refPicker&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'48px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget)setRefPicker(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:560,maxHeight:'80vh',display:'flex',flexDirection:'column'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <div><div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Create from reference</div><div style={{fontSize:12,color:'var(--grey-400)'}}>Pick an event to copy its sub-events &amp; items into a new one (prices reset).</div></div>
+              <button className="btn sm" onClick={()=>setRefPicker(false)}>✕</button>
+            </div>
+            <div style={{padding:'12px 20px',borderBottom:'1px solid var(--grey-100)'}}>
+              <input className="field-input" autoFocus placeholder="Search by name, ref, client, type…" value={refSearch} onChange={e=>setRefSearch(e.target.value)}/>
+            </div>
+            <div style={{overflowY:'auto',padding:'6px 0'}}>
+              {(()=>{ const q=refSearch.toLowerCase(); const list=events.filter(e=>e.status?.toLowerCase()!=='cancelled').filter(e=>!q||`${e.name} ${e.client_name||''} ${e.type||''} ${e.ref_number||''} ${e.location||''}`.toLowerCase().includes(q)); if(list.length===0) return <div style={{padding:'24px 20px',textAlign:'center',fontSize:13,color:'var(--grey-400)'}}>No matching events.</div>; return list.map(e=>(
+                <div key={e.event_id} onClick={()=>{setRefPicker(false);onNavigate('events',{mode:'new',referenceEvent:e,label:'New event'});}} style={{padding:'10px 20px',cursor:'pointer',borderBottom:'1px solid var(--grey-50)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}}
+                  onMouseEnter={ev=>ev.currentTarget.style.background='var(--grey-50)'} onMouseLeave={ev=>ev.currentTarget.style.background='white'}>
+                  <div><div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{e.name}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>{e.ref_number?(e.ref_number+' · '):''}{e.type?eventTypeLabel(e.type):''}{e.client_name?(' · '+e.client_name):''}</div></div>
+                  <span style={{color:'var(--pink)',fontSize:12,fontWeight:500,whiteSpace:'nowrap'}}>Use →</span>
+                </div>
+              )); })()}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Metrics */}
       <div className="metrics-grid" style={{marginBottom:20}}>
         <div className="metric-card pink"><div className="metric-icon">🎪</div><div className="metric-value">{events.length}</div><div className="metric-label">Total events</div></div>
@@ -4939,6 +4964,7 @@ function EventsModule({nav, onNavigate, onBack}) {
         <select className="field-input" style={{width:160}} value={budgetFilter} onChange={e=>setBudgetFilter(e.target.value)}>
           {BUDGET_RANGES.map(r=><option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
+        <button className="btn" onClick={()=>{setRefSearch('');setRefPicker(true);}} title="Start a new event pre-filled from an existing one">📋 From reference</button>
         <button className="btn primary" onClick={()=>onNavigate('events',{mode:'new',label:'New event'})}>+ New event</button>
       </div>
 
