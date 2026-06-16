@@ -7772,6 +7772,15 @@ function RFQDetail({rfqId, onBack, onShare, onNavigate}){
       supabase.from('rfq_activity').select('*').eq('rfq_id',rfqId).order('created_at',{ascending:false}),
       supabase.from('rfq_revisions').select('*').eq('rfq_id',rfqId).order('revision_number',{ascending:false}),
     ]);
+    // Self-heal a stale quote pointer: walk forward through the revision chain to the newest quote.
+    if(rfq && rfq.quotation_id){
+      let cur=rfq.quotation_id, guard=0;
+      while(guard++<25){
+        const {data:child}=await supabase.from('quotations').select('quotation_id').eq('parent_quotation_id',cur).eq('is_deleted',false).order('created_at',{ascending:false}).limit(1).maybeSingle();
+        if(child&&child.quotation_id) cur=child.quotation_id; else break;
+      }
+      if(cur!==rfq.quotation_id){ try{ await supabase.from('rfqs').update({quotation_id:cur,updated_at:new Date().toISOString()}).eq('rfq_id',rfqId); }catch(e){} rfq.quotation_id=cur; }
+    }
     setR(rfq||null); setItems(its||[]); setActivity(act||[]); setRevisions(revs||[]); setLoading(false);
   };
   React.useEffect(()=>{ load(); },[rfqId]);
