@@ -5293,6 +5293,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [qUserMap, setQUserMap] = React.useState({});
   const [srcLead, setSrcLead] = React.useState(null);
   const [srcEvent, setSrcEvent] = React.useState(null);
+  const [srcRfq, setSrcRfq] = React.useState(null);
   const [invoiceIssued, setInvoiceIssued] = React.useState(false);
   const [qActExpanded, setQActExpanded] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
@@ -5342,6 +5343,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     if(q&&q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
     let _evd=null;
     if(q&&q.lead_id){ const {data:ld}=await supabase.from('leads').select('lead_id,ref_number,stage,tentative_date').eq('lead_id',q.lead_id).maybeSingle(); setSrcLead(ld||null); if(ld&&ld.tentative_date) _evd=ld.tentative_date; } else setSrcLead(null);
+    try{ const {data:rq}=await supabase.from('rfqs').select('rfq_id,ref_number').eq('quotation_id',q.quotation_id).eq('is_deleted',false).maybeSingle(); setSrcRfq(rq||null); }catch(e){ setSrcRfq(null); }
     if(q&&q.event_id){
       const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status,main_date').eq('event_id',q.event_id).maybeSingle(); setSrcEvent(ev||null);
       if(ev&&ev.main_date) _evd=ev.main_date;
@@ -5486,10 +5488,11 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           <div>
             <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number}{quot.revision_number>0?<span style={{fontSize:12,color:'var(--grey-400)',fontWeight:400}}> · Rev {quot.revision_number}</span>:''} <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,marginLeft:6}}>{statusLabel}</span>{isQuoteExpired(quot)&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>Expired</span>}</div>
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}><ClientLink clientId={quot.client_id} name={quot.client_name} onNavigate={onNavigate}>{quot.client_name||'—'}</ClientLink>{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
-            {(srcLead||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
+            {(srcLead||srcEvent||srcRfq)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
-              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
-              <span>→</span><span style={{color:'var(--grey-600)'}}>📄 {quot.ref_number}</span>
+              {srcRfq?<><a onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:srcRfq.rfq_id,label:srcRfq.ref_number||'RFQ'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>📝 {srcRfq.ref_number||'RFQ'}</a><span>→</span></>:null}
+              {srcLead?<><a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {srcLead.ref_number||'Lead'}</a><span>→</span></>:(srcRfq?null:<><span>🎯 —</span><span>→</span></>)}
+              <span style={{color:'var(--grey-600)'}}>📄 {quot.ref_number}</span>
               {srcEvent&&<><span>→</span><a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id,label:srcEvent.name||srcEvent.ref_number||'Event'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎪 {srcEvent.ref_number||'Event'}</a></>}
             </div>}
           </div>
@@ -5834,6 +5837,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [revReason, setRevReason] = React.useState('');
   const [revSaving, setRevSaving] = React.useState(false);
   const [srcQuote, setSrcQuote] = React.useState(null);
+  const [srcRfq, setSrcRfq] = React.useState(null);
   const [srcLead, setSrcLead] = React.useState(null);
   const [srcEvent, setSrcEvent] = React.useState(null);
   const [pdfDisplay, setPdfDisplay] = React.useState({prices:true,qty:true,schedule:true,discount:true,coverPage:false,bankDetails:true});
@@ -5887,6 +5891,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     let sq=null;
     if(i&&i.quotation_id){ const r=await supabase.from('quotations').select('quotation_id,ref_number,status,grand_total,lead_id,event_id').eq('quotation_id',i.quotation_id).maybeSingle(); sq=r.data||null; }
     setSrcQuote(sq);
+    try{ const _qid=(sq&&sq.quotation_id)||i.quotation_id; if(_qid){ const {data:rq}=await supabase.from('rfqs').select('rfq_id,ref_number').eq('quotation_id',_qid).eq('is_deleted',false).maybeSingle(); setSrcRfq(rq||null); } else setSrcRfq(null); }catch(e){ setSrcRfq(null); }
     // Source lead — prefer the invoice's own lead_id, else the quote's lead_id
     const leadId=(i&&i.lead_id)||(sq&&sq.lead_id)||null;
     if(leadId){ const {data:ld}=await supabase.from('leads').select('lead_id,ref_number,stage').eq('lead_id',leadId).maybeSingle(); setSrcLead(ld||null); }
@@ -6130,10 +6135,11 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}>
               <ClientLink clientId={inv.client_id} name={inv.client_name} onNavigate={onNavigate}>{inv.client_name||'—'}</ClientLink>{inv.event_name?' · '+inv.event_name:''}{inv.doc_date?' · '+fmt(inv.doc_date):''}
             </div>
-            {(srcLead||srcQuote||srcEvent)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
+            {(srcLead||srcQuote||srcEvent||srcRfq)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
-              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={LEAD_STAGE_LABELS[srcLead.stage]||srcLead.stage}>🎯 {srcLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
-              <span>→</span>
+              {srcRfq?<><a onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:srcRfq.rfq_id,label:srcRfq.ref_number||'RFQ'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>📝 {srcRfq.ref_number||'RFQ'}</a><span>→</span></>:null}
+              {srcLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={LEAD_STAGE_LABELS[srcLead.stage]||srcLead.stage}>🎯 {srcLead.ref_number||'Lead'}</a>:(srcRfq?null:<span>🎯 —</span>)}
+              {(srcLead||!srcRfq)&&<span>→</span>}
               {srcQuote?<a onClick={()=>onNavigate&&onNavigate('quotations',{quotId:srcQuote.quotation_id,label:srcQuote.ref_number})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={(QUOT_STATUS_LABELS[srcQuote.status]||srcQuote.status)+' · ₹'+parseFloat(srcQuote.grand_total||0).toLocaleString('en-IN')}>📄 {srcQuote.ref_number}</a>:<span>📄 —</span>}
               <span>→</span>
               {srcEvent?<a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id,label:srcEvent.name||srcEvent.ref_number||'Event'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}} title={srcEvent.name||''}>🎪 {srcEvent.ref_number||'Event'}</a>:<span>🎪 —</span>}
@@ -9711,6 +9717,9 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
       if(qe) throw qe;
 
       if(lineItems.length>0){ const {error:lie}=await supabase.from('quotation_line_items').insert(lineItems.map(i=>({...i,quotation_id:newQ.quotation_id}))); if(lie) throw lie; }
+
+      // RFQ-origin: keep the source RFQ pointing at the LIVE quote (so "Go to quote" never lands on a superseded one).
+      if(isRevision&&existingQuotationId){ try{ await supabase.from('rfqs').update({quotation_id:newQ.quotation_id,updated_at:new Date().toISOString()}).eq('quotation_id',existingQuotationId); }catch(e){} }
 
       // Sync the planned event date back: lead's tentative date (lead-origin) and/or the event's main date (event-origin).
       if(quotDetails.event_date){
