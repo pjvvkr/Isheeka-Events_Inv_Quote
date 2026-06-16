@@ -5403,6 +5403,30 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       setConvertLead(l); setShowConvert(true);
       return;
     }
+    // Client/RFQ-origin (no lead, no event): create the event directly from the quote + client.
+    if(quot.client_id){
+      if(!window.confirm('Confirm this quote and create the event?\n\nThis creates the event from the quote items and a draft invoice.')) return;
+      setConfirming(true);
+      try{
+        const {data:c}=await supabase.from('clients').select('first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',quot.client_id).maybeSingle();
+        const {data:rq}=await supabase.from('rfqs').select('event_type,event_date,location,city,guest_count,budget').eq('quotation_id',quot.quotation_id).eq('is_deleted',false).maybeSingle();
+        const nm=(quot.client_name||'').trim();
+        const synthLead={
+          lead_id:null, client_id:quot.client_id,
+          first_name:(c&&c.first_name)||nm.split(' ')[0]||nm, last_name:(c&&c.last_name)||nm.split(' ').slice(1).join(' '),
+          phone:(c&&c.phone_1)||'', phone_2:(c&&c.phone_2)||'', email:(c&&c.email_1)||'', source:(c&&c.source)||'referral',
+          event_type:(rq&&rq.event_type)||'', tentative_date:(rq&&rq.event_date)||null,
+          location:(rq&&(rq.location||rq.city))||null, guest_count:(rq&&rq.guest_count)||null, budget:(rq&&rq.budget)||null,
+          active_quotation_id:quot.quotation_id
+        };
+        if(quot.status!=='approved'){ const {error:ae}=await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',quot.quotation_id); if(ae) throw ae; }
+        const res=await createEventFromQuote(synthLead, {quot, forcedClientId:quot.client_id});
+        setConfirming(false);
+        notify('Event created from the quote.','success');
+        onNavigate&&onNavigate('events',{eventId:res.eventId});
+      }catch(err){ console.error('[Isheeka ERP] confirm (client-origin) failed:', err); notify('Could not create the event: '+(err&&err.message?err.message:'Please try again.'),'error'); setConfirming(false); }
+      return;
+    }
     notify('This quote is not linked to a lead or event.','error');
   };
   // Lead-origin confirm → create the event from this quote (reuses the shared conversion helper).
@@ -5474,7 +5498,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   // (= create the event) available until converted, including 'approved' (idempotent re-convert).
   const canConfirm = (quot.event_id
     ? !['approved','converted','rejected','expired','superseded'].includes(quot.status)
-    : (!!quot.lead_id && !['converted','rejected','expired','superseded'].includes(quot.status))) && !invoiceIssued && !eventCancelled;
+    : ((!!quot.lead_id || !!quot.client_id) && !['converted','rejected','expired','superseded'].includes(quot.status))) && !invoiceIssued && !eventCancelled;
 
   return (
     <div>
@@ -8933,12 +8957,14 @@ async function createEventFromQuote(lead, opts={}) {
     try { await createInvoiceFromQuote(approvedQuot.quotation_id,{eventId:event.event_id}); }
     catch(invErr){ console.error('[Isheeka ERP] invoice auto-create failed:', invErr); notify('Event created, but the draft invoice couldn\'t be generated automatically — use "Generate invoice" on the event.','error'); }
   }
-  const {error:lue}=await supabase.from('leads').update({
-    stage:'event_triggered',client_id:clientId,
-    event_id:event.event_id,converted_at:new Date().toISOString(),
-    updated_at:new Date().toISOString()
-  }).eq('lead_id',lead.lead_id);
-  if(lue) throw lue;
+  if(lead.lead_id){
+    const {error:lue}=await supabase.from('leads').update({
+      stage:'event_triggered',client_id:clientId,
+      event_id:event.event_id,converted_at:new Date().toISOString(),
+      updated_at:new Date().toISOString()
+    }).eq('lead_id',lead.lead_id);
+    if(lue) throw lue;
+  }
   return {eventId:event.event_id, clientOutcome, clientName:lead.first_name+' '+lead.last_name};
 }
 
