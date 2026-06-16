@@ -5882,6 +5882,8 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
   const [payFile, setPayFile] = React.useState(null);
   const [showRefund, setShowRefund] = React.useState(false);
   const [refundForm, setRefundForm] = React.useState({amount:'',reason:'',date:new Date().toISOString().split('T')[0]});
+  const [showDiscount, setShowDiscount] = React.useState(false);
+  const [discountForm, setDiscountForm] = React.useState({amount:'',reason:''});
   const openRefund = ()=>{ setRefundForm({amount:String(Math.round(parseFloat(inv.total_received)||0)),reason:'',date:new Date().toISOString().split('T')[0]}); setShowRefund(true); };
   const submitRefund = async ()=>{
     if(paySaving) return;
@@ -5907,6 +5909,20 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
       supabase.from('invoice_payments').select('*').eq('invoice_id',invoiceId).order('payment_date',{ascending:false}),
     ]);
     setInv(i||null); setItems(li||[]); setInstallments(inst||[]); setSettings(s||{}); setActivity(act||[]); setPayments(pays||[]);
+    // Self-heal: if the installment ledger has drifted from the header (e.g. a refund recorded
+    // before the reopen fix left every installment "paid" while the header shows an outstanding
+    // balance), rebuild the installment allocation from total_received so the two agree again.
+    if(i && inst && inst.length){
+      const sumPaid=inst.reduce((acc,x)=>acc+(parseFloat(x.amount_paid)||0),0);
+      const recv=parseFloat(i.total_received)||0;
+      if(Math.abs(sumPaid-recv)>0.5){
+        try{
+          await reconcileInvoiceInstallments(inst, recv);
+          const {data:inst2}=await supabase.from('invoice_installments').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('installment_number');
+          setInstallments(inst2||inst);
+        }catch(e){}
+      }
+    }
     // Auto-flag overdue: an issued / partly-paid invoice past its due date becomes 'overdue'.
     if(i && isInvoiceOverdue(i)){ try{ await supabase.from('invoices').update({status:'overdue',updated_at:new Date().toISOString()}).eq('invoice_id',i.invoice_id); setInv(prev=>prev?{...prev,status:'overdue'}:prev); }catch(e){} }
     const m={}; (us||[]).forEach(u=>{ m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim(); }); setUserMap(m);
@@ -6072,6 +6088,36 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     notify('Invoice revised'+(newRev>(inv.revision_number||0)?(' (rev '+newRev+')'):'')+'.','success');
     await loadAll();
   };
+  // Last-minute discount / write-off: knock an amount off the balance (a goodwill discount,
+  // or write off the remaining outstanding so the client settles for less). Reduces the grand
+  // total + outstanding, rescales installments, settles to Paid if covered, and logs it.
+  const openDiscount = ()=>{ setDiscountForm({amount:outstanding>0?String(Math.round(outstanding)):'',reason:''}); setShowDiscount(true); };
+  const applyDiscount = async ()=>{
+    if(saving) return;
+    const d=parseFloat(discountForm.amount)||0;
+    if(d<=0){ notify('Enter a discount amount greater than ₹0.','error'); return; }
+    if(d>taxable+0.5){ notify('Discount can’t exceed the invoice total (₹'+Math.round(taxable).toLocaleString('en-IN')+').','error'); return; }
+    if(!discountForm.reason.trim()){ notify('Enter a reason for the discount.','error'); return; }
+    setSaving(true);
+    const newDiscount=(parseFloat(inv.discount_amount)||0)+d;
+    const newTaxable=Math.max(0,subtotal-newDiscount);
+    const newTax=inv.gst_applicable?Math.round(newTaxable*gstPct/100):0;
+    const newGrand=newTaxable+newTax;
+    const newOut=Math.max(0,newGrand-received);
+    const fullyPaid=received>=newGrand-0.5;
+    const newStatus=fullyPaid?'paid':(received>0?'partially_paid':(inv.status==='draft'?'draft':'sent'));
+    const newRev=(inv.status==='draft')?(inv.revision_number||0):((inv.revision_number||0)+1);
+    const {error:ue}=await supabase.from('invoices').update({discount_amount:newDiscount,tax_amount:newTax,grand_total:newGrand,total_outstanding:newOut,status:newStatus,revision_number:newRev,updated_at:new Date().toISOString()}).eq('invoice_id',invoiceId);
+    if(ue){ notify('Could not apply the discount: '+(ue.message||''),'error'); setSaving(false); return; }
+    // rescale percentage-based installment dues to the new grand, then reconcile paid/balance from received
+    for(const it of installments){ if(it.percentage==null) continue; const due=Math.round(newGrand*(parseFloat(it.percentage)||0)/100); await supabase.from('invoice_installments').update({amount_due:due,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id); }
+    try{ const {data:fresh}=await supabase.from('invoice_installments').select('*').eq('invoice_id',invoiceId).eq('is_deleted',false).order('installment_number'); await reconcileInvoiceInstallments(fresh||[], received); }catch(e){}
+    if(fullyPaid && inv.quotation_id){ try{ await supabase.from('quotations').update({status:'invoiced',updated_at:new Date().toISOString()}).eq('quotation_id',inv.quotation_id); }catch(e){} }
+    try{ await logInvoiceActivity(invoiceId,{action:'revised',field:'discount',old_value:'₹'+grand.toLocaleString('en-IN'),new_value:'₹'+newGrand.toLocaleString('en-IN'),reason:'Discount ₹'+d.toLocaleString('en-IN')+' — '+discountForm.reason.trim(),revision_number:newRev}); }catch(e){}
+    setSaving(false); setShowDiscount(false);
+    notify('Discount of ₹'+d.toLocaleString('en-IN')+' applied'+(fullyPaid?' — invoice settled.':'.'),'success');
+    await loadAll();
+  };
   const canShare = ['sent','partially_paid','paid','overdue'].includes(inv.status);
   const shareInvoice = async (channel)=>{
     if(sharing) return;
@@ -6097,7 +6143,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
     const amt=parseFloat(payForm.amount)||0;
     if(amt<=0){ notify('Enter a valid payment amount.','error'); return; }
     if(!payForm.date){ notify('Pick a payment date.','error'); return; }
-    if(!payForm.installment_id){ notify('Select which installment this payment is against.','error'); return; }
+    if(!payForm.installment_id && unpaidInstallments.length){ notify('Select which installment this payment is against.','error'); return; }
     setPaySaving(true);
     const uid=await _currentUid();
     let receiptUrl=null;
@@ -6110,10 +6156,28 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
         else { const {data:pu}=await supabase.storage.from('quotations').createSignedUrl(path, 60*60*24*365); receiptUrl=(pu&&pu.signedUrl)||null; }
       }catch(e){ notify('Attachment upload failed — recording the payment without it.','error'); }
     }
-    const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:invoiceId, installment_id:payForm.installment_id, amount:amt, payment_date:payForm.date, payment_mode:payForm.mode, reference_number:payForm.reference||null, notes:payForm.notes||null, recorded_by:uid, receipt_url:receiptUrl});
+    // Resolve the installment to stamp on the payment row: the chosen one, else the first
+    // unpaid, else the first installment, else null (general payment against the invoice).
+    const rowInstId = payForm.installment_id || (unpaidInstallments[0]&&unpaidInstallments[0].installment_id) || (installments[0]&&installments[0].installment_id) || null;
+    const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:invoiceId, installment_id:rowInstId, amount:amt, payment_date:payForm.date, payment_mode:payForm.mode, reference_number:payForm.reference||null, notes:payForm.notes||null, recorded_by:uid, receipt_url:receiptUrl});
     if(pe){ notify('Could not record payment: '+(pe.message||''),'error'); setPaySaving(false); return; }
-    const it=installments.find(x=>x.installment_id===payForm.installment_id);
-    if(it){ const paid=(parseFloat(it.amount_paid)||0)+amt; const due=parseFloat(it.amount_due)||0; const bal=Math.max(0,due-paid); const ist=bal<=0?'paid':'partially_paid'; await supabase.from('invoice_installments').update({amount_paid:paid,balance:bal,status:ist,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id); }
+    // Allocate the payment: the chosen installment first, then spill the remainder onto the
+    // remaining installments in order. Works whether or not an installment was picked.
+    {
+      let remaining=amt;
+      const ordered=[...installments].sort((a,b)=>(a.installment_number||0)-(b.installment_number||0));
+      const chosen=ordered.filter(x=>x.installment_id===payForm.installment_id);
+      const rest=ordered.filter(x=>x.installment_id!==payForm.installment_id);
+      for(const it of [...chosen,...rest]){
+        if(remaining<=0.5) break;
+        const due=parseFloat(it.amount_due)||0; const curPaid=parseFloat(it.amount_paid)||0;
+        const room=Math.max(0,due-curPaid); if(room<=0) continue;
+        const add=Math.min(room,remaining);
+        const newPaid=curPaid+add; const bal=Math.max(0,due-newPaid); const ist=bal<=0?'paid':'partially_paid';
+        await supabase.from('invoice_installments').update({amount_paid:newPaid,balance:bal,status:ist,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id);
+        remaining-=add;
+      }
+    }
     const newRec=(parseFloat(inv.total_received)||0)+amt; const newOut=Math.max(0,grand-newRec);
     const fullyPaid = newRec>=grand;
     const newStatus = fullyPaid ? 'paid' : 'partially_paid';
@@ -6231,6 +6295,19 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
           </div>
         </div>
       )}
+      {showDiscount&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowDiscount(false);}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:440,boxShadow:'var(--shadow-lg)'}}>
+            <div style={{padding:'16px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>Discount / write-off <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {inv.ref_number} · outstanding ₹{Math.round(outstanding).toLocaleString('en-IN')}</span></div>
+            <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr',gap:12}}>
+              <div><label className="field-label">Discount amount (₹) <span style={{color:'var(--pink)'}}>*</span></label><input type="number" className="field-input" value={discountForm.amount} onChange={e=>setDiscountForm(f=>({...f,amount:e.target.value}))} placeholder="0"/><div style={{fontSize:11,color:'var(--grey-400)',marginTop:4}}>Prefilled with the full outstanding (a write-off). Lower it for a partial discount. New total: ₹{Math.max(0,Math.round(grand-(parseFloat(discountForm.amount)||0))).toLocaleString('en-IN')}.</div></div>
+              <div><label className="field-label">Reason <span style={{color:'var(--pink)'}}>*</span></label><input className="field-input" value={discountForm.reason} onChange={e=>setDiscountForm(f=>({...f,reason:e.target.value}))} placeholder="e.g. Goodwill discount agreed on event day"/></div>
+              <div style={{fontSize:11,color:'var(--grey-400)'}}>Reduces the invoice total and outstanding, rescales the installment schedule, and is logged in the activity trail. If the discount clears the balance, the invoice is marked Paid.</div>
+            </div>
+            <div style={{padding:'14px 20px',borderTop:'1px solid var(--grey-100)',display:'flex',justifyContent:'flex-end',gap:8}}><button className="btn" onClick={()=>setShowDiscount(false)}>Cancel</button><button className="btn primary" disabled={saving} onClick={applyDiscount}>{saving?'Saving…':'Apply discount'}</button></div>
+          </div>
+        </div>
+      )}
       {showRefund&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'60px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget) setShowRefund(false);}}>
           <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:440,boxShadow:'var(--shadow-lg)'}}>
@@ -6254,7 +6331,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
               <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Amount (₹) <span style={{color:'var(--red)'}}>*</span></div><input className="field-input" type="number" value={payForm.amount} onChange={e=>setPayForm(f=>({...f,amount:e.target.value}))}/></div>
               <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Date <span style={{color:'var(--red)'}}>*</span></div><input className="field-input" type="date" value={payForm.date} onChange={e=>setPayForm(f=>({...f,date:e.target.value}))}/></div>
               <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Mode <span style={{color:'var(--red)'}}>*</span></div><select className="field-input" value={payForm.mode} onChange={e=>setPayForm(f=>({...f,mode:e.target.value}))}>{[['upi','UPI'],['neft','Bank / NEFT'],['cash','Cash'],['cheque','Cheque']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
-              <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Against installment <span style={{color:'var(--red)'}}>*</span></div><select className="field-input" value={payForm.installment_id} onChange={e=>setPayForm(f=>({...f,installment_id:e.target.value}))}>{unpaidInstallments.length===0&&<option value="">No unpaid installments</option>}{unpaidInstallments.map(it=><option key={it.installment_id} value={it.installment_id}>{(it.label||('Installment '+it.installment_number))+' · bal ₹'+(parseFloat(it.balance!=null?it.balance:it.amount_due)||0).toLocaleString('en-IN')}</option>)}</select></div>
+              <div><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Against installment {unpaidInstallments.length>0&&<span style={{color:'var(--red)'}}>*</span>}</div><select className="field-input" value={payForm.installment_id} onChange={e=>setPayForm(f=>({...f,installment_id:e.target.value}))}>{unpaidInstallments.length===0?<option value="">General — against outstanding</option>:<option value="">Auto — apply in order</option>}{unpaidInstallments.map(it=><option key={it.installment_id} value={it.installment_id}>{(it.label||('Installment '+it.installment_number))+' · bal ₹'+(parseFloat(it.balance!=null?it.balance:it.amount_due)||0).toLocaleString('en-IN')}</option>)}</select></div>
             </div>
             <div style={{marginBottom:8}}><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Reference no. (optional)</div><input className="field-input" value={payForm.reference} onChange={e=>setPayForm(f=>({...f,reference:e.target.value}))} placeholder="UTR / cheque no. / txn id"/></div>
             <div style={{marginBottom:12}}><div style={{fontSize:12,fontWeight:500,color:'var(--grey-700)',marginBottom:4}}>Notes (optional)</div><input className="field-input" value={payForm.notes} onChange={e=>setPayForm(f=>({...f,notes:e.target.value}))}/></div>
@@ -6377,6 +6454,7 @@ function InvoiceDetail({invoiceId, onBack, onNavigate}) {
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8,paddingTop:8,borderTop:'1px solid var(--grey-50)'}}>
               <span style={{fontSize:11,fontWeight:600,color:'var(--grey-700)'}}>Payments ({payments.length})</span>
               {canRecordPay&&<button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={openPay}>+ Record</button>}
+              {canRecordPay&&<button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} title="Apply a last-minute discount / write off the balance" onClick={openDiscount}>% Discount</button>}
               {(parseFloat(inv.total_received)||0)>0&&<button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} title="Record money refunded to the client" onClick={openRefund}>↩ Refund</button>}
             </div>
             {payments.length===0&&<div style={{fontSize:11,color:'var(--grey-400)',marginTop:4}}>No payments recorded yet.</div>}
@@ -6630,9 +6708,40 @@ async function recordVendorRefund(ev, refund){
   await supabase.from('event_vendors').update({total_paid:newPaid,outstanding:out,status:newPaid<=0?'pending':(out<=0?'paid':'partially_paid'),updated_at:new Date().toISOString()}).eq('event_vendor_id',ev.event_vendor_id);
 }
 // Record a client refund (money returned to the client) as a negative is_refund row + roll back invoice totals.
+// Reconcile an invoice's installment ledger from the header's total_received.
+// Allocates the received amount across installments in number order (advance → … → balance),
+// so amount_paid / balance / status always agree with the invoice header. Idempotent.
+async function reconcileInvoiceInstallments(installments, totalReceived){
+  let remaining=Math.max(0,parseFloat(totalReceived)||0);
+  for(const it of [...(installments||[])].sort((a,b)=>(a.installment_number||0)-(b.installment_number||0))){
+    const due=parseFloat(it.amount_due)||0;
+    const paid=Math.min(due,remaining); remaining-=paid;
+    const bal=Math.max(0,due-paid);
+    const ist=paid<=0?'pending':(bal<=0?'paid':'partially_paid');
+    if((parseFloat(it.amount_paid)||0)!==paid || (parseFloat(it.balance)||0)!==bal || it.status!==ist){
+      await supabase.from('invoice_installments').update({amount_paid:paid,balance:bal,status:ist,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id);
+    }
+  }
+}
+
 async function recordClientRefund(inv, refund){
   const amt=parseFloat(refund.amount)||0; if(amt<=0) return;
   let instId=refund.installmentId||null;
+  // Un-apply the refund against installments from last to first, so paid balances re-open to
+  // match the lowered header (otherwise the installment ledger reads "paid" while the header
+  // shows an outstanding amount — and a new payment then has no installment to land on).
+  const {data:insts}=await supabase.from('invoice_installments').select('*').eq('invoice_id',inv.invoice_id).eq('is_deleted',false).order('installment_number',{ascending:false});
+  let remaining=amt;
+  for(const it of (insts||[])){
+    if(remaining<=0.5) break;
+    const paid=parseFloat(it.amount_paid)||0; if(paid<=0) continue;
+    const take=Math.min(paid,remaining);
+    const newPaid=paid-take; const due=parseFloat(it.amount_due)||0; const bal=Math.max(0,due-newPaid);
+    const ist=newPaid<=0?'pending':(bal<=0?'paid':'partially_paid');
+    await supabase.from('invoice_installments').update({amount_paid:newPaid,balance:bal,status:ist,updated_at:new Date().toISOString()}).eq('installment_id',it.installment_id);
+    if(!instId) instId=it.installment_id; // attribute the refund row to the first installment reversed
+    remaining-=take;
+  }
   if(!instId){ const {data:ins}=await supabase.from('invoice_installments').select('installment_id').eq('invoice_id',inv.invoice_id).eq('is_deleted',false).order('installment_number').limit(1); instId=(ins&&ins[0]&&ins[0].installment_id)||null; }
   const {error:pe}=await supabase.from('invoice_payments').insert({invoice_id:inv.invoice_id,installment_id:instId,amount:-amt,payment_date:refund.date||todayLocalStr(),payment_mode:null,reference_number:refund.reference||null,notes:('Refund: '+(refund.reason||'')),is_refund:true,recorded_by:await _currentUid()});
   if(pe) throw pe;
