@@ -9735,7 +9735,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
         } catch(syncErr){ console.error('[Isheeka ERP] event item sync failed:', syncErr); notify('Quote saved, but syncing the event items failed — please refresh the event.','error'); }
       }
 
-      if(!originEvent){
+      if(!originEvent && lead && lead.lead_id){
         const {error:lqe}=await supabase.from('leads').update({
           active_quotation_id:newQ.quotation_id,
           client_id:clientId||lead.client_id||null,
@@ -9743,7 +9743,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
           updated_at:new Date().toISOString()
         }).eq('lead_id',lead.lead_id);
         if(lqe) throw lqe;
-      } else if(lead.lead_id){
+      } else if(lead && lead.lead_id){
         // Revising a quote that already has an event (lead-origin, post-conversion): keep the lead pointing
         // at the newest revision so it doesn't surface the superseded original. Stage is left as-is (converted).
         try{ await supabase.from('leads').update({active_quotation_id:newQ.quotation_id,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id); }catch(e){ console.error('[Isheeka ERP] lead active-quote repoint failed:', e); }
@@ -9779,7 +9779,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
     const newStage = isRevision ? 'revised_quote_sent' : 'quote_sent';
     const {error:qse}=await runDb(supabase.from('quotations').update({status:'sent',updated_at:new Date().toISOString()}).eq('quotation_id',createdQuot.quotation_id),'mark quotation sent');
     if(qse) return;
-    if(!originEvent){
+    if(!originEvent && lead && lead.lead_id){
       const {error:lse}=await runDb(supabase.from('leads').update({stage:newStage,updated_at:new Date().toISOString()}).eq('lead_id',lead.lead_id),'update lead stage');
       if(lse) return;
     }
@@ -10047,7 +10047,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
               <div style={{width:64,height:64,borderRadius:'50%',background:'var(--green-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,margin:'0 auto 14px'}}>{'\u2705'}</div>
               <div style={{fontSize:16,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{isRevision?'Revised quotation created!':'Quotation created!'}</div>
               <div style={{fontSize:14,color:'var(--grey-400)',marginBottom:6}}>{createdQuot.ref_number} — Rs.{parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')}</div>
-              <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:24}}>Share with {lead.first_name}, then mark it as sent.{originEvent?'':' This updates the lead stage.'}</div>
+              <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:24}}>Share with {lead.first_name}, then mark it as sent.{(!originEvent && lead && lead.lead_id)?' This updates the lead stage.':''}</div>
               <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'14px 16px',marginBottom:16,textAlign:'left'}}>
                 <div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>What the client sees</div>
                 <div style={{display:'flex',gap:6,marginBottom:12}}>
@@ -10103,7 +10103,7 @@ function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContinuation,
                 </button>
               </div>
               <button className="btn primary" style={{width:'100%',maxWidth:420,padding:'12px'}} onClick={handleMarkSent}>
-                {originEvent ? 'Mark quotation as sent' : 'Mark as sent — update lead stage'}
+                {(!originEvent && lead && lead.lead_id) ? 'Mark as sent — update lead stage' : 'Mark quotation as sent'}
               </button>
               <button className="btn" style={{width:'100%',maxWidth:420,padding:'10px',marginTop:8}} onClick={()=>onComplete(createdQuot)}>
                 Close — I'll mark it sent later
