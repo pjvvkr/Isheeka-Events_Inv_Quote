@@ -1,16 +1,16 @@
 # Isheeka ERP — Vite port: state of things
 
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-18_
 
 ## Where we are
 
-The Vite port (`isheeka-vite/`) of the Isheeka ERP is feature-complete for the ported
-modules, has an automated test safety net, and the short-link service is built and
-**deployed to prod**. Everything is committed and pushed to `origin/main`
-(`github.com/pjvvkr/Isheeka-Events_Inv_Quote`).
+The Vite port (`isheeka-vite/`) of the Isheeka ERP is **LIVE in production on Netlify**
+at **https://isheeka-events-erp.netlify.app** (auto-deploys on every push to `main`).
+Login, quote-share short links, RFQ links, and password reset all validated against prod.
 
-The **live app is still the root `isheeka-erp-v22.html`** (untouched). The Vite app is
-not yet deployed — so the changes below are ready but not yet user-facing.
+The legacy `isheeka-erp-v22.html` + the public `rfq.html` portal stay on GitHub Pages
+(unchanged), so existing client RFQ links keep working. Everything is committed and
+pushed to `origin/main` (`github.com/pjvvkr/Isheeka-Events_Inv_Quote`).
 
 ## What's done
 
@@ -63,10 +63,20 @@ npm run test:e2e               # smoke + lead happy-path
 
 Studio: http://127.0.0.1:54323 · Local API: http://127.0.0.1:54321
 
-## Open / next up (not started)
+## Deployment — DONE (2026-06-18)
 
-- **Deploy the Vite app** — short links + all ported fixes only reach real users once the
-  Vite app is live (currently the root HTML app is what's served).
+- Hosted on **Netlify** (`isheeka-events-erp.netlify.app`), auto-deploy from `main`.
+- `netlify.toml` (base `isheeka-vite`, `npm run build`, publish `dist`, Node 20).
+- Supabase Auth: Site URL + Redirect URLs include the Netlify origin.
+- `VITE_RFQ_BASE_URL` points client RFQ links at the Pages `rfq.html`.
+- GitHub Pages left ON for `rfq.html` + legacy app.
+
+## Open / next up
+
+- **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +
+  add to Supabase Redirect URLs).
+- **Pending functionality** — see the prioritized list maintained with the user (feature
+  gaps / module work beyond the now-complete fix list #1–#6).
 - **More UI happy-paths** — quote wizard, event creation/cancellation, RFQ → quote.
 - **Smoke flake** — `smoke.spec.ts` failed once at the page-walk loop then passed; if it
   recurs, harden that wait.

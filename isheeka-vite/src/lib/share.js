@@ -85,7 +85,7 @@ export function buildQuoteShareMsg(quot, settings, url) {
   const evt = quot.event_name || 'your upcoming event';
   const phone = (settings && settings.phone_1) || '+91 78423 95867';
   const email = (settings && settings.email) || 'isheekaevents@gmail.com';
-  const web = (settings && settings.website) || 'www.isheekaevents.in';
+  const web = (settings && settings.website) || 'www.isheekaevents.com';
   return 'Dear ' + (quot.client_name || '') + ',\n\n' +
     'Thank you for considering Isheeka Events. We are delighted to share your personalised quotation for ' + evt + '.\n\n' +
     'Quotation: ' + quot.ref_number + '\n' +
@@ -125,7 +125,7 @@ export function buildInvoiceShareMsg(inv, settings, url) {
   const evt = inv.event_name || 'your event';
   const phone = (settings && settings.phone_1) || '+91 78423 95867';
   const email = (settings && settings.email) || 'isheekaevents@gmail.com';
-  const web = (settings && settings.website) || 'www.isheekaevents.in';
+  const web = (settings && settings.website) || 'www.isheekaevents.com';
   const bal = parseFloat(inv.total_outstanding != null ? inv.total_outstanding : inv.grand_total) || 0;
   return 'Dear ' + (inv.client_name || '') + ',\n\n' +
     'Thank you for choosing Isheeka Events for ' + evt + '. Please find your invoice below.\n\n' +

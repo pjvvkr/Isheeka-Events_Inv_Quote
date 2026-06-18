@@ -794,7 +794,7 @@ export function SettingsModule() {
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="phone_2" label="Phone 2" placeholder="+91 XXXXX XXXXX" />
             </div>
             <div className="form-grid one">
-              <SettingsField form={form} errors={errors} handleChange={handleChange} field="website" label="Website" placeholder="www.isheekaevents.in" />
+              <SettingsField form={form} errors={errors} handleChange={handleChange} field="website" label="Website" placeholder="www.isheekaevents.com" />
             </div>
             <hr className="divider" />
             <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--grey-600)', marginBottom: 12 }}>Address</div>

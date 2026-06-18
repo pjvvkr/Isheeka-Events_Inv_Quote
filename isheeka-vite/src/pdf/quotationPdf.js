@@ -62,7 +62,7 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
     const fy = H - 34;
     setDraw(GOLD); doc.setLineWidth(0.5); doc.line(M, fy, W - M, fy);
     sans('normal', 8); setText(MUTED);
-    const phone = (settings.phone_1) || '+91 78423 95867', email = (settings.email) || 'isheekaevents@gmail.com', web = (settings.website) || 'www.isheekaevents.in';
+    const phone = (settings.phone_1) || '+91 78423 95867', email = (settings.email) || 'isheekaevents@gmail.com', web = (settings.website) || 'www.isheekaevents.com';
     doc.text(phone + '   ' + email, M, fy + 12);
     doc.text(web + '   ·   Page ' + pageNo + ' of ' + pageCount, W - M, fy + 12, { align: 'right' });
   };

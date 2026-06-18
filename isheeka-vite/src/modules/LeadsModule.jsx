@@ -69,7 +69,7 @@ ${quotRef?`Your quotation (${quotRef}) has been confirmed`:'Your quotation has b
 For any queries, please reach out to us at:
 📞 +91 78423 95867
 📧 isheekaevents@gmail.com
-🌐 www.isheekaevents.in
+🌐 www.isheekaevents.com
 
 Warm regards,
 Team Isheeka Events 💕`;

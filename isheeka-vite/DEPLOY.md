@@ -61,7 +61,7 @@ supabase secrets list --project-ref jlcssesetnxulnkbrmyp
 ## Step 5 — Cut over
 
 - Share the Netlify URL with staff as the new ERP address.
-- Optional: add a custom domain (e.g. `app.isheekaevents.in`) under Netlify → Domain
+- Optional: add a custom domain (e.g. `app.isheekaevents.com`) under Netlify → Domain
   management → free HTTPS via Let's Encrypt → update DNS. Then add it to Supabase
   Redirect URLs (Step 2) too.
 - **Leave GitHub Pages on** — it keeps serving `rfq.html` and the legacy app. Existing

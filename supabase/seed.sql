@@ -5,7 +5,7 @@
 --  in Studio. We'll add storage buckets + sample data here as the tests need them.)
 
 insert into public.settings (company_name, phone_1, email, website)
-values ('Isheeka Events (LOCAL)', '+91 78423 95867', 'isheekaevents@gmail.com', 'www.isheekaevents.in');
+values ('Isheeka Events (LOCAL)', '+91 78423 95867', 'isheekaevents@gmail.com', 'www.isheekaevents.com');
 
 -- Private 'quotations' bucket so the share flow (PDF upload + short link) works LOCALLY.
 -- Prod already has this bucket; this only seeds the throwaway local DB.
