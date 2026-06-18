@@ -71,6 +71,26 @@ Studio: http://127.0.0.1:54323 · Local API: http://127.0.0.1:54321
 - `VITE_RFQ_BASE_URL` points client RFQ links at the Pages `rfq.html`.
 - GitHub Pages left ON for `rfq.html` + legacy app.
 
+## Milestone S — Vendor RFQ + costing (IN PROGRESS)
+
+Spec: `docs/milestone-s-vendor-rfq-spec.md`. Build is **local-only + feature-flagged**;
+prod is untouched until the full loop is ready.
+
+- **S1 ✅ (local):** migration `20260618000000_milestone_s_vendor_rfq.sql` (vendor fields on
+  `rfqs`/`rfq_items`, `settings.default_markup_pct`, `costing_summaries`) + `rfq-gateway`
+  vendor mode. Applied locally via `supabase migration up`. **NOT yet deployed to prod.**
+- **S2a/S2b ✅ (local):** `src/lib/vendorRfq.js` + the **Sourcing panel** in `RFQsModule`
+  (send vendor RFQs, status list, manual reminders, View bid, Open-costing placeholder).
+  Behind flag `VITE_ENABLE_VENDOR_RFQ` — set `=true` in `.env` (local only; gitignored), so
+  the prod build (no flag) renders nothing.
+- **S2c ⬜ next:** vendor cost-entry portal — `rfq.html` vendor mode (the big remaining piece).
+- **S3 ⬜:** costing & markup screen + Generate quote + Generate costing summary (with the
+  hard/soft validations from the spec §5).
+
+**To activate in prod (only when S2c+S3 are done & tested):** apply the migration to prod
+(Dashboard SQL), `supabase functions deploy rfq-gateway --no-verify-jwt`, add
+`VITE_ENABLE_VENDOR_RFQ=true` to `.env.production`, push.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +
