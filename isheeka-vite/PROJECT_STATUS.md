@@ -71,10 +71,10 @@ Studio: http://127.0.0.1:54323 · Local API: http://127.0.0.1:54321
 - `VITE_RFQ_BASE_URL` points client RFQ links at the Pages `rfq.html`.
 - GitHub Pages left ON for `rfq.html` + legacy app.
 
-## Milestone S — Vendor RFQ + costing (IN PROGRESS)
+## Milestone S — Vendor RFQ + costing ✅ DONE (live in prod, 2026-06-18)
 
-Spec: `docs/milestone-s-vendor-rfq-spec.md`. Build is **local-only + feature-flagged**;
-prod is untouched until the full loop is ready.
+Spec: `docs/milestone-s-vendor-rfq-spec.md`. Built end-to-end, automated-tested, and
+**activated in production** (feature flag `VITE_ENABLE_VENDOR_RFQ=true`).
 
 - **S1 ✅ (local):** migration `20260618000000_milestone_s_vendor_rfq.sql` (vendor fields on
   `rfqs`/`rfq_items`, `settings.default_markup_pct`, `costing_summaries`) + `rfq-gateway`
@@ -93,12 +93,21 @@ prod is untouched until the full loop is ready.
   hard/soft validations, **Generate quote** (prices the existing draft quote) + **Save costing
   summary** (`costing_summaries` audit row). Reached from the Sourcing panel; flag-gated.
 
-**Milestone S is BUILD-COMPLETE (local + feature-flagged).** Remaining = (1) full local loop test
-(needs local `rfq-gateway` `SESSION_SECRET` + `rfq.html` static-served), (2) prod activation below.
+**Tests (all green):** `tests/flows/vendor-rfq-loop.test.ts` (logic: create vendor RFQ → bid →
+costing → priced quote → costing summary) + `e2e/vendor-rfq-flow.spec.ts` (UI: sourcing panel,
+costing math, hard-block validation, in-house resolve, generate quote, send modal). The UI test
+caught a real bug — `costingRfqId` was missing from the Shell `navigate()` allow-list (the costing
+screen silently showed the RFQ list); now fixed.
 
-**To activate in prod (only when S2c+S3 are done & tested):** apply the migration to prod
-(Dashboard SQL), `supabase functions deploy rfq-gateway --no-verify-jwt`, add
-`VITE_ENABLE_VENDOR_RFQ=true` to `.env.production`, push.
+**Prod activation DONE (2026-06-18):** migration applied via Dashboard SQL · `rfq-gateway` deployed
+(`supabase functions deploy rfq-gateway --no-verify-jwt`) · `VITE_ENABLE_VENDOR_RFQ=true` in
+`.env.production` · pushed (Netlify rebuilt with the feature ON).
+
+**Not covered by automated tests:** the vendor PORTAL (`rfq.html`) HTTP path needs the gateway's
+`SESSION_SECRET` + static serving — validated by the logic test's data path + a manual prod check.
+
+**Still deferred (post-baseline):** scheduled auto-reminders to vendors; read-only sourcing history
+on the Vendor profile; per-item split across vendors at quote time; role-aware access to costs/margin.
 
 ## Open / next up
 
