@@ -1,0 +1,77 @@
+// Milestone S · S3 — costing & markup logic.
+// Joins the client RFQ items (rows) with each submitted vendor bid (columns), and turns
+// the chosen cost + markup into a priced draft quote, plus a saved costing summary (audit).
+// See docs/milestone-s-vendor-rfq-spec.md §4.3, §5.
+import { supabase } from './supabase';
+import { runDb } from './toast.jsx';
+import { _currentUid } from './session.js';
+import { loadVendorRfqs } from './vendorRfq.js';
+
+export const costKey = (it) => (it.sub_event_name || '') + '||' + (it.description || '');
+
+// Everything the costing screen needs.
+export async function loadCostingData(clientRfqId) {
+  const { data: rfq } = await supabase.from('rfqs').select('*').eq('rfq_id', clientRfqId).single();
+  const { data: clientItems } = await supabase.from('rfq_items').select('*').eq('rfq_id', clientRfqId).eq('is_deleted', false).order('sort_order');
+  const vrfqs = await loadVendorRfqs(clientRfqId);
+  const vIds = vrfqs.map((v) => v.rfq_id);
+  let vendorItems = [];
+  if (vIds.length) {
+    const { data } = await supabase.from('rfq_items').select('rfq_id,sub_event_name,description,quantity,unit_cost,can_supply,item_note').in('rfq_id', vIds).eq('is_deleted', false);
+    vendorItems = data || [];
+  }
+  const { data: vendors } = await supabase.from('vendors').select('vendor_id,name').eq('is_deleted', false);
+  const vendorMap = {}; (vendors || []).forEach((v) => { vendorMap[v.vendor_id] = v; });
+  const { data: settings } = await supabase.from('settings').select('default_markup_pct').limit(1).maybeSingle();
+
+  // Only vendors who actually submitted become comparison columns.
+  const submitted = vrfqs.filter((v) => v.status === 'submitted');
+  const submittedIds = submitted.map((v) => v.vendor_id);
+  const rfqVendorOf = {}; vrfqs.forEach((v) => { rfqVendorOf[v.rfq_id] = v.vendor_id; });
+  const bidsByKey = {};
+  vendorItems.forEach((vi) => {
+    const vendorId = rfqVendorOf[vi.rfq_id];
+    if (!submittedIds.includes(vendorId)) return;
+    (bidsByKey[costKey(vi)] = bidsByKey[costKey(vi)] || []).push({ vendor_id: vendorId, unit_cost: vi.unit_cost, can_supply: vi.can_supply, item_note: vi.item_note });
+  });
+  const columns = submittedIds.map((id) => ({ vendor_id: id, name: (vendorMap[id] || {}).name || 'Vendor' }));
+
+  return {
+    rfq: rfq || null,
+    clientItems: clientItems || [],
+    bidsByKey, columns,
+    defaultMarkup: (settings && settings.default_markup_pct != null) ? Number(settings.default_markup_pct) : 30,
+    draftQuoteId: rfq ? rfq.quotation_id : null,
+    vrfqs,
+  };
+}
+
+// Replace the draft quote's line items with the priced rows + recompute totals.
+export async function generateQuoteFromCosting(draftQuoteId, rows) {
+  if (!draftQuoteId) throw new Error('No draft quote to fill — approve the RFQ first.');
+  const now = new Date().toISOString();
+  await runDb(supabase.from('quotation_line_items').update({ is_deleted: true }).eq('quotation_id', draftQuoteId).eq('is_deleted', false), 'clear draft items');
+  const li = rows.map((r, i) => ({
+    quotation_id: draftQuoteId, sub_event_name: r.sub_event_name || null, description: r.description,
+    quantity: r.quantity || 1, unit_price: r.clientUnitPrice || 0, amount: (r.clientUnitPrice || 0) * (r.quantity || 1),
+    sort_order: i, is_deleted: false, created_at: now,
+  }));
+  if (li.length) { const { error } = await runDb(supabase.from('quotation_line_items').insert(li), 'price quote items'); if (error) throw error; }
+  const subtotal = li.reduce((s, x) => s + (x.amount || 0), 0);
+  const { error: qe } = await runDb(supabase.from('quotations').update({ subtotal, discount_amount: 0, grand_total: subtotal, updated_at: now }).eq('quotation_id', draftQuoteId), 'update quote total');
+  if (qe) throw qe;
+  return { subtotal };
+}
+
+// Save the audit snapshot (every bid, chosen source, markup, notes).
+export async function saveCostingSummary(payload) {
+  const uid = await _currentUid();
+  const { error } = await runDb(supabase.from('costing_summaries').insert({
+    client_rfq_id: payload.client_rfq_id, quotation_id: payload.quotation_id || null, event_id: payload.event_id || null,
+    generated_by: uid || null, default_markup_pct: payload.default_markup_pct,
+    total_cost: payload.total_cost, total_client: payload.total_client, total_margin: payload.total_margin,
+    internal_notes: payload.internal_notes || null, lines: payload.lines || [], is_deleted: false,
+  }), 'save costing summary');
+  if (error) throw error;
+  return true;
+}

@@ -83,9 +83,18 @@ prod is untouched until the full loop is ready.
   (send vendor RFQs, status list, manual reminders, View bid, Open-costing placeholder).
   Behind flag `VITE_ENABLE_VENDOR_RFQ` — set `=true` in `.env` (local only; gitignored), so
   the prod build (no flag) renders nothing.
-- **S2c ⬜ next:** vendor cost-entry portal — `rfq.html` vendor mode (the big remaining piece).
-- **S3 ⬜:** costing & markup screen + Generate quote + Generate costing summary (with the
-  hard/soft validations from the spec §5).
+- **S2c ✅ (local + pushed):** vendor cost-entry portal — `rfq.html` vendor mode (unit cost /
+  can't-supply / per-item note / overall note / save / submit). Dormant for clients (renders
+  only when `get_rfq` returns `party_type='vendor'`); `rfq.html` auto-detects localhost to hit
+  the local gateway. Lives on GitHub Pages.
+- **S3 ✅ (local):** costing & markup screen — `src/modules/CostingScreen.jsx` + `src/lib/costing.js`.
+  Bid comparison grid (click to choose, cheapest auto-picked, can't-supply `✕`, vendor-note `📝`),
+  per-item in-house toggle + cost, markup (default + override), live totals, internal notes,
+  hard/soft validations, **Generate quote** (prices the existing draft quote) + **Save costing
+  summary** (`costing_summaries` audit row). Reached from the Sourcing panel; flag-gated.
+
+**Milestone S is BUILD-COMPLETE (local + feature-flagged).** Remaining = (1) full local loop test
+(needs local `rfq-gateway` `SESSION_SECRET` + `rfq.html` static-served), (2) prod activation below.
 
 **To activate in prod (only when S2c+S3 are done & tested):** apply the migration to prod
 (Dashboard SQL), `supabase functions deploy rfq-gateway --no-verify-jwt`, add

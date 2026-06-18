@@ -10,6 +10,7 @@ import { RFQ_STATUS, RFQ_ACTION_LABEL } from '../lib/constants.js';
 import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuote, findClientMatch } from '../lib/rfq.js';
 import { waLink } from '../lib/share.js';
 import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg } from '../lib/vendorRfq.js';
+import { CostingScreen } from './CostingScreen.jsx';
 
 function RFQShareCard({ created, contact, onDone }) {
   const link = rfqLink(created.token);
@@ -104,6 +105,7 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
 
   if (created) { return <div><div style={{ marginBottom: 12 }}><button className="btn sm" onClick={() => { setCreated(null); }}>← All RFQs</button></div><RFQShareCard created={created} contact={created.contact} onDone={() => { setCreated(null); }} /></div>; }
   if (isNew) { return <div><div style={{ marginBottom: 12 }}><button className="btn sm" onClick={onBack}>← Back</button></div><NewRFQForm prefill={nav && nav.prefill} onCreated={(c, contact) => { setCreated({ ...c, contact }); }} onCancel={onBack} onNavigate={onNavigate} /></div>; }
+  if (nav && nav.costingRfqId) { return <CostingScreen rfqId={nav.costingRfqId} onBack={onBack} onNavigate={onNavigate} />; }
   if (detailId) { return <RFQDetail rfqId={detailId} onBack={onBack} onShare={(c, contact) => setCreated({ ...c, contact })} onNavigate={onNavigate} />; }
 
   const needsReview = rfqs.filter((r) => r.status === 'submitted').length;
@@ -150,7 +152,7 @@ function diffRevItems(aItems, bItems) {
 }
 
 // Milestone S · S2b — Sourcing panel: send/track vendor RFQs from an approved client RFQ.
-function SourcingPanel({ clientRfq, itemCount }) {
+function SourcingPanel({ clientRfq, itemCount, onNavigate }) {
   const [vrfqs, setVrfqs] = React.useState([]);
   const [vendorMap, setVendorMap] = React.useState({});
   const [summ, setSumm] = React.useState({});
@@ -283,7 +285,7 @@ function SourcingPanel({ clientRfq, itemCount }) {
             <span style={{ fontSize: 12, color: 'var(--grey-400)' }}>{respondedN} of {vrfqs.length} responded</span>
             {vrfqs.some((v) => v.status !== 'submitted') && <button className="btn sm" onClick={remindAll}>Remind all pending</button>}
           </div>
-          <button className="btn sm primary" disabled={respondedN === 0} onClick={() => notify('Costing & markup screen is the next build (S3).', 'success')}>Open costing & markup →</button>
+          <button className="btn sm primary" disabled={respondedN === 0} onClick={() => onNavigate && onNavigate('rfqs', { costingRfqId: clientRfq.rfq_id, label: 'Costing & markup' })}>Open costing & markup →</button>
         </div>
       )}
 
@@ -444,7 +446,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
       {/* Sourcing — vendor RFQs (Milestone S, S2b). Appears once the client RFQ is approved.
           Behind VITE_ENABLE_VENDOR_RFQ so the in-progress feature stays hidden in prod until the
           full loop (S1 migration + gateway + portal + costing) ships. On locally for testing. */}
-      {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ === 'true') && r.party_type !== 'vendor' && r.status === 'converted' && <SourcingPanel clientRfq={r} itemCount={items.length} />}
+      {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ === 'true') && r.party_type !== 'vendor' && r.status === 'converted' && <SourcingPanel clientRfq={r} itemCount={items.length} onNavigate={onNavigate} />}
 
       {/* Revisions */}
       {revisions.length > 0 && <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
