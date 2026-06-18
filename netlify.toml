@@ -6,6 +6,11 @@
   base = "isheeka-vite"          # run the build from here (where package.json lives)
   command = "npm run build"       # vite build (mode=production → loads .env.production)
   publish = "dist"                # publish isheeka-vite/dist
+  # COST SAVER: a production deploy costs Netlify credits. Skip the build entirely when the
+  # commit doesn't touch anything that affects the app bundle — i.e. docs/, supabase/,
+  # rfq.html, tests/, e2e/, PROJECT_STATUS.md changes won't trigger a (paid) build/deploy.
+  # Paths are relative to `base` (isheeka-vite); ../netlify.toml is the repo-root config.
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- src public index.html package.json package-lock.json .env.production vite.config.ts ../netlify.toml"
 
 [build.environment]
   NODE_VERSION = "20"             # LTS; matches Vite's supported runtime

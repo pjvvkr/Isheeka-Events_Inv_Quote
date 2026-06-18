@@ -423,6 +423,8 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
             </select>}
             {canApprove && <button className="btn sm" style={{ background: 'var(--green-light)', color: 'var(--green)', borderColor: '#86EFAC' }} disabled={approving} onClick={approve}>{approving ? 'Approving…' : '✅ Approve → create quote'}</button>}
             {r.status === 'submitted' && <button className="btn sm" style={{ color: 'var(--red)', borderColor: 'rgba(163,45,45,0.3)' }} onClick={requestChanges}>↩ Request changes</button>}
+            {r.lead_id && <button className="btn sm" title="Open the source lead" onClick={() => onNavigate && onNavigate('leads', { leadId: r.lead_id, label: r.contact_name || 'Lead' })}>🎯 View lead →</button>}
+            {r.client_id && <button className="btn sm" title="Open the client 360" onClick={() => onNavigate && onNavigate('clients', { clientId: r.client_id, label: r.contact_name || 'Client' })}>👤 View client →</button>}
             {r.quotation_id && <button className="btn sm" onClick={() => onNavigate && onNavigate('quotations', { quotId: r.quotation_id, label: 'Quote' })}>📄 Go to quote →</button>}
             <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>
           </div>
@@ -484,21 +486,27 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
       {/* Activity timeline */}
       {actGroups.length > 0 && <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)', marginBottom: 6 }}>Activity</div>
-        {actGroups.map((g, gi) => (
-          <div key={gi} style={{ borderBottom: '1px solid var(--grey-50)' }}>
-            <div onClick={() => setOpenAct(openAct === gi ? -1 : gi)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '9px 0', fontSize: 13 }}>
-              <span style={{ fontWeight: 600, color: 'var(--grey-800)' }}>{g.label}</span>
-              <span style={{ color: 'var(--grey-400)', fontSize: 12 }}>{g.entries.length} event{g.entries.length > 1 ? 's' : ''} {openAct === gi ? '▾' : '▸'}</span>
-            </div>
-            {openAct === gi && g.entries.map((a) => (
-              <div key={a.activity_id} style={{ display: 'flex', gap: 10, fontSize: 12, padding: '4px 0 4px 12px' }}>
-                <span style={{ color: 'var(--grey-700)', fontWeight: 500, minWidth: 160 }}>{RFQ_ACTION_LABEL[a.action] || a.action}</span>
-                <span style={{ flex: 1, color: 'var(--grey-400)', overflowWrap: 'anywhere' }}>{a.notes || ''}</span>
-                <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>{fmtDate(a.created_at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+        {actGroups.map((g, gi) => {
+          // collapse consecutive autosaves ("saved") into one row with a count — they're not
+          // duplicate data, the client portal just logs every autosave.
+          const collapsed = [];
+          g.entries.forEach((a) => { const last = collapsed[collapsed.length - 1]; if (last && last.action === a.action && a.action === 'saved' && !a.notes) { last.count++; last.created_at = a.created_at; } else collapsed.push({ ...a, count: 1 }); });
+          return (
+            <div key={gi} style={{ borderBottom: '1px solid var(--grey-50)' }}>
+              <div onClick={() => setOpenAct(openAct === gi ? -1 : gi)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', padding: '9px 0', fontSize: 13 }}>
+                <span style={{ fontWeight: 600, color: 'var(--grey-800)' }}>{g.label}</span>
+                <span style={{ color: 'var(--grey-400)', fontSize: 12 }}>{collapsed.length} event{collapsed.length > 1 ? 's' : ''} {openAct === gi ? '▾' : '▸'}</span>
               </div>
-            ))}
-          </div>
-        ))}
+              {openAct === gi && collapsed.map((a) => (
+                <div key={a.activity_id} style={{ display: 'flex', gap: 10, fontSize: 12, padding: '4px 0 4px 12px' }}>
+                  <span style={{ color: 'var(--grey-700)', fontWeight: 500, minWidth: 160 }}>{RFQ_ACTION_LABEL[a.action] || a.action}{a.count > 1 ? (' ×' + a.count) : ''}</span>
+                  <span style={{ flex: 1, color: 'var(--grey-400)', overflowWrap: 'anywhere' }}>{a.notes || ''}</span>
+                  <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>{fmtDate(a.created_at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>}
 
       <div style={{ marginTop: 4 }}><button className="btn sm" onClick={onBack}>← All RFQs</button></div>

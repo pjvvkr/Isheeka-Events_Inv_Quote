@@ -60,6 +60,7 @@ function ConvertLeadModal({lead, onConfirm, onCancel}) {
 
 function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [quot, setQuot] = React.useState(null);
+  const [sourceRfq, setSourceRfq] = React.useState(null);
   const [items, setItems] = React.useState([]);
   const [qSettings, setQSettings] = React.useState({});
   const [qActivity, setQActivity] = React.useState([]);
@@ -99,19 +100,20 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
 
   const loadAll = React.useCallback(async () => {
     setLoading(true);
-    const [{data:q},{data:li},{data:st},{data:qact},{data:qus}] = await Promise.all([
+    const [{data:q},{data:li},{data:st},{data:qact},{data:qus},{data:srfq}] = await Promise.all([
       supabase.from('quotations').select('*').eq('quotation_id',quotationId).single(),
       supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order'),
       supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single(),
       supabase.from('quotation_activity_log').select('*').eq('quotation_id',quotationId).order('logged_at',{ascending:false}),
       supabase.from('users').select('user_id,first_name,last_name'),
+      supabase.from('rfqs').select('rfq_id,ref_number,status').eq('quotation_id',quotationId).eq('party_type','client').eq('is_deleted',false).maybeSingle(),
     ]);
     let qEnriched=q;
     if(q){
       if(q.client_id){ const {data:c}=await supabase.from('clients').select('phone_1,email_1,city').eq('client_id',q.client_id).single(); if(c) qEnriched={...q,client_phone:q.client_phone||c.phone_1||'',client_email:q.client_email||c.email_1||'',client_city:q.client_city||c.city||''}; }
       else if(q.lead_id){ const {data:l}=await supabase.from('leads').select('phone,email,location').eq('lead_id',q.lead_id).single(); if(l) qEnriched={...q,client_phone:q.client_phone||l.phone||'',client_email:q.client_email||l.email||'',client_city:q.client_city||l.location||''}; }
     }
-    setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{}); setQActivity(qact||[]);
+    setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{}); setQActivity(qact||[]); setSourceRfq(srfq||null);
     { const m={}; (qus||[]).forEach(u=>{m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim();}); setQUserMap(m); }
     if(q&&q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
     let _evd=null;
@@ -298,6 +300,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
           {quot.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:quot.client_id,label:quot.client_name||'Client'})}>👤 View client →</button>}
+          {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') && sourceRfq && <button className="btn sm" title="Send vendor RFQs and price this quote via the costing screen" onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:sourceRfq.rfq_id,label:sourceRfq.ref_number})}>🔧 Source vendors →</button>}
           {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
           {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
