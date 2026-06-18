@@ -96,6 +96,7 @@ function publicRfq(r: Record<string, unknown>) {
     guest_count: r.guest_count, budget: r.budget, budget_range: r.budget_range,
     sub_events: r.sub_events, notes: r.notes,
     revision_number: r.revision_number,
+    party_type: r.party_type ?? "client",
   };
 }
 async function rfqByToken(token: string) {
@@ -239,11 +240,32 @@ Deno.serve(async (req) => {
       case "save_rfq": {
         const s = await readSession(body.session);
         if (!s) return json({ error: "no_session" }, 401);
-        const { data: r } = await db.from("rfqs").select("status").eq("rfq_id", s.rfq_id).eq("is_deleted", false).maybeSingle();
+        const { data: r } = await db.from("rfqs").select("status, party_type").eq("rfq_id", s.rfq_id).eq("is_deleted", false).maybeSingle();
         if (!r) return json({ error: "not_found" }, 404);
         // editable until staff lock it; clients may revise even after submitting
         if (["approved", "converted", "withdrawn"].includes(r.status))
           return json({ error: "not_editable", status: r.status }, 409);
+
+        // ── vendor mode: update per-item costs only; the frozen item list is never replaced ──
+        if (r.party_type === "vendor") {
+          if (Array.isArray(body.items)) {
+            for (const it of body.items) {
+              if (!it || !it.rfq_item_id) continue;
+              const supplies = it.can_supply !== false;
+              await db.from("rfq_items").update({
+                can_supply: supplies,
+                unit_cost: (!supplies || it.unit_cost === "" || it.unit_cost == null) ? null : Number(it.unit_cost),
+                item_note: (it.item_note ?? "") === "" ? null : String(it.item_note),
+              }).eq("rfq_item_id", it.rfq_item_id).eq("rfq_id", s.rfq_id);
+            }
+          }
+          const vf = body.fields ?? {};
+          const vpatch: Record<string, unknown> = { status: "in_progress" };
+          if ("notes" in vf) vpatch.notes = vf.notes === "" ? null : vf.notes; // vendor's overall note
+          await db.from("rfqs").update(vpatch).eq("rfq_id", s.rfq_id);
+          await logActivity(s.rfq_id, "vendor", "saved");
+          return json({ ok: true });
+        }
 
         const f = body.fields ?? {};
         const patch: Record<string, unknown> = { status: "in_progress" };
@@ -283,7 +305,7 @@ Deno.serve(async (req) => {
           return json({ error: "not_submittable", status: r.status }, 409);
         // snapshot this submission as a revision (item-for-item history)
         const { data: its } = await db.from("rfq_items")
-          .select("sub_event_name,description,quantity,unit,source,sort_order").eq("rfq_id", s.rfq_id).eq("is_deleted", false).order("sort_order");
+          .select("sub_event_name,description,quantity,unit,source,sort_order,unit_cost,can_supply,item_note").eq("rfq_id", s.rfq_id).eq("is_deleted", false).order("sort_order");
         const revNo = (r.revision_number || 0) + 1;
         const snapshot = {
           details: {
@@ -296,9 +318,10 @@ Deno.serve(async (req) => {
           sub_events: r.sub_events || [],
           items: its || [],
         };
-        await db.from("rfq_revisions").insert({ rfq_id: s.rfq_id, revision_number: revNo, snapshot, submitted_by: "client" });
+        const who = (r.party_type === "vendor") ? "vendor" : "client";
+        await db.from("rfq_revisions").insert({ rfq_id: s.rfq_id, revision_number: revNo, snapshot, submitted_by: who });
         await db.from("rfqs").update({ status: "submitted", revision_number: revNo, client_submitted_at: new Date().toISOString() }).eq("rfq_id", s.rfq_id);
-        await logActivity(s.rfq_id, "client", "submitted", "Revision " + revNo);
+        await logActivity(s.rfq_id, who, "submitted", "Revision " + revNo);
         return json({ ok: true, revision_number: revNo });
       }
 
