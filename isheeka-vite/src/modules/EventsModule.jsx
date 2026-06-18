@@ -952,7 +952,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:14}}>Payment summary</div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
           {[
-            {label:'Quoted (items)',val:'₹'+grandTotal.toLocaleString('en-IN'),color:'var(--grey-800)'},
+            {label:activeQuote?'Quoted':'Quoted (items)',val:'₹'+(activeQuote?(parseFloat(activeQuote.grand_total)||0):grandTotal).toLocaleString('en-IN'),color:'var(--grey-800)'},
             {label:'Invoiced',val:'₹'+invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.grand_total)||0),0).toLocaleString('en-IN'),color:'var(--blue)'},
             {label:'Received',val:'₹'+invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.total_received)||0),0).toLocaleString('en-IN'),color:'var(--green)'},
             {label:'Outstanding',val:'₹'+invoices.filter(i=>i.status!=='cancelled').reduce((s,i)=>s+(parseFloat(i.total_outstanding!=null?i.total_outstanding:((parseFloat(i.grand_total)||0)-(parseFloat(i.total_received)||0)))||0),0).toLocaleString('en-IN'),color:'var(--red)'},
