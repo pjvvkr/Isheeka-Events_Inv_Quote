@@ -23,13 +23,19 @@ const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: fa
 const SIGNED_TTL = 60 * 60; // 1 hour — long enough to open, short enough to not leak.
 
 function notFound(msg: string) {
-  return new Response(
-    `<!doctype html><meta charset="utf-8"><title>Link unavailable</title>` +
-    `<div style="font-family:system-ui;max-width:32rem;margin:4rem auto;text-align:center;color:#333">` +
-    `<h2>This link isn’t available</h2><p>${msg}</p>` +
-    `<p style="color:#888">Please contact Isheeka Events for an updated link.</p></div>`,
-    { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } },
-  );
+  const html =
+    '<!doctype html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<title>Link unavailable</title></head><body>' +
+    '<div style="font-family:system-ui,Segoe UI,Roboto,sans-serif;max-width:32rem;margin:4rem auto;text-align:center;color:#333">' +
+    '<h2>This link is not available</h2>' +
+    '<p>' + msg + '</p>' +
+    '<p style="color:#888">Please contact Isheeka Events for an updated link.</p>' +
+    '</div></body></html>';
+  return new Response(html, {
+    status: 404,
+    headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+  });
 }
 
 Deno.serve(async (req) => {
