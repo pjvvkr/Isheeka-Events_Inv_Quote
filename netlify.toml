@@ -1,0 +1,18 @@
+# Netlify build config for the Vite ERP (isheeka-vite/).
+# The repo root also holds the legacy HTML app + rfq.html, which stay on GitHub Pages;
+# Netlify builds and serves ONLY the new ERP from isheeka-vite/.
+
+[build]
+  base = "isheeka-vite"          # run the build from here (where package.json lives)
+  command = "npm run build"       # vite build (mode=production → loads .env.production)
+  publish = "dist"                # publish isheeka-vite/dist
+
+[build.environment]
+  NODE_VERSION = "20"             # LTS; matches Vite's supported runtime
+
+# SPA fallback — harmless for this app (stack-based router), kept as insurance so any
+# direct path still loads index.html instead of a 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

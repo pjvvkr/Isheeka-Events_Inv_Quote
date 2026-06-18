@@ -9,7 +9,16 @@ import { defaultEventName } from './format.js';
 export async function sha256Hex(s) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
 export function genRfqToken() { const a = new Uint8Array(18); crypto.getRandomValues(a); return [...a].map((x) => x.toString(16).padStart(2, '0')).join(''); }
 export function genRfqPin() { return String(Math.floor(1000 + Math.random() * 9000)); }
-export function rfqLink(token) { try { return new URL('rfq.html?t=' + token, location.href).href; } catch (e) { return 'rfq.html?t=' + token; } }
+// Builds the client-facing RFQ portal link. rfq.html may live on a DIFFERENT origin
+// from this app (e.g. ERP on Netlify, portal still on GitHub Pages), so we resolve
+// against VITE_RFQ_BASE_URL when set, falling back to the current origin for local/dev.
+export function rfqLink(token) {
+  try {
+    const raw = (import.meta.env && import.meta.env.VITE_RFQ_BASE_URL) || '';
+    const base = raw ? (raw.endsWith('/') ? raw : raw + '/') : location.href;
+    return new URL('rfq.html?t=' + token, base).href;
+  } catch (e) { return 'rfq.html?t=' + token; }
+}
 
 // Create an RFQ + its access token/PIN. Returns {rfq_id, ref_number, token, pin}.
 // Raw token/PIN are shown once; only hashes are stored.

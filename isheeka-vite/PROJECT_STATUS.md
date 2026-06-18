@@ -1,0 +1,73 @@
+# Isheeka ERP — Vite port: state of things
+
+_Last updated: 2026-06-17_
+
+## Where we are
+
+The Vite port (`isheeka-vite/`) of the Isheeka ERP is feature-complete for the ported
+modules, has an automated test safety net, and the short-link service is built and
+**deployed to prod**. Everything is committed and pushed to `origin/main`
+(`github.com/pjvvkr/Isheeka-Events_Inv_Quote`).
+
+The **live app is still the root `isheeka-erp-v22.html`** (untouched). The Vite app is
+not yet deployed — so the changes below are ready but not yet user-facing.
+
+## What's done
+
+### Module port
+Leads, Quotations, Events (+ EventDetail, NewEventWizard), the Quote wizard, and the
+shared item-entry components are ported into `isheeka-vite/src`. Build verified with
+`tsc --noEmit` + `vite build`.
+
+### Fix list (all applied)
+- **#1** Short-link service — see below.
+- **#2** Convert-lead "Linked to existing client" now shows the real client name.
+- **#3** "Done — go to event" blank-screen crash (editEngage TDZ) fixed.
+- **#4** Revision-aware quote status labels ("Rev 4 · Sent") — display-only.
+- **#5** Duplicate `color` key in the Leads pipeline hint removed.
+- **#6** Dead `rfq_revisions` query (404) removed.
+
+### Test suite (all green)
+- `npm run test` — 13 Vitest logic tests (the money matrix: quote→invoice, quote→event,
+  payment reconcile/overpay, invoice variations, convert entrypoints, vendor money,
+  rfq→quote). Run against the **local** throwaway Supabase.
+- `npm run test:e2e` — Playwright smoke (every page renders) + lead happy-path
+  (create → list → detail → mark contacted).
+- `e2e/global-setup.ts` auto-creates the local login before tests, so a `supabase db
+  reset` never breaks them. Needs `$env:E2E_EMAIL` / `$env:E2E_PASSWORD` set in the shell.
+- No secrets in the repo (local anon key only; email confirmations disabled locally via
+  `supabase/config.toml [auth.email] enable_confirmations = false`).
+
+### Short-link service (#1) — DEPLOYED TO PROD
+- `supabase/migrations/20260617000000_short_links.sql` — `short_links` table (table also
+  created in prod via the Dashboard SQL editor).
+- `supabase/functions/s/index.ts` — public `s` edge function: resolves a code → fresh
+  signed URL → 302 redirect. Deployed to prod project `jlcssesetnxulnkbrmyp`.
+- `src/lib/share.js` — `makeShortLink()` wired into both PDF uploaders, with a
+  signed-URL fallback if the infra is missing.
+- Short links look like `https://jlcssesetnxulnkbrmyp.supabase.co/functions/v1/s/<code>`.
+
+## Local dev quickstart (tomorrow)
+
+```powershell
+cd C:\Users\vamsh\GitHub\isheeka-vite
+# 1. Supabase local stack (Docker must be running)
+supabase start                 # or: supabase stop; supabase start  (after config changes)
+# 2. App
+npm run dev                    # http://localhost:5173
+# 3. Tests
+$env:E2E_EMAIL="vamshi.555@gmail.com"; $env:E2E_PASSWORD="<local password>"
+npm run test                   # logic tests
+npm run test:e2e               # smoke + lead happy-path
+```
+
+Studio: http://127.0.0.1:54323 · Local API: http://127.0.0.1:54321
+
+## Open / next up (not started)
+
+- **Deploy the Vite app** — short links + all ported fixes only reach real users once the
+  Vite app is live (currently the root HTML app is what's served).
+- **More UI happy-paths** — quote wizard, event creation/cancellation, RFQ → quote.
+- **Smoke flake** — `smoke.spec.ts` failed once at the page-walk loop then passed; if it
+  recurs, harden that wait.
+- **Staging environment** — a separate Supabase project between local and prod.
