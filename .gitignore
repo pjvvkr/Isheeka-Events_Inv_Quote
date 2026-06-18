@@ -1,5 +1,6 @@
 # Supabase CLI internal state (not secret, but machine-local)
 supabase/.temp/
+supabase/.branches/
 
 # Local-only debugging tool for the RFQ gateway — keep on disk, don't publish to GitHub Pages
 tools/rfq-test.html

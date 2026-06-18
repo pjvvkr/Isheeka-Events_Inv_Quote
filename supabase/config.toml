@@ -1,6 +1,24 @@
+project_id = "isheeka-local"
+
+# LOCAL ONLY: no email confirmation step, so the e2e global-setup can create a usable
+# test login with a plain signUp (no service key needed). Does not affect prod.
+[auth.email]
+enable_confirmations = false
+
+# Seed the LOCAL database on `supabase start` / `supabase db reset`.
+# This only affects the local throwaway DB — never prod.
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
 # Minimal Supabase CLI config — only the bits M2 needs.
 # `supabase functions deploy rfq-gateway` reads this. The RFQ gateway is PUBLIC
 # (clients have no Supabase JWT); it does its own token+PIN/OTP auth, so JWT
 # verification must be OFF for this function.
 [functions.rfq-gateway]
+verify_jwt = false
+
+# Short-link redirect (#1). PUBLIC — visitors clicking a shared quote/invoice link have
+# no Supabase JWT; the function reads via the service role and 302s to a signed URL.
+[functions.s]
 verify_jwt = false
