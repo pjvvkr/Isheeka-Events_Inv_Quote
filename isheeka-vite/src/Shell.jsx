@@ -21,6 +21,7 @@ import { SettingsModule } from './modules/SettingsModule.jsx';
 import { LeadsModule } from './modules/LeadsModule.jsx';
 import { QuotationsModule } from './modules/QuotationsModule.jsx';
 import { EventsModule } from './modules/EventsModule.jsx';
+import { UsersModule } from './modules/UsersModule.jsx';
 
 const pageTitles = { dashboard: 'Dashboard', leads: 'Leads', clients: 'Clients', events: 'Events', quotations: 'Quotations', invoices: 'Invoices', vendors: 'Vendors', 'vendor-payments': 'Vendor Payments', expenses: 'Expenses', reports: 'Reports', users: 'Users', settings: 'Settings', 'owner-account': 'Owner Account' };
 
@@ -145,7 +146,8 @@ export default function Shell() {
                         : activePage === 'quotations' ? <QuotationsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                         : activePage === 'invoices' ? <InvoicesModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                           : activePage === 'settings' ? <SettingsModule />
-                            : <ComingSoon page={activePage} />}
+                            : activePage === 'users' ? <UsersModule />
+                              : <ComingSoon page={activePage} />}
         </div>
       </main>
     </div>
