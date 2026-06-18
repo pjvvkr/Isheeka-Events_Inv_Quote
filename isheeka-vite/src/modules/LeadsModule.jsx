@@ -258,6 +258,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   const [showLostConfirm, setShowLostConfirm] = React.useState(false);
   const [showQuoteWizard, setShowQuoteWizard] = React.useState(false);
   const [leadQuotations, setLeadQuotations] = React.useState([]);
+  const [leadRfqs, setLeadRfqs] = React.useState([]);
   const [linkedEvent, setLinkedEvent] = React.useState(null);
   const [successMsg, setSuccessMsg] = React.useState('');
   const [staffList, setStaffList] = React.useState([]);
@@ -266,16 +267,18 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
 
   const loadLead = async () => {
     setLoading(true); setMode('view');
-    const [{data:l},{data:ses},{data:staff},{data:quots}] = await Promise.all([
+    const [{data:l},{data:ses},{data:staff},{data:quots},{data:rfqs}] = await Promise.all([
       supabase.from('leads').select('*').eq('lead_id',leadId).single(),
       supabase.from('lead_sub_events').select('*').eq('lead_id',leadId).eq('is_deleted',false).order('sort_order'),
       supabase.from('users').select('user_id,first_name,last_name').eq('status','active'),
       supabase.from('quotations').select('quotation_id,ref_number,status,grand_total,valid_until,revision_number,created_at').eq('lead_id',leadId).eq('is_deleted',false).order('created_at',{ascending:false}),
+      supabase.from('rfqs').select('rfq_id,ref_number,status,client_submitted_at,created_at').eq('lead_id',leadId).eq('party_type','client').eq('is_deleted',false).order('created_at',{ascending:false}),
     ]);
     if(l) setLead(l);
     if(ses) setSubEvents(ses);
     if(staff) setStaffList(staff);
     if(quots) setLeadQuotations(quots);
+    if(rfqs) setLeadRfqs(rfqs);
     if(l && l.event_id){
       const {data:ev} = await supabase.from('events').select('event_id,ref_number,name,status,main_date,location,type').eq('event_id',l.event_id).single();
       setLinkedEvent(ev||null);
@@ -494,7 +497,11 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
             {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
           </span>
           {lead.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:lead.client_id,label:(lead.first_name+' '+lead.last_name).trim()||'Client'})}>👤 View client →</button>}
-          {!isLost&&<button className="btn sm" title="Send a requirements link to capture event details" onClick={()=>onNavigate&&onNavigate('rfqs',{mode:'new',label:'New RFQ',prefill:{lead_id:lead.lead_id,client_id:lead.client_id||null,contact_first_name:lead.first_name,contact_last_name:lead.last_name,contact_phone:lead.phone,contact_email:lead.email,event_type:lead.event_type,location:lead.location}})}>📝 Send RFQ</button>}
+          {!isLost&&(()=>{ const activeRfq=leadRfqs.find(r=>!['converted','withdrawn','expired'].includes(r.status)); const tip=activeRfq?('An active RFQ ('+activeRfq.ref_number+') already exists — open it below.'):'Send a requirements link to capture event details'; return (
+            <span title={tip} style={{display:'inline-flex'}}>
+              <button className="btn sm" disabled={!!activeRfq} style={activeRfq?{opacity:0.5,cursor:'not-allowed',pointerEvents:'none'}:{}} onClick={()=>onNavigate&&onNavigate('rfqs',{mode:'new',label:'New RFQ',prefill:{lead_id:lead.lead_id,client_id:lead.client_id||null,contact_first_name:lead.first_name,contact_last_name:lead.last_name,contact_phone:lead.phone,contact_email:lead.email,event_type:lead.event_type,location:lead.location}})}>📝 Send RFQ</button>
+            </span>
+          ); })()}
           {!isLost&&!isConverted&&(
             <>
               {/* Next action buttons — context aware per stage */}
@@ -590,6 +597,28 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
           <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Notes</div>
           <div style={{fontSize:13,color:'var(--grey-600)',lineHeight:1.7,whiteSpace:'pre-wrap'}}>{lead.notes}</div>
+        </div>
+      )}
+
+      {/* RFQs panel — surfaces the lead's client RFQs (party_type='client' only). */}
+      {leadRfqs.length>0&&(
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:12}}>RFQs</div>
+          {leadRfqs.map((r,i)=>{ const isActive=!['converted','withdrawn','expired'].includes(r.status); return (
+            <div key={r.rfq_id} onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:r.rfq_id,label:r.ref_number})} title="Open RFQ"
+              style={{display:'flex',alignItems:'center',gap:12,padding:'10px 8px',margin:'0 -8px',borderRadius:'var(--radius-sm)',cursor:'pointer',borderBottom:i<leadRfqs.length-1?'1px solid var(--grey-100)':'none'}}
+              onMouseEnter={e=>e.currentTarget.style.background='var(--grey-50)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              <div style={{width:10,height:10,borderRadius:'50%',flexShrink:0,background:isActive?'var(--green)':'var(--grey-300)'}}/>
+              <div style={{flex:1}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{r.ref_number}</span>
+                  {isActive&&<span style={{fontSize:10,fontWeight:700,color:'var(--green)',textTransform:'uppercase',letterSpacing:'.04em'}}>ACTIVE</span>}
+                </div>
+                <div style={{fontSize:12,color:'var(--grey-400)',marginTop:2}}>{r.client_submitted_at?('Responded '+fmtDate(r.client_submitted_at,{day:'numeric',month:'short'})):('Sent '+fmtDate(r.created_at,{day:'numeric',month:'short'}))}</div>
+              </div>
+              <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:isActive?'var(--green-light)':'var(--grey-100)',color:isActive?'var(--green)':'var(--grey-400)',textTransform:'capitalize'}}>{(r.status||'').replace('_',' ')}</span>
+            </div>
+          ); })}
         </div>
       )}
 
