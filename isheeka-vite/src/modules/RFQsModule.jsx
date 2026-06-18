@@ -9,6 +9,7 @@ import { fmtDate } from '../lib/format.js';
 import { RFQ_STATUS, RFQ_ACTION_LABEL } from '../lib/constants.js';
 import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuote, findClientMatch } from '../lib/rfq.js';
 import { waLink } from '../lib/share.js';
+import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg } from '../lib/vendorRfq.js';
 
 function RFQShareCard({ created, contact, onDone }) {
   const link = rfqLink(created.token);
@@ -40,7 +41,7 @@ function NewRFQForm({ prefill, onCreated, onCancel, onNavigate }) {
   const [existingRfqs, setExistingRfqs] = React.useState([]);
   React.useEffect(() => { (async () => {
     if (!prefill || (!prefill.client_id && !prefill.lead_id)) return;
-    let q = supabase.from('rfqs').select('rfq_id,ref_number,status').eq('is_deleted', false).not('status', 'in', '("converted","withdrawn")');
+    let q = supabase.from('rfqs').select('rfq_id,ref_number,status').eq('is_deleted', false).eq('party_type', 'client').not('status', 'in', '("converted","withdrawn")');
     q = prefill.client_id ? q.eq('client_id', prefill.client_id) : q.eq('lead_id', prefill.lead_id);
     const { data } = await q.order('created_at', { ascending: false });
     setExistingRfqs(data || []);
@@ -98,7 +99,7 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
   const detailId = nav && nav.rfqId;
   const isNew = !!(nav && nav.mode === 'new');
 
-  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at').eq('is_deleted', false).order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
+  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at').eq('is_deleted', false).eq('party_type', 'client').order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
   React.useEffect(() => { if (!detailId && !isNew && !created) load(); }, [detailId, isNew, created]);
 
   if (created) { return <div><div style={{ marginBottom: 12 }}><button className="btn sm" onClick={() => { setCreated(null); }}>← All RFQs</button></div><RFQShareCard created={created} contact={created.contact} onDone={() => { setCreated(null); }} /></div>; }
@@ -146,6 +147,175 @@ function diffRevItems(aItems, bItems) {
   Object.keys(bm).forEach((k) => { if (!am[k]) added.push(bm[k]); else if ((parseFloat(am[k].quantity) || 0) !== (parseFloat(bm[k].quantity) || 0)) changed.push({ from: am[k], to: bm[k] }); });
   Object.keys(am).forEach((k) => { if (!bm[k]) removed.push(am[k]); });
   return { added, removed, changed };
+}
+
+// Milestone S · S2b — Sourcing panel: send/track vendor RFQs from an approved client RFQ.
+function SourcingPanel({ clientRfq, itemCount }) {
+  const [vrfqs, setVrfqs] = React.useState([]);
+  const [vendorMap, setVendorMap] = React.useState({});
+  const [summ, setSumm] = React.useState({});
+  const [settings, setSettings] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [showSend, setShowSend] = React.useState(false);
+  const [allVendors, setAllVendors] = React.useState([]);
+  const [picked, setPicked] = React.useState({});
+  const [sending, setSending] = React.useState(false);
+  const [justSent, setJustSent] = React.useState([]);
+  const [viewBid, setViewBid] = React.useState(null);
+  const [bidItems, setBidItems] = React.useState([]);
+
+  const load = async () => {
+    setLoading(true);
+    const [vs, vendorsRes, setRes] = await Promise.all([
+      loadVendorRfqs(clientRfq.rfq_id),
+      supabase.from('vendors').select('vendor_id,name,contact_person,phone_1,email_1,status').eq('is_deleted', false).order('name'),
+      supabase.from('settings').select('company_name,default_markup_pct').limit(1).maybeSingle(),
+    ]);
+    setVrfqs(vs);
+    const vmap = {}; (vendorsRes.data || []).forEach((v) => { vmap[v.vendor_id] = v; });
+    setVendorMap(vmap);
+    setAllVendors((vendorsRes.data || []).filter((v) => v.status === 'active'));
+    setSettings(setRes.data || null);
+    const ids = vs.map((x) => x.rfq_id);
+    if (ids.length) {
+      const { data: its } = await supabase.from('rfq_items').select('rfq_id,unit_cost,can_supply').in('rfq_id', ids).eq('is_deleted', false);
+      const s = {};
+      (its || []).forEach((it) => { const e = s[it.rfq_id] || { priced: 0, cant: 0, total: 0 }; e.total++; if (it.can_supply === false) e.cant++; else if (it.unit_cost != null) e.priced++; s[it.rfq_id] = e; });
+      setSumm(s);
+    } else setSumm({});
+    setLoading(false);
+  };
+  React.useEffect(() => { load(); }, [clientRfq.rfq_id]);
+
+  const copy = (t, what) => { try { navigator.clipboard.writeText(t); notify(what + ' copied.', 'success'); } catch (e) { notify('Copy failed.', 'error'); } };
+  const markup = (settings && settings.default_markup_pct != null) ? settings.default_markup_pct : 30;
+
+  const doSend = async () => {
+    const chosen = allVendors.filter((v) => picked[v.vendor_id]);
+    if (!chosen.length) { notify('Pick at least one vendor.', 'error'); return; }
+    setSending(true);
+    try { const created = await createVendorRfqs(clientRfq, chosen); setJustSent(created); setShowSend(false); setPicked({}); notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + '.', 'success'); load(); }
+    catch (e) { /* toasted */ }
+    setSending(false);
+  };
+
+  const remind = async (vr) => {
+    const v = vendorMap[vr.vendor_id] || {};
+    try {
+      const { token, pin } = await regenerateVendorLink(vr.rfq_id);
+      const n = await bumpReminder(vr.rfq_id);
+      const link = vendorRfqLink(token);
+      const msg = buildVendorRfqMsg({ vendor_name: v.name, pin }, settings, link, { reminder: true });
+      window.open(waLink(v.phone_1, msg), '_blank');
+      notify('Reminder #' + n + ' — fresh link opened.', 'success'); load();
+    } catch (e) { notify('Could not send reminder.', 'error'); }
+  };
+
+  const remindAll = async () => {
+    const pending = vrfqs.filter((v) => v.status !== 'submitted');
+    if (!pending.length) { notify('No pending vendors to remind.', 'success'); return; }
+    for (const vr of pending) { await remind(vr); } // eslint-disable-line no-await-in-loop
+  };
+
+  const openBid = async (rfqId) => { if (viewBid === rfqId) { setViewBid(null); return; } setViewBid(rfqId); setBidItems(await loadVendorRfqItems(rfqId)); };
+
+  const chip = (st) => ({ sent: { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' }, in_progress: { l: 'Opened', bg: 'var(--orange-light)', c: 'var(--orange)' }, submitted: { l: 'Submitted', bg: 'var(--green-light)', c: 'var(--green)' } }[st] || { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' });
+  const respondedN = vrfqs.filter((v) => v.status === 'submitted').length;
+
+  return (
+    <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>Sourcing — vendor RFQs</div>
+          <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>Item list frozen · {itemCount} item{itemCount === 1 ? '' : 's'} · default markup {markup}%</div>
+        </div>
+        <button className="btn sm primary" onClick={() => { setShowSend(true); setJustSent([]); }}>+ Send vendor RFQ</button>
+      </div>
+
+      {justSent.length > 0 && (
+        <div style={{ background: 'var(--green-light)', border: '1px solid #86EFAC', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginTop: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--green)', marginBottom: 8 }}>Share these links — the PIN is shown once</div>
+          {justSent.map((c) => { const v = vendorMap[c.vendor_id] || {}; const link = vendorRfqLink(c.token); const msg = buildVendorRfqMsg({ vendor_name: c.vendor_name, pin: c.pin }, settings, link, {}); return (
+            <div key={c.rfq_id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '5px 0', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+              <span style={{ fontSize: 13, fontWeight: 500, minWidth: 120 }}>{c.vendor_name}</span>
+              <span style={{ fontSize: 12, color: 'var(--grey-600)' }}>PIN <b>{c.pin}</b></span>
+              <button className="btn sm" onClick={() => copy(link, 'Link')}>Copy link</button>
+              <a className="btn sm" style={{ background: 'white', textDecoration: 'none' }} href={waLink(v.phone_1, msg)} target="_blank" rel="noreferrer">💬 WhatsApp</a>
+            </div>
+          ); })}
+        </div>
+      )}
+
+      {loading ? <div style={{ padding: 20, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
+        : vrfqs.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 12 }}>No vendor RFQs yet. Click “+ Send vendor RFQ” to request pricing.</div>
+          : <div style={{ border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', marginTop: 12, overflow: 'hidden' }}>
+            {vrfqs.map((vr, i) => { const v = vendorMap[vr.vendor_id] || {}; const sc = chip(vr.status); const s = summ[vr.rfq_id] || { priced: 0, cant: 0, total: 0 }; return (
+              <div key={vr.rfq_id} style={{ borderTop: i > 0 ? '1px solid var(--grey-100)' : 'none' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center', padding: '11px 14px' }}>
+                  <div>
+                    <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--grey-800)' }}>{v.name || '—'}</div>
+                    <div style={{ fontSize: 12, color: 'var(--grey-400)' }}>{vr.status === 'submitted' ? (s.priced + ' priced' + (s.cant ? (' · ' + s.cant + ' can’t supply') : '')) : (s.total + ' items')}{vr.reminder_count > 0 ? (' · reminded ' + vr.reminder_count + '×') : ''}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c }}>{sc.l}</span>
+                    {vr.status === 'submitted'
+                      ? <button className="btn sm" onClick={() => openBid(vr.rfq_id)}>{viewBid === vr.rfq_id ? 'Hide' : 'View bid'}</button>
+                      : <button className="btn sm" onClick={() => remind(vr)} title="Send a fresh link + reminder on WhatsApp">Remind</button>}
+                  </div>
+                </div>
+                {viewBid === vr.rfq_id && (
+                  <div style={{ background: 'var(--grey-50)', padding: '8px 14px' }}>
+                    {bidItems.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--grey-400)' }}>No items.</div> : bidItems.map((it) => (
+                      <div key={it.rfq_item_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5, padding: '3px 0' }}>
+                        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{it.description} <span style={{ color: 'var(--grey-400)' }}>×{it.quantity}</span>{it.item_note ? <span style={{ color: 'var(--grey-400)' }}> · {it.item_note}</span> : ''}</span>
+                        <span style={{ whiteSpace: 'nowrap', color: it.can_supply === false ? 'var(--red)' : 'var(--grey-800)' }}>{it.can_supply === false ? 'can’t supply' : (it.unit_cost != null ? ('₹' + Number(it.unit_cost).toLocaleString('en-IN')) : '—')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ); })}
+          </div>}
+
+      {vrfqs.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: 'var(--grey-400)' }}>{respondedN} of {vrfqs.length} responded</span>
+            {vrfqs.some((v) => v.status !== 'submitted') && <button className="btn sm" onClick={remindAll}>Remind all pending</button>}
+          </div>
+          <button className="btn sm primary" disabled={respondedN === 0} onClick={() => notify('Costing & markup screen is the next build (S3).', 'success')}>Open costing & markup →</button>
+        </div>
+      )}
+
+      {showSend && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={(e) => { if (e.target === e.currentTarget) setShowSend(false); }}>
+          <div style={{ background: 'white', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: 460 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Send vendor RFQ</div>
+              <button className="btn sm" onClick={() => setShowSend(false)}>✕</button>
+            </div>
+            <div style={{ padding: '14px 20px' }}>
+              <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginBottom: 10 }}>Pick vendors to request pricing from — each gets a secure link with the frozen {itemCount}-item list.</div>
+              {allVendors.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>No active vendors. Add vendors first.</div>
+                : <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)' }}>
+                  {allVendors.map((v, i) => (
+                    <label key={v.vendor_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: i > 0 ? '1px solid var(--grey-50)' : 'none', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!picked[v.vendor_id]} onChange={(e) => setPicked((p) => ({ ...p, [v.vendor_id]: e.target.checked }))} />
+                      <span style={{ fontSize: 13 }}>{v.name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--grey-400)', marginLeft: 'auto' }}>{v.phone_1 || v.email_1 || ''}</span>
+                    </label>
+                  ))}
+                </div>}
+            </div>
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={() => setShowSend(false)}>Cancel</button>
+              <button className="btn primary" disabled={sending} onClick={doSend}>{sending ? 'Sending…' : 'Send'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
@@ -270,6 +440,11 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
             </div>
           ))}
       </div>
+
+      {/* Sourcing — vendor RFQs (Milestone S, S2b). Appears once the client RFQ is approved.
+          Behind VITE_ENABLE_VENDOR_RFQ so the in-progress feature stays hidden in prod until the
+          full loop (S1 migration + gateway + portal + costing) ships. On locally for testing. */}
+      {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ === 'true') && r.party_type !== 'vendor' && r.status === 'converted' && <SourcingPanel clientRfq={r} itemCount={items.length} />}
 
       {/* Revisions */}
       {revisions.length > 0 && <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
