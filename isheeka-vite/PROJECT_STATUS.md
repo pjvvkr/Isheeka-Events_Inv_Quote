@@ -126,6 +126,20 @@ on the Vendor profile; per-item split across vendors at quote time; role-aware a
     `rfq_revisions` table locally (already present in prod from the M3 batch) so dev matches prod.
 - **Email notification on revision** — deferred (phase 2), per decision.
 
+## Manual-test fixes (2026-06-18, batch 3) — event screen
+
+- **Record payment from the event** — added a "＋ Record payment →" button on the event's
+  Payment summary that jumps to the active invoice's record flow (one source of truth; client
+  payments still live on the invoice/installments). Disabled with a hint if no invoice exists yet.
+- **Items vs quote total reconciliation** — under "Total items value" the event now shows the
+  quote-level **Adjustment** (signed `discount_amount`) and the **Quote total**, so the items
+  sum ties out to what's billed (e.g. ₹2,32,700 + ₹2,300 = ₹2,35,000).
+- **Vendor populate from costing** (suggest-and-confirm) — `loadCostingVendorSuggestion()`
+  reads the saved costing summary for the event's quote, groups the chosen (non-in-house)
+  vendors and sums each one's winning cost. The Vendors & payments section shows a banner to
+  add them as editable engagements (`agreed_amount` = winning cost, service = "Sourced via
+  vendor RFQ"). Only suggests vendors not already on the event; manual ＋ Add vendor unchanged.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +

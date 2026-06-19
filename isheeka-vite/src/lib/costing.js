@@ -63,6 +63,34 @@ export async function generateQuoteFromCosting(draftQuoteId, rows) {
   return { subtotal };
 }
 
+// Suggest vendor engagements for an event from its saved costing summary.
+// Groups the chosen (non-in-house) vendors across the costing lines and sums each
+// one's winning item cost (chosen_cost × qty). Returns [{ vendor_id, name, amount, item_count }].
+// Used by the event screen to offer "pull the costing's vendors into this event".
+export async function loadCostingVendorSuggestion(quotationIds) {
+  const ids = (quotationIds || []).filter(Boolean);
+  if (!ids.length) return [];
+  const { data: sums } = await supabase.from('costing_summaries')
+    .select('*').in('quotation_id', ids).eq('is_deleted', false)
+    .order('created_at', { ascending: false });
+  const summary = (sums || [])[0];
+  if (!summary || !Array.isArray(summary.lines)) return [];
+  const byVendor = {};
+  summary.lines.forEach((ln) => {
+    const vid = ln.chosen;
+    if (!vid || vid === 'in-house') return;          // skip in-house / unpriced lines
+    const cost = (ln.chosen_cost != null ? Number(ln.chosen_cost) : 0) * (Number(ln.quantity) || 1);
+    if (!byVendor[vid]) byVendor[vid] = { vendor_id: vid, amount: 0, item_count: 0 };
+    byVendor[vid].amount += cost;
+    byVendor[vid].item_count += 1;
+  });
+  const vids = Object.keys(byVendor);
+  if (!vids.length) return [];
+  const { data: vendors } = await supabase.from('vendors').select('vendor_id,name').in('vendor_id', vids);
+  const nameOf = {}; (vendors || []).forEach((v) => { nameOf[v.vendor_id] = v.name; });
+  return vids.map((id) => ({ ...byVendor[id], name: nameOf[id] || 'Vendor' }));
+}
+
 // Save the audit snapshot (every bid, chosen source, markup, notes).
 export async function saveCostingSummary(payload) {
   const uid = await _currentUid();

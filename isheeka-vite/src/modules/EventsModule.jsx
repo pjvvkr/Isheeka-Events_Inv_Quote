@@ -12,6 +12,7 @@ import { EVENT_STATUS_ORDER, EVENT_STATUS_LABELS, EVENT_STATUS_COLORS, EVENT_STA
 import { useEventTypes } from '../lib/data.js';
 import { getNextEventRef, getNextClientRef } from '../lib/refs.js';
 import { addEventVendor, recordVendorPayment, recordVendorRefund, recordClientRefund, createInvoiceFromQuote, _ensureVendorInstallment } from '../lib/money.js';
+import { loadCostingVendorSuggestion } from '../lib/costing.js';
 import { InputField, SelectField, AutocompleteInput, fetchSuggestions } from '../components/fields.jsx';
 import { ClientLink, VendorLink } from '../components/links.jsx';
 import { FastEntryTable, SubEventTplBtn } from '../components/ItemEntry.jsx';
@@ -205,6 +206,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [invoices, setInvoices] = React.useState([]);
   const [invInstallments, setInvInstallments] = React.useState([]);
   const [eventVendors, setEventVendors] = React.useState([]);
+  const [costingSuggestion, setCostingSuggestion] = React.useState([]);  // vendors from the saved costing, to offer pulling in
+  const [applyingSuggestion, setApplyingSuggestion] = React.useState(false);
   const [showAddVendor, setShowAddVendor] = React.useState(false);
   const [vForm, setVForm] = React.useState({mode:'existing',vendorId:'',vendorName:'',category:'other',service:'',agreed:''});
   const [vendorMaster, setVendorMaster] = React.useState([]);
@@ -249,6 +252,17 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     try{ await addEventVendor({eventId, vendorName:vForm.vendorName.trim(), category:vForm.category, service:vForm.service, agreed:vForm.agreed}); setShowAddVendor(false); setVForm({mode:'existing',vendorId:'',vendorName:'',category:'other',service:'',agreed:''}); notify('Vendor added.','success'); await loadEventVendors(); }
     catch(err){ notify('Could not add vendor: '+(err&&err.message?err.message:''),'error'); }
     setVSaving(false);
+  };
+  // Pull the costing's chosen vendors into this event as editable engagements (only those not already added).
+  const applyCostingVendors=async(list)=>{
+    if(!list||!list.length) return;
+    setApplyingSuggestion(true);
+    try{
+      for(const s of list){ await addEventVendor({eventId, vendorId:s.vendor_id, vendorName:s.name, category:'other', service:'Sourced via vendor RFQ', agreed:Math.round(s.amount||0)}); }
+      notify(list.length+' vendor'+(list.length>1?'s':'')+' added from costing — adjust agreed amounts as needed.','success');
+      await loadEventVendors();
+    }catch(err){ notify('Could not add vendors: '+(err&&err.message?err.message:''),'error'); }
+    setApplyingSuggestion(false);
   };
   const submitVendorPayment=async()=>{
     const amt=parseFloat(vPay.amount)||0; if(amt<=0){ notify('Enter a valid amount.','error'); return; }
@@ -398,7 +412,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       supabase.from('sub_events').select('*').eq('event_id',eventId).eq('is_deleted',false).order('sort_order'),
       supabase.from('sub_event_items').select('*').eq('event_id',eventId).eq('is_deleted',false).order('sort_order'),
       supabase.from('event_checklists').select('*').eq('event_id',eventId).order('sort_order'),
-      supabase.from('quotations').select('quotation_id,ref_number,status,grand_total').eq('event_id',eventId).eq('is_deleted',false),
+      supabase.from('quotations').select('quotation_id,ref_number,status,grand_total,subtotal,discount_amount').eq('event_id',eventId).eq('is_deleted',false),
       supabase.from('invoices').select('invoice_id,ref_number,status,grand_total,total_received,total_outstanding,revision_number').eq('event_id',eventId).eq('is_deleted',false),
       supabase.from('users').select('user_id,first_name,last_name').eq('status','active'),
     ]);
@@ -444,6 +458,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     if(chk) setChecklist(chk);
     if(quotes) setQuotations(quotes);
     if(invs) setInvoices(invs);
+    // Vendors used in the saved costing for this event's quote(s) — offered as a one-click pull.
+    try { const sugg = await loadCostingVendorSuggestion((quotes||[]).map(q=>q.quotation_id)); setCostingSuggestion(sugg||[]); } catch(e){ setCostingSuggestion([]); }
     if(invs&&invs.length){ const {data:iin}=await supabase.from('invoice_installments').select('invoice_id,balance,is_deleted').in('invoice_id',invs.map(i=>i.invoice_id)).eq('is_deleted',false); setInvInstallments(iin||[]); } else { setInvInstallments([]); }
     if(staff) setStaffList(staff);
     setLoading(false);
@@ -850,12 +866,28 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               </table>
             </div>
           )}
-          {(subEvents.length>0||mainItemsView.length>0)&&(
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:12,paddingTop:12,borderTop:'2px solid var(--grey-200)'}}>
-              <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Total items value</div>
-              <div style={{fontSize:15,fontWeight:700,color:'var(--pink)'}}>₹{grandTotal.toLocaleString('en-IN')}</div>
-            </div>
-          )}
+          {(subEvents.length>0||mainItemsView.length>0)&&(()=>{
+            const _d=activeQuote?(parseFloat(activeQuote.discount_amount)||0):0;
+            const hasAdj=activeQuote&&Math.abs(_d)>0.5;
+            return (
+              <div style={{marginTop:12,paddingTop:12,borderTop:'2px solid var(--grey-200)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <div style={{fontSize:13,fontWeight:hasAdj?500:600,color:hasAdj?'var(--grey-600)':'var(--grey-800)'}}>Total items value</div>
+                  <div style={{fontSize:hasAdj?13:15,fontWeight:hasAdj?500:700,color:hasAdj?'var(--grey-700)':'var(--pink)'}}>₹{grandTotal.toLocaleString('en-IN')}</div>
+                </div>
+                {hasAdj&&<>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:5,fontSize:13,color:'var(--grey-600)'}}>
+                    <div>Adjustment{activeQuote.ref_number?(' · '+activeQuote.ref_number):''}</div>
+                    <div>{_d>0?'− ':'+ '}₹{Math.abs(Math.round(_d)).toLocaleString('en-IN')}</div>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8,paddingTop:8,borderTop:'1px solid var(--grey-100)'}}>
+                    <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Quote total</div>
+                    <div style={{fontSize:15,fontWeight:700,color:'var(--pink)'}}>₹{(parseFloat(activeQuote.grand_total)||0).toLocaleString('en-IN')}</div>
+                  </div>
+                </>}
+              </div>
+            );
+          })()}
         </div>
 
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
@@ -949,7 +981,14 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
 
       {/* Payment summary */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:14}}>Payment summary</div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Payment summary</div>
+          {(()=>{ const activeInv=invoices.find(i=>i.status!=='cancelled'); return (
+            <button className="btn sm" style={activeInv?{}:{opacity:0.5,cursor:'not-allowed'}} disabled={!activeInv}
+              title={activeInv?('Record a client payment on '+activeInv.ref_number):'Generate an invoice first to record payments'}
+              onClick={()=>activeInv&&onNavigate&&onNavigate('invoices',{invoiceId:activeInv.invoice_id,label:activeInv.ref_number})}>＋ Record payment →</button>
+          ); })()}
+        </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
           {[
             {label:activeQuote?'Quoted':'Quoted (items)',val:'₹'+(activeQuote?(parseFloat(activeQuote.grand_total)||0):grandTotal).toLocaleString('en-IN'),color:'var(--grey-800)'},
@@ -972,7 +1011,15 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>setShowAddVendor(true)}>+ Add vendor</button>
         </div>
         {(()=>{ const paid=eventVendors.reduce((s,v)=>s+(parseFloat(v.total_paid)||0),0); const out=eventVendors.reduce((s,v)=>s+(parseFloat(v.outstanding)||0),0); const agr=eventVendors.reduce((s,v)=>s+(parseFloat(v.agreed_amount)||0),0); return <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:12}}>Vendor cost: <b style={{color:'var(--grey-800)'}}>₹{Math.round(paid).toLocaleString('en-IN')} paid</b> · ₹{Math.round(out).toLocaleString('en-IN')} outstanding · ₹{Math.round(agr).toLocaleString('en-IN')} agreed</div>; })()}
-        {eventVendors.length===0&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No vendors added yet.</div>}
+        {/* Suggest-and-confirm: vendors chosen during costing that aren't on this event yet. */}
+        {(()=>{ const pending=costingSuggestion.filter(s=>!eventVendors.some(v=>String(v.vendor_id)===String(s.vendor_id))); if(!pending.length) return null; const tot=pending.reduce((x,s)=>x+(s.amount||0),0); return (
+          <div style={{background:'var(--blue-light)',border:'1px solid #BFDBFE',borderRadius:'var(--radius-md)',padding:'10px 12px',marginBottom:12}}>
+            <div style={{fontSize:12.5,color:'var(--grey-700)',marginBottom:8}}>🔧 From this event's costing: <b>{pending.length}</b> vendor{pending.length>1?'s':''} chosen (₹{Math.round(tot).toLocaleString('en-IN')} cost). Add {pending.length>1?'them':'it'} to this event?</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>{pending.map(s=>(<span key={s.vendor_id} style={{fontSize:11.5,background:'white',border:'1px solid #BFDBFE',borderRadius:20,padding:'2px 9px',color:'var(--grey-700)'}}>{s.name} · ₹{Math.round(s.amount||0).toLocaleString('en-IN')} · {s.item_count} item{s.item_count>1?'s':''}</span>))}</div>
+            <button className="btn sm primary" disabled={applyingSuggestion} onClick={()=>applyCostingVendors(pending)}>{applyingSuggestion?'Adding…':('＋ Add '+(pending.length>1?'these vendors':'this vendor'))}</button>
+          </div>
+        ); })()}
+        {eventVendors.length===0&&!costingSuggestion.length&&<div style={{fontSize:13,color:'var(--grey-400)'}}>No vendors added yet.</div>}
         {eventVendors.map(v=>{ const st={pending:{bg:'var(--grey-100)',color:'var(--grey-400)'},partially_paid:{bg:'var(--orange-light)',color:'var(--orange)'},paid:{bg:'var(--green-light)',color:'var(--green)'}}[v.status]||{bg:'var(--grey-100)',color:'var(--grey-400)'}; const insts=(eventInstallments[v.event_vendor_id]||[]); const anyOverdue=insts.some(isVendorInstOverdue); const open=expandedVendor===v.event_vendor_id; return (
           <div key={v.event_vendor_id} style={{borderTop:'1px solid var(--grey-100)'}}>
             <div style={{display:'grid',gridTemplateColumns:'1fr 90px 90px 96px 110px',gap:8,alignItems:'center',padding:'9px 0',fontSize:13}}>
