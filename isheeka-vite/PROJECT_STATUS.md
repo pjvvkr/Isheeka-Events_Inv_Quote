@@ -207,6 +207,19 @@ Phase-2 extras roadmap (remaining): **B** staff-side import · **C** catalog aut
 flag + manual re-map · **D** governance (rate-limit, store upload, usage log) · **E** voice-note,
 email import, multi-vendor split.
 
+## PWA — installable Android app (built 2026-06-18)
+
+The ERP is now an installable PWA (step 1 of the Android packaging path; works for TWA/Capacitor later).
+- `vite-plugin-pwa@^0.20.5` (devDep) — `registerType: autoUpdate`, Workbox SW precaches the app shell.
+- Manifest: name "Isheeka Events ERP", short_name "Isheeka", `display: standalone`, maroon
+  theme/background `#A0123A`, start_url/scope `/`, icons 192/512 + 512 maskable.
+- Icons in `public/icons/` (maroon flower mark). `index.html` theme-color → maroon + apple-mobile meta.
+- `base` left as `./` (asset loading unchanged); manifest uses absolute `/` paths (Netlify root).
+- **To ship:** `npm install` (new dep) → `npm run build` → tests → push. Netlify build covers it
+  (vite.config/package.json/index.html/public are in the build-trigger watch list).
+- **Verify on Android:** open the Netlify URL in Chrome → ⋮ → "Install app" → confirms the maroon
+  flower icon + fullscreen standalone launch.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +
