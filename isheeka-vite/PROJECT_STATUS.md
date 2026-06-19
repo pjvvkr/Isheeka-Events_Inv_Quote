@@ -237,6 +237,26 @@ Soft-delete approach (reversible). Keeps real leads **L-26-1129 + L-26-1139** an
 **Deploy order (matters!):** backup prod → apply BOTH migrations to prod (columns must exist before
 the app filters / purge run) → deploy app → run purge script (PART 0→1→2) → verify → 2nd backup.
 
+## Batch B — staff-side import + universal sourcing bridge (built 2026-06-18)
+
+Lets staff import a requirements list directly in the ERP (quote wizard), and source vendors
+from any quote — not just RFQ-born ones.
+- **`supabase/functions/extract`** — authenticated extraction endpoint (deploy `--no-verify-jwt`;
+  it verifies the staff JWT manually + handles CORS). Photo/PDF/text → item JSON via Claude Haiku.
+  Reuses the `ANTHROPIC_API_KEY` secret.
+- **`src/lib/staffExtract.js`** — client downscale + `supabase.functions.invoke('extract')`.
+- **Quote wizard (`QuoteWizard.jsx`)** — 📎/📷/📋 import box on the Items step, preview-before-add,
+  items merge into sub-event blocks (match by name / auto-create / first block), prices default ₹0.
+- **Universal sourcing bridge** — `ensureSourcingAnchor(quote)` in `vendorRfq.js`: the quote's
+  "🔧 Source vendors" now works on ANY quote; if there's no client RFQ it creates a hidden
+  **sourcing anchor** (`is_sourcing_anchor=true`, status converted) seeded from the quote's items,
+  then opens the existing Sourcing + costing flow. Idempotent per quote; needs ≥1 line item.
+- **`20260619100000_rfq_sourcing_anchor.sql`** — adds `is_sourcing_anchor` to `rfqs`. The Client
+  RFQ list + Lead RFQ panel filter these out (so the list only shows real client-sent RFQs).
+
+**Deploy order:** migration → prod (column must exist before the app's RFQ queries) + local
+(`supabase migration up`) · `supabase functions deploy extract --no-verify-jwt` · app build/test/push.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +

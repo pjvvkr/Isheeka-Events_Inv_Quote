@@ -7,7 +7,7 @@ import { supabase } from './supabase';
 import { runDb } from './toast.jsx';
 import { _currentUid } from './session.js';
 import { getNextRfqRef } from './refs.js';
-import { sha256Hex, genRfqToken, genRfqPin, rfqLink } from './rfq.js';
+import { sha256Hex, genRfqToken, genRfqPin, rfqLink, createRfq } from './rfq.js';
 
 // Spin up one vendor RFQ per selected vendor from an (approved) client RFQ.
 // Freezes the client RFQ's item list as the sourcing basis (copied item-for-item,
@@ -60,6 +60,31 @@ export async function createVendorRfqs(parentRfq, vendors) {
     out.push({ vendor_id: v.vendor_id, vendor_name: v.name || '', rfq_id: rfq.rfq_id, ref_number: rfq.ref_number, token, pin });
   }
   return out;
+}
+
+// Universal sourcing bridge: ensure a quote has a client-RFQ to source against.
+// Reuses the quote's existing client RFQ if it has one; otherwise creates a hidden
+// "sourcing anchor" (is_sourcing_anchor=true, status=converted) seeded from the
+// quote's line items, so the Sourcing panel + costing screen work off any quote.
+// Returns the rfq_id to open. Idempotent per quote.
+export async function ensureSourcingAnchor(quote) {
+  if (!quote || !quote.quotation_id) throw new Error('No quote to source from.');
+  const { data: existing } = await supabase.from('rfqs')
+    .select('rfq_id').eq('party_type', 'client').eq('quotation_id', quote.quotation_id).eq('is_deleted', false)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (existing && existing.rfq_id) return existing.rfq_id;
+
+  const { data: li } = await supabase.from('quotation_line_items')
+    .select('description,quantity,sub_event_name,sort_order').eq('quotation_id', quote.quotation_id).eq('is_deleted', false).order('sort_order');
+  if (!li || !li.length) throw new Error('Add at least one line item before sourcing vendors.');
+
+  const created = await createRfq({ client_id: quote.client_id || null, lead_id: quote.lead_id || null, contact_name: quote.client_name || null, event_type: quote.event_type || null });
+  const { error: ue } = await runDb(supabase.from('rfqs').update({ status: 'converted', party_type: 'client', is_sourcing_anchor: true, quotation_id: quote.quotation_id, updated_at: new Date().toISOString() }).eq('rfq_id', created.rfq_id), 'link sourcing anchor');
+  if (ue) throw ue;
+  const items = li.map((x, i) => ({ rfq_id: created.rfq_id, description: x.description, quantity: x.quantity || 1, sub_event_name: x.sub_event_name || null, sort_order: (x.sort_order != null ? x.sort_order : i), source: 'quote', is_deleted: false }));
+  const { error: lie } = await runDb(supabase.from('rfq_items').insert(items), 'seed sourcing items');
+  if (lie) throw lie;
+  return created.rfq_id;
 }
 
 // All vendor RFQs under a client RFQ (for the Sourcing panel).

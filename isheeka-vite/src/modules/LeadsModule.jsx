@@ -272,7 +272,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
       supabase.from('lead_sub_events').select('*').eq('lead_id',leadId).eq('is_deleted',false).order('sort_order'),
       supabase.from('users').select('user_id,first_name,last_name').eq('status','active'),
       supabase.from('quotations').select('quotation_id,ref_number,status,grand_total,valid_until,revision_number,created_at').eq('lead_id',leadId).eq('is_deleted',false).order('created_at',{ascending:false}),
-      supabase.from('rfqs').select('rfq_id,ref_number,status,client_submitted_at,created_at').eq('lead_id',leadId).eq('party_type','client').eq('is_deleted',false).order('created_at',{ascending:false}),
+      supabase.from('rfqs').select('rfq_id,ref_number,status,client_submitted_at,created_at').eq('lead_id',leadId).eq('party_type','client').eq('is_sourcing_anchor',false).eq('is_deleted',false).order('created_at',{ascending:false}),
     ]);
     if(l) setLead(l);
     if(ses) setSubEvents(ses);

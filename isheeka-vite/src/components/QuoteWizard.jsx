@@ -12,6 +12,7 @@ import { logQuoteSend } from '../lib/session.js';
 import { buildQuotationPDF } from '../pdf/quotationPdf.js';
 import { createInvoiceFromQuote } from '../lib/money.js';
 import { FastEntryTable } from './ItemEntry.jsx';
+import { filesToPayloads, extractItems, extractErrMsg } from '../lib/staffExtract.js';
 
 function QWSubEventNameInput({value, onChange}) {
   return <input className="field-input" style={{flex:1,fontSize:13,fontWeight:500}}
@@ -110,6 +111,59 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
   });
   const [calcRow, setCalcRow] = React.useState(null); // index of the installment whose % calculator is open
   const [calcPct, setCalcPct] = React.useState('');
+
+  // ── staff-side import: photo/PDF/paste → items (review, then add to blocks) ──
+  const [impPending, setImpPending] = React.useState(null);
+  const [impMsg, setImpMsg] = React.useState('');
+  const [impPaste, setImpPaste] = React.useState(false);
+  const [impText, setImpText] = React.useState('');
+  const [impBusy, setImpBusy] = React.useState(false);
+  const applyImported = (list) => {
+    let added = 0;
+    setSubEventBlocks((bs) => {
+      const blocks = bs.map((b) => ({ ...b, items: [...(b.items || [])] }));
+      (Array.isArray(list) ? list : []).forEach((ex) => {
+        const desc = (ex.description || '').trim(); if (!desc) return;
+        const se = (ex.sub_event || '').trim();
+        let block;
+        if (se) { block = blocks.find((b) => (b.name || '').trim().toLowerCase() === se.toLowerCase()); if (!block) { block = { id: 'se-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), name: se, items: [] }; blocks.push(block); } }
+        else { if (!blocks.length) blocks.push({ id: 'se-' + Date.now(), name: '', items: [] }); block = blocks[0]; }
+        block.items.push({ id: 'imp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), description: desc, quantity: Math.max(1, Math.round(Number(ex.quantity) || 1)), unit_price: 0 });
+        added++;
+      });
+      return blocks;
+    });
+    return added;
+  };
+  const runImportFiles = (camera) => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = camera ? 'image/*' : 'image/*,application/pdf';
+    if (camera) inp.setAttribute('capture', 'environment'); else inp.multiple = true;
+    inp.onchange = async () => {
+      const fl = inp.files; if (!fl || !fl.length) return;
+      setImpBusy(true); setImpMsg('Reading your list…');
+      try {
+        const files = await filesToPayloads(fl);
+        if (!files.length) { setImpMsg('Couldn’t read that file — try a clear photo or PDF.'); setImpBusy(false); return; }
+        const r = await extractItems({ files });
+        if (r && r.ok) { if ((r.items || []).length) { setImpPending(r.items); setImpMsg(''); } else setImpMsg('No items found — add them manually.'); }
+        else setImpMsg(extractErrMsg(r));
+      } catch (e) { setImpMsg('Couldn’t read that — try again, or add items manually.'); }
+      setImpBusy(false);
+    };
+    inp.click();
+  };
+  const runImportText = async () => {
+    const t = (impText || '').trim(); if (t.length < 3) { setImpMsg('Paste your list first.'); return; }
+    setImpBusy(true); setImpMsg('Reading your message…');
+    try {
+      const r = await extractItems({ text: t });
+      if (r && r.ok) { setImpPaste(false); setImpText(''); if ((r.items || []).length) { setImpPending(r.items); setImpMsg(''); } else setImpMsg('No items found — add them manually.'); }
+      else setImpMsg(extractErrMsg(r));
+    } catch (e) { setImpMsg('Couldn’t read that — try again, or add items manually.'); }
+    setImpBusy(false);
+  };
+  const confirmImport = () => { const n = applyImported(impPending || []); setImpPending(null); setImpMsg(n + ' item' + (n === 1 ? '' : 's') + ' added — set prices below.'); };
 
   // Helper: auto-generate payment terms text from schedule (amount-based).
   const buildPaymentTermsText = (schedule) => {
@@ -612,6 +666,39 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
               <div style={{background:'var(--blue-light)',borderRadius:'var(--radius-md)',padding:'8px 14px',fontSize:12,color:'var(--blue)',marginBottom:14}}>
                 Use templates to pre-fill items per sub-event, then fill in prices. Tab between cells.
               </div>
+              {impPending ? (
+                <div style={{background:'#fff',border:'1px solid #e6d9bf',borderRadius:'var(--radius-lg)',padding:'12px 14px',marginBottom:12}}>
+                  <div style={{fontWeight:600,fontSize:13.5,color:'var(--grey-800)'}}>We read {impPending.length} item{impPending.length===1?'':'s'} — review, then add</div>
+                  <div style={{fontSize:11,color:'var(--grey-400)',margin:'2px 0 6px'}}>Prices start at ₹0 — you'll set them after adding.</div>
+                  <div>{impPending.map((p,i)=>(
+                    <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8,borderTop:'1px solid var(--grey-100)',padding:'5px 0',fontSize:12.5}}>
+                      <span>{p.description} <span style={{color:'var(--grey-400)'}}>×{Number(p.quantity)||1}{p.sub_event?(' · '+p.sub_event):''}</span></span>
+                      <span onClick={()=>setImpPending(ps=>{ const n=(ps||[]).filter((_,j)=>j!==i); return n.length?n:null; })} style={{cursor:'pointer',color:'var(--grey-300)'}}>✕</span>
+                    </div>
+                  ))}</div>
+                  <div style={{display:'flex',gap:8,marginTop:8}}>
+                    <button className="btn sm primary" onClick={confirmImport}>✓ Add {impPending.length} item{impPending.length===1?'':'s'}</button>
+                    <button className="btn sm" onClick={()=>{setImpPending(null);setImpMsg('');}}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{background:'#FDF2F6',border:'1px solid #f4cfdd',borderRadius:'var(--radius-lg)',padding:'12px 14px',marginBottom:12}}>
+                  <div style={{fontWeight:600,fontSize:13.5,color:'#a11149'}}>⚡ Have the list already?</div>
+                  <div style={{fontSize:11.5,color:'var(--grey-400)',margin:'2px 0 8px'}}>Attach a photo/PDF or paste a message — we'll fill the items for you to review, then you set the prices.</div>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    <button className="btn sm" disabled={impBusy} onClick={()=>runImportFiles(false)}>📎 Attach a list</button>
+                    <button className="btn sm" disabled={impBusy} onClick={()=>runImportFiles(true)}>📷 Take a photo</button>
+                    <button className="btn sm" disabled={impBusy} onClick={()=>setImpPaste(v=>!v)}>📋 Paste a message</button>
+                  </div>
+                  {impPaste&&(
+                    <div style={{marginTop:10}}>
+                      <textarea className="field-input" rows={4} value={impText} onChange={e=>setImpText(e.target.value)} placeholder="Paste your WhatsApp message or typed list here…" style={{width:'100%',boxSizing:'border-box'}}/>
+                      <div style={{display:'flex',gap:8,marginTop:6}}><button className="btn sm primary" disabled={impBusy} onClick={runImportText}>✨ Build from this</button><button className="btn sm" onClick={()=>{setImpPaste(false);setImpText('');}}>Cancel</button></div>
+                    </div>
+                  )}
+                  {impMsg&&<div style={{marginTop:8,fontSize:11.5,color:'#a11149'}}>{impMsg}</div>}
+                </div>
+              )}
               {subEventBlocks.map((block,bi)=>(
                 <div key={block.id} style={{background:'var(--grey-50)',borderRadius:'var(--radius-lg)',padding:'14px 16px',marginBottom:12,border:'1px solid var(--grey-100)'}}>
                   <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,paddingBottom:8,borderBottom:'1px solid var(--grey-200)'}}>

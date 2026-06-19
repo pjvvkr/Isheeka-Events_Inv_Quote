@@ -100,7 +100,7 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
   const detailId = nav && nav.rfqId;
   const isNew = !!(nav && nav.mode === 'new');
 
-  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at,revision_number').eq('is_deleted', false).eq('party_type', 'client').order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
+  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at,revision_number').eq('is_deleted', false).eq('party_type', 'client').eq('is_sourcing_anchor', false).order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
   React.useEffect(() => { if (!detailId && !isNew && !created) load(); }, [detailId, isNew, created]);
 
   if (created) { return <div><div style={{ marginBottom: 12 }}><button className="btn sm" onClick={() => { setCreated(null); }}>← All RFQs</button></div><RFQShareCard created={created} contact={created.contact} onDone={() => { setCreated(null); }} /></div>; }
