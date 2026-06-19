@@ -190,6 +190,23 @@ Lets a client attach a photo/PDF of their list instead of keying items by hand.
   --no-verify-jwt` + push `rfq.html` (Pages). Until the key+deploy land, the button degrades
   gracefully ("photo reading isn't enabled yet — add items manually").
 
+## Extraction · Batch A polish (built 2026-06-18)
+
+- **Preview-before-merge** (both portals): extraction now stages results in a review card
+  (`pendingItems` / `pendingCosts`) with per-row ✕ and Add/Cancel — nothing merges until confirmed.
+- **Undo import**: client "↩ Undo import (remove N imported)"; vendor "↩ Clear imported prices".
+- **Prompt tuning**: extract prompts now handle Telugu/Hindi/Hinglish + handwriting and parse
+  counts like "2 tubs" / "200 chairs" / "8x12 backdrop" (number vs spec).
+- **Matched source line** (vendor): `extract_costs` returns `source` (the vendor's own line); shown
+  as "matched from: …" on each imported row + in the preview.
+
+Deploy: `git push` (rfq.html → Pages) + `supabase functions deploy rfq-gateway --no-verify-jwt`
+(prompt + source changes). No app/Netlify change, no migration, key already set.
+
+Phase-2 extras roadmap (remaining): **B** staff-side import · **C** catalog auto-map + needs-review
+flag + manual re-map · **D** governance (rate-limit, store upload, usage log) · **E** voice-note,
+email import, multi-vendor split.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +

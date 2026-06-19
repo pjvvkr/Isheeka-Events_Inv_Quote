@@ -364,6 +364,9 @@ Deno.serve(async (req) => {
           "of objects: {\"description\": string, \"quantity\": number, \"sub_event\": string|null}. " +
           "description = the item/service requested. quantity = the number requested (use 1 if not stated). " +
           "sub_event = the function/section it belongs to if the list is grouped (e.g. \"Mehendi\", \"Reception\"), else null. " +
+          "The list may be in English, Telugu, Hindi or a mix (Hinglish/Tenglish) and may be handwritten — read it faithfully; " +
+          "give each description as a short clear label in English where the meaning is obvious, otherwise keep the original wording. " +
+          "For quantity, read counts like \"2 tubs\", \"200 chairs\", \"8x12 backdrop\" as the number (2, 200, 1) and keep any size/spec in the description. " +
           "Ignore prices, money, totals, headings, page numbers and contact details. If you cannot read any items, return [].";
 
         const content: any[] = text
@@ -424,9 +427,11 @@ Deno.serve(async (req) => {
           "You are matching a vendor's price list to a FIXED list of items the customer needs. " +
           "ITEMS (JSON): " + JSON.stringify(itemList) + ". " +
           "Read the vendor's price document/message and, for each item id above, find the vendor's matching PER-UNIT price. " +
+          "The vendor's list may be in English, Telugu, Hindi or a mix and may be handwritten — read it faithfully. " +
           "Return ONLY a JSON array (no prose, no code fences) of objects: " +
-          "{\"rfq_item_id\": string, \"unit_cost\": number|null, \"can_supply\": boolean, \"confidence\": \"high\"|\"low\"}. " +
+          "{\"rfq_item_id\": string, \"unit_cost\": number|null, \"can_supply\": boolean, \"confidence\": \"high\"|\"low\", \"source\": string}. " +
           "unit_cost = per-unit price as a plain number (no currency symbols); if only a line total is given, divide by that item's quantity. " +
+          "source = a short snippet of the vendor's own line that this price came from (e.g. \"Stage decor - 45k\"), or \"\" if none. " +
           "confidence = \"high\" when the vendor's line clearly corresponds to the item; \"low\" when the match is a guess or the wording differs a lot. " +
           "If the vendor marks an item unavailable, set can_supply=false and unit_cost=null. " +
           "If you cannot match an item at all, set unit_cost=null, can_supply=true, confidence=\"low\". " +
@@ -463,6 +468,7 @@ Deno.serve(async (req) => {
           unit_cost: (c.unit_cost == null || c.unit_cost === "") ? null : Math.max(0, Math.round(Number(c.unit_cost) || 0)),
           can_supply: c.can_supply !== false,
           confidence: (c.confidence === "low") ? "low" : "high",
+          source: c.source ? String(c.source).trim().slice(0, 120) : "",
         }));
         return json({ ok: true, costs, matched: costs.filter((c) => c.unit_cost != null).length, total: itemRows.length });
       }
