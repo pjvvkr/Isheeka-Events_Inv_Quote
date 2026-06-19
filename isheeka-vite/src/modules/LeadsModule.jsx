@@ -372,6 +372,17 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
     }
   };
 
+  // Admin: cascade soft-delete this lead and everything attached (reversible).
+  const archiveLead = async () => {
+    if(!window.confirm('Archive '+(lead.ref_number||'this lead')+' and ALL its data — RFQs, quotes, events, invoices, payments?\n\nIt hides everywhere (soft delete, reversible from the database). Use this to remove test or duplicate entries.')) return;
+    const { data, error } = await supabase.rpc('archive_lead_chain', { p_lead_ref: lead.ref_number });
+    if(error){ notify('Could not archive: '+(error.message||''),'error'); return; }
+    if(data && data.ok===false){ notify('Archive skipped — '+(data.error||'lead not found'),'error'); return; }
+    const c = data || {};
+    notify('Archived '+(lead.ref_number||'lead')+' + '+(c.events||0)+' event(s), '+(c.quotations||0)+' quote(s), '+(c.invoices||0)+' invoice(s).','success');
+    if(onBack) onBack(); else if(onNavigate) onNavigate('leads');
+  };
+
   const handleCreateFromLostLead = async () => {
     setShowLostConfirm(false);
     // Load sub-events for this lead
@@ -524,6 +535,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
           )}
           {isConverted&&<button className="btn sm" onClick={()=>setMode('edit')}>✏️ Edit</button>}
           {isLost&&<button className="btn sm" onClick={()=>setShowLostConfirm(true)}>✏️ Edit</button>}
+          <button className="btn sm" title="Archive this lead and ALL its data (RFQs, quotes, events, invoices). Reversible — for removing test/duplicate entries." style={{color:'#A32D2D',border:'1px solid #FCEBEB'}} onClick={archiveLead}>🗄 Archive + data</button>
         </div>
       </div>
 

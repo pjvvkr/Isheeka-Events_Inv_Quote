@@ -220,6 +220,23 @@ The ERP is now an installable PWA (step 1 of the Android packaging path; works f
 - **Verify on Android:** open the Netlify URL in Chrome → ⋮ → "Install app" → confirms the maroon
   flower icon + fullscreen standalone launch.
 
+## Test-data purge + reusable lead-archive (built 2026-06-18)
+
+Soft-delete approach (reversible). Keeps real leads **L-26-1129 + L-26-1139** and their full chains.
+- `supabase/migrations/20260619000000_payment_soft_delete_flags.sql` — adds `is_deleted` to
+  `vendor_payments` + `invoice_payments` (were the only view-queried tables without it).
+- `supabase/migrations/20260619000100_archive_lead_chain.sql` — `archive_lead_chain(lead_ref)` /
+  `unarchive_lead_chain(lead_ref)` plpgsql: cascade soft-delete/restore a lead's whole graph
+  (RFQs incl. vendor, quotes, events, invoices, costing, expenses, line items, installments,
+  payments). Shared-client guard; vendor MASTER never touched. Returns jsonb counts.
+- `scripts/purge_test_data_keep_leads.sql` — one-time: PART 0 safety check, PART 1 preview (rolls
+  back), PART 2 transactional purge keeping the two real leads.
+- App: `is_deleted` filters added to Reports + Vendor-Payments queries; **"🗄 Archive + data"**
+  admin button on the Lead detail (confirm + reversible) calling `archive_lead_chain`.
+
+**Deploy order (matters!):** backup prod → apply BOTH migrations to prod (columns must exist before
+the app filters / purge run) → deploy app → run purge script (PART 0→1→2) → verify → 2nd backup.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +

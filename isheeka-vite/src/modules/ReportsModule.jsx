@@ -24,9 +24,9 @@ export function ReportsModule({ onNavigate }) {
     setLoading(true);
     const [{ data: inv }, { data: ip }, { data: ex }, { data: vp }, { data: ev }, { data: ld }] = await Promise.all([
       supabase.from('invoices').select('invoice_id,ref_number,status,grand_total,total_received,total_outstanding,event_id,doc_date').eq('is_deleted', false),
-      supabase.from('invoice_payments').select('amount,payment_date,invoice_id'),
+      supabase.from('invoice_payments').select('amount,payment_date,invoice_id').eq('is_deleted', false),
       supabase.from('expenses').select('amount,date,event_id,category').eq('is_deleted', false),
-      supabase.from('vendor_payments').select('amount,payment_date,event_id,is_voided'),
+      supabase.from('vendor_payments').select('amount,payment_date,event_id,is_voided').eq('is_deleted', false),
       supabase.from('events').select('event_id,ref_number,name,main_date,status,client_name').eq('is_deleted', false),
       supabase.from('leads').select('lead_id,stage,budget').eq('is_deleted', false),
     ]);

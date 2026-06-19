@@ -32,7 +32,7 @@ export function VendorPaymentsModule({ onNavigate }) {
   const load = React.useCallback(async () => {
     setLoading(true);
     const [{ data: p }, { data: ev }, { data: vn }, { data: e }] = await Promise.all([
-      supabase.from('vendor_payments').select('*').order('payment_date', { ascending: false }),
+      supabase.from('vendor_payments').select('*').eq('is_deleted', false).order('payment_date', { ascending: false }),
       supabase.from('event_vendors').select('*').eq('is_deleted', false),
       supabase.from('vendors').select('vendor_id,name,category,status').eq('is_deleted', false),
       supabase.from('events').select('event_id,ref_number,name,main_date,client_name').eq('is_deleted', false).order('main_date', { ascending: false }),
