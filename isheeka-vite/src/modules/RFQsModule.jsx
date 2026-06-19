@@ -301,7 +301,11 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
             </div>
             <div style={{ padding: '14px 20px' }}>
               <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginBottom: 10 }}>Pick vendors to request pricing from — each gets a secure link with the frozen {itemCount}-item list.</div>
-              {allVendors.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>No active vendors. Add vendors first.</div>
+              {allVendors.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>
+                  No active vendors yet.
+                  <div style={{ marginTop: 10 }}><button className="btn sm primary" onClick={() => { setShowSend(false); onNavigate && onNavigate('vendors', { mode: 'new', label: 'New vendor' }); }}>＋ Add a vendor →</button></div>
+                  <div style={{ marginTop: 6, fontSize: 11.5 }}>You'll go to Vendors to add one — then use the breadcrumb above to come back here and resume sourcing.</div>
+                </div>
                 : <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)' }}>
                   {allVendors.map((v, i) => (
                     <label key={v.vendor_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: i > 0 ? '1px solid var(--grey-50)' : 'none', cursor: 'pointer' }}>
@@ -312,9 +316,12 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                   ))}
                 </div>}
             </div>
-            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn" onClick={() => setShowSend(false)}>Cancel</button>
-              <button className="btn primary" disabled={sending} onClick={doSend}>{sending ? 'Sending…' : 'Send'}</button>
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <button className="btn sm" onClick={() => { setShowSend(false); onNavigate && onNavigate('vendors', { mode: 'new', label: 'New vendor' }); }}>＋ New vendor</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={() => setShowSend(false)}>Cancel</button>
+                <button className="btn primary" disabled={sending} onClick={doSend}>{sending ? 'Sending…' : 'Send'}</button>
+              </div>
             </div>
           </div>
         </div>

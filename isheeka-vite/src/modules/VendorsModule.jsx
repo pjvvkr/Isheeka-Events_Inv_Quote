@@ -43,6 +43,8 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
   const stColor = (s) => ({ active: { bg: 'var(--green-light)', color: 'var(--green)' }, inactive: { bg: 'var(--grey-100)', color: 'var(--grey-400)' } }[s] || { bg: 'var(--grey-100)', color: 'var(--grey-400)' });
 
   const openNew = () => { setEditV(null); setDupWarn(null); setForm({ ...emptyV }); setShowForm(true); };
+  // Arriving with mode:'new' (e.g. from the Sourcing "Add a vendor" shortcut) opens the form straight away.
+  React.useEffect(() => { if (nav && nav.mode === 'new' && !detailId) openNew(); }, [nav && nav.mode]);
   const openEdit = (v) => { setEditV(v); setDupWarn(null); setForm({ ...emptyV, ...v, rating: v.rating || '', is_preferred: !!v.is_preferred, phone_1: v.phone_1 || '+91 ', email_1: v.email_1 || '' }); setShowForm(true); };
   const cleanEmail = (e) => { const t = (e || '').trim(); return (t === '' || t === '@gmail.com') ? null : t; };
   const save = async (force) => {
