@@ -109,6 +109,23 @@ screen silently showed the RFQ list); now fixed.
 **Still deferred (post-baseline):** scheduled auto-reminders to vendors; read-only sourcing history
 on the Vendor profile; per-item split across vendors at quote time; role-aware access to costs/margin.
 
+## Manual-test fixes (2026-06-18, batch 2)
+
+- **Event items bug** — `convertLeadToEvent` (money.js) created sub-event *headers* from the
+  quote's line items but never copied the line items into `sub_event_items`, so events from
+  the RFQ→costing→auto-quote path showed empty sub-events (₹0). Now copies the items,
+  mapping `sub_event_name` → the new `sub_event_id`. (Existing events need a one-time backfill;
+  new conversions are fixed.)
+- **Revision visibility** (client/vendor can revise until approved — capability already existed):
+  - **#1** "🔄 Rev N" badge on the RFQ list rows + detail header (driven by `revision_number`);
+    the list's awaiting-review line now also flags how many are revisions.
+  - **#2** Count badge on the **Client RFQ** sidebar item (refreshes on nav) + the dashboard
+    "awaiting review" tile aligned to `party_type='client'` only.
+  - **#3** Restored the **Revision history + diff** panel on the RFQ detail (view any snapshot,
+    compare two versions). New migration `20260618120000_rfq_revisions.sql` recreates the
+    `rfq_revisions` table locally (already present in prod from the M3 batch) so dev matches prod.
+- **Email notification on revision** — deferred (phase 2), per decision.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +

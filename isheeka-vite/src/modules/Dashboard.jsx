@@ -20,7 +20,7 @@ export function Dashboard({ user, onNavigate }) {
       supabase.from('quotations').select('grand_total,doc_date,status,event_id').eq('is_deleted', false),
       supabase.from('invoice_payments').select('amount,payment_date,invoice_id'),
       supabase.from('invoices').select('invoice_id,ref_number,client_name,event_name,total_outstanding,status').eq('is_deleted', false),
-      supabase.from('rfqs').select('rfq_id', { count: 'exact', head: true }).eq('is_deleted', false).eq('status', 'submitted'),
+      supabase.from('rfqs').select('rfq_id', { count: 'exact', head: true }).eq('is_deleted', false).eq('party_type', 'client').eq('status', 'submitted'),
     ]);
     const cancelledInv = {}; (invs || []).forEach((i) => { if (i.status === 'cancelled') cancelledInv[i.invoice_id] = true; });
     const cancelledEvt = {}; (events || []).forEach((e) => { if ((e.status || '').toLowerCase() === 'cancelled') cancelledEvt[e.event_id] = true; });

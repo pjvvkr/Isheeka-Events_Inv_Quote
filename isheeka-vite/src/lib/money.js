@@ -150,11 +150,27 @@ export async function createEventFromQuote(lead, opts = {}) {
   }).select().single();
   if (ee) throw ee;
   if (approvedQuot) {
-    const { data: li } = await supabase.from('quotation_line_items').select('sub_event_name').eq('quotation_id', approvedQuot.quotation_id).eq('is_deleted', false);
+    const { data: li } = await supabase.from('quotation_line_items').select('sub_event_name,description,quantity,unit_price,sort_order').eq('quotation_id', approvedQuot.quotation_id).eq('is_deleted', false).order('sort_order');
     const names = [...new Set((li || []).map((x) => x.sub_event_name).filter((n) => n && n.trim() && n !== 'General Items'))];
+    const nameToId = {};
     let so = 0;
     for (const name of names) {
-      const { error: sie } = await supabase.from('sub_events').insert({ event_id: event.event_id, name, sort_order: so++, created_at: new Date().toISOString(), is_deleted: false }); if (sie) throw sie;
+      const { data: seRow, error: sie } = await supabase.from('sub_events').insert({ event_id: event.event_id, name, sort_order: so++, created_at: new Date().toISOString(), is_deleted: false }).select().single(); if (sie) throw sie;
+      if (seRow) nameToId[name] = seRow.sub_event_id;
+    }
+    // Copy the quote's line items onto the event so they appear under their sub-events
+    // (items with no/General sub-event fall under the event's main group). Without this the
+    // event shows empty sub-events even though the quote/invoice carry the items.
+    if (li && li.length) {
+      const itemRows = li.map((it, idx) => ({
+        sub_event_id: (it.sub_event_name && nameToId[it.sub_event_name]) ? nameToId[it.sub_event_name] : null,
+        event_id: event.event_id,
+        description: it.description || '—',
+        quantity: it.quantity, unit_price: it.unit_price,
+        sort_order: (it.sort_order != null ? it.sort_order : idx),
+        created_at: new Date().toISOString(), is_deleted: false,
+      }));
+      const { error: siie } = await supabase.from('sub_event_items').insert(itemRows); if (siie) throw siie;
     }
     const { error: cve } = await supabase.from('quotations').update({ status: 'converted', event_id: event.event_id, updated_at: new Date().toISOString() }).eq('quotation_id', approvedQuot.quotation_id); if (cve) throw cve;
     try { await createInvoiceFromQuote(approvedQuot.quotation_id, { eventId: event.event_id }); }

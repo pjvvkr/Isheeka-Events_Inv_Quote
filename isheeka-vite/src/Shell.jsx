@@ -47,6 +47,9 @@ export default function Shell() {
   const jumpTo = useCallback((i) => { setNavStack((st) => ((i >= 0 && i < st.length - 1) ? st.slice(0, i + 1) : st)); }, []);
   const resetTo = useCallback((page) => { setNavStack([{ page, label: pageTitles[page] || page }]); }, []);
   const [showWarning, setShowWarning] = useState(false);
+  // RFQs awaiting review (status 'submitted' incl. client resubmissions/revisions) — shown
+  // as a count badge on the Client RFQ nav item so it's visible from any screen.
+  const [reviewCount, setReviewCount] = useState(0);
   const lastActivity = useRef(Date.now());
   const warningTimer = useRef(null);
   const logoutTimer = useRef(null);
@@ -82,6 +85,15 @@ export default function Shell() {
     return () => { events.forEach((e) => document.removeEventListener(e, resetTimers)); clearTimeout(warningTimer.current); clearTimeout(logoutTimer.current); };
   }, [user, resetTimers]);
 
+  const loadReviewCount = useCallback(async () => {
+    try {
+      const { count } = await supabase.from('rfqs').select('rfq_id', { count: 'exact', head: true }).eq('is_deleted', false).eq('party_type', 'client').eq('status', 'submitted');
+      setReviewCount(count || 0);
+    } catch (e) { /* non-fatal */ }
+  }, []);
+  // Refresh the count on login and whenever the active page changes (so it clears after review).
+  useEffect(() => { if (user) loadReviewCount(); }, [user, activePage, loadReviewCount]);
+
   const role = 'admin';
 
   if (loading) return <div className="loading"><div className="spinner"></div><div style={{ color: 'var(--grey-400)', fontSize: 14 }}>Loading Isheeka Events...</div></div>;
@@ -108,6 +120,7 @@ export default function Shell() {
               {group.items.filter((item) => item.roles.includes(role)).map((item) => (
                 <button key={item.id} className={`nav-item ${activePage === item.id ? 'active' : ''}`} onClick={() => resetTo(item.id)}>
                   <span className="nav-icon">{item.icon}</span>{item.label}
+                  {item.id === 'rfqs' && reviewCount > 0 && <span title={reviewCount + ' RFQ' + (reviewCount > 1 ? 's' : '') + ' awaiting review'} style={{ marginLeft: 'auto', background: 'var(--pink)', color: 'white', fontSize: 11, fontWeight: 600, borderRadius: 20, padding: '0 7px', minWidth: 18, height: 18, lineHeight: '18px', textAlign: 'center' }}>{reviewCount}</span>}
                 </button>
               ))}
             </div>

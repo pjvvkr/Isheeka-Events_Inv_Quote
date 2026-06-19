@@ -100,7 +100,7 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
   const detailId = nav && nav.rfqId;
   const isNew = !!(nav && nav.mode === 'new');
 
-  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at').eq('is_deleted', false).eq('party_type', 'client').order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
+  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at,revision_number').eq('is_deleted', false).eq('party_type', 'client').order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
   React.useEffect(() => { if (!detailId && !isNew && !created) load(); }, [detailId, isNew, created]);
 
   if (created) { return <div><div style={{ marginBottom: 12 }}><button className="btn sm" onClick={() => { setCreated(null); }}>← All RFQs</button></div><RFQShareCard created={created} contact={created.contact} onDone={() => { setCreated(null); }} /></div>; }
@@ -109,13 +109,14 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
   if (detailId) { return <RFQDetail rfqId={detailId} onBack={onBack} onShare={(c, contact) => setCreated({ ...c, contact })} onNavigate={onNavigate} />; }
 
   const needsReview = rfqs.filter((r) => r.status === 'submitted').length;
+  const revisedReview = rfqs.filter((r) => r.status === 'submitted' && (r.revision_number || 0) > 1).length;
   const list = rfqs.filter((r) => !statusFilter || r.status === statusFilter);
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--grey-800)' }}>RFQs</div>
-          {needsReview > 0 && <div style={{ fontSize: 12, color: 'var(--pink)', fontWeight: 500, marginTop: 2 }}>⏳ {needsReview} submitted · awaiting review</div>}
+          {needsReview > 0 && <div style={{ fontSize: 12, color: 'var(--pink)', fontWeight: 500, marginTop: 2 }}>⏳ {needsReview} submitted · awaiting review{revisedReview > 0 ? (' · 🔄 ' + revisedReview + ' revised') : ''}</div>}
         </div>
         <button className="btn primary" onClick={() => onNavigate('rfqs', { mode: 'new', label: 'New RFQ' })}>+ New RFQ</button>
       </div>
@@ -132,6 +133,7 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
               <div key={r.rfq_id} onClick={() => onNavigate('rfqs', { rfqId: r.rfq_id, label: r.ref_number })} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i > 0 ? '1px solid var(--grey-100)' : 'none', cursor: 'pointer' }}>
                 <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--pink)', width: 120 }}>{r.ref_number}</span>
                 <span style={{ flex: 1, fontSize: 13, color: 'var(--grey-800)' }}>{r.contact_name || '—'}{r.event_type ? (' · ' + r.event_type) : ''}</span>
+                {(r.revision_number || 0) > 1 && <span title={'Client revised this ' + r.revision_number + '×'} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 600, background: 'var(--orange-light)', color: 'var(--orange)' }}>🔄 Rev {r.revision_number}</span>}
                 <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c }}>{sc.l}</span>
               </div>
             ); })}
@@ -334,13 +336,15 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [openAct, setOpenAct] = React.useState(0);
   const [dupe, setDupe] = React.useState(null);
   const load = async () => { setLoading(true);
-    // #6: there is no `rfq_revisions` table in the schema — querying it 404s on every RFQ
-    // open (the panel was always empty). Dropped the dead query; revisions stays [].
     const [{ data: rfq }, { data: its }, { data: act }] = await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id', rfqId).single(),
       supabase.from('rfq_items').select('*').eq('rfq_id', rfqId).eq('is_deleted', false).order('sort_order'),
       supabase.from('rfq_activity').select('*').eq('rfq_id', rfqId).order('created_at', { ascending: false }),
     ]);
+    // Revision snapshots (one per client/vendor submission), newest first. Guarded so a
+    // missing table never breaks the detail load — revisions just stays empty.
+    let revs = [];
+    try { const { data: rv } = await supabase.from('rfq_revisions').select('*').eq('rfq_id', rfqId).order('revision_number', { ascending: false }); revs = rv || []; } catch (e) { revs = []; }
     // Self-heal a stale quote pointer: walk forward through the revision chain to the newest quote.
     if (rfq && rfq.quotation_id) {
       let cur = rfq.quotation_id, guard = 0;
@@ -350,7 +354,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
       }
       if (cur !== rfq.quotation_id) { try { await supabase.from('rfqs').update({ quotation_id: cur, updated_at: new Date().toISOString() }).eq('rfq_id', rfqId); } catch (e) { /* noop */ } rfq.quotation_id = cur; }
     }
-    setR(rfq || null); setItems(its || []); setActivity(act || []); setRevisions([]); setLoading(false);
+    setR(rfq || null); setItems(its || []); setActivity(act || []); setRevisions(revs); setLoading(false);
   };
   React.useEffect(() => { load(); }, [rfqId]);
   const regenerate = async () => {
@@ -409,10 +413,25 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
           </div>
         </div>
       ); })()}
+      {viewRev && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }} onClick={() => setViewRev(null)}>
+          <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', maxWidth: 480, width: '100%', maxHeight: '80vh', overflowY: 'auto', padding: '20px 22px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--grey-800)', marginBottom: 4 }}>Revision v{viewRev.revision_number}</div>
+            <div style={{ fontSize: 12, color: 'var(--grey-400)', marginBottom: 12 }}>Submitted by {viewRev.submitted_by || 'client'} · {fmtDate(viewRev.submitted_at || viewRev.created_at, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+            {(() => { const g = rfqItemsGrouped((viewRev.snapshot || {}).items || []); const keys = Object.keys(g); return keys.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>No items in this revision.</div> : keys.map((k) => (
+              <div key={k} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)', marginBottom: 4 }}>{k.toUpperCase()}</div>
+                {g[k].map((it, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, padding: '3px 0' }}><span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{it.description}</span><span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>×{it.quantity}</span></div>)}
+              </div>
+            )); })()}
+            <div style={{ marginTop: 12, textAlign: 'right' }}><button className="btn sm" onClick={() => setViewRev(null)}>Close</button></div>
+          </div>
+        </div>
+      )}
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '18px 22px', marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>{r.ref_number} <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c, marginLeft: 6 }}>{sc.l}</span></div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>{r.ref_number} <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c, marginLeft: 6 }}>{sc.l}</span>{(r.revision_number || 0) > 1 && <span title={'Revised ' + r.revision_number + '× by the ' + (r.party_type === 'vendor' ? 'vendor' : 'client')} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 600, background: 'var(--orange-light)', color: 'var(--orange)', marginLeft: 6 }}>🔄 Rev {r.revision_number}</span>}</div>
             <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 3 }}>{r.contact_name || '—'}{r.contact_phone ? (' · ' + r.contact_phone) : ''}{r.event_type ? (' · ' + r.event_type) : ''}{r.city ? (' · ' + r.city) : ''}</div>
             {(r.secondary_contact_name || r.secondary_contact_phone) && <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>2nd contact: {r.secondary_contact_name || ''} {r.secondary_contact_phone || ''}</div>}
           </div>
@@ -444,6 +463,47 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
             </div>
           ))}
       </div>
+
+      {/* Revision history + diff — one snapshot per client/vendor submission. */}
+      {revisions.length > 0 && (
+        <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)', marginBottom: 6 }}>Revision history ({revisions.length})</div>
+          <div>
+            {revisions.map((rv) => { const n = ((rv.snapshot && rv.snapshot.items) || []).length; return (
+              <div key={rv.revision_id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, padding: '7px 0', borderTop: '1px solid var(--grey-100)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--grey-800)', width: 44 }}>v{rv.revision_number}</span>
+                <span style={{ flex: 1, color: 'var(--grey-600)' }}>by {rv.submitted_by || 'client'} · {n} item{n === 1 ? '' : 's'}</span>
+                <span style={{ color: 'var(--grey-400)', fontSize: 12 }}>{fmtDate(rv.submitted_at || rv.created_at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                <button className="btn sm" onClick={() => setViewRev(rv)}>View</button>
+              </div>
+            ); })}
+          </div>
+          {revisions.length > 1 && (() => {
+            const a = cmpA || String(revisions[1].revision_number);
+            const b = cmpB || String(revisions[0].revision_number);
+            const ra = revisions.find((x) => String(x.revision_number) === a);
+            const rb = revisions.find((x) => String(x.revision_number) === b);
+            const d = (ra && rb) ? diffRevItems((ra.snapshot || {}).items, (rb.snapshot || {}).items) : { added: [], removed: [], changed: [] };
+            return (
+              <div style={{ marginTop: 12, borderTop: '1px solid var(--grey-100)', paddingTop: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--grey-600)', marginBottom: 8 }}>
+                  <span>Compare</span>
+                  <select className="field-input" style={{ width: 80, fontSize: 12, padding: '4px 6px' }} value={a} onChange={(e) => setCmpA(e.target.value)}>{revisions.map((x) => <option key={x.revision_id} value={x.revision_number}>v{x.revision_number}</option>)}</select>
+                  <span>→</span>
+                  <select className="field-input" style={{ width: 80, fontSize: 12, padding: '4px 6px' }} value={b} onChange={(e) => setCmpB(e.target.value)}>{revisions.map((x) => <option key={x.revision_id} value={x.revision_number}>v{x.revision_number}</option>)}</select>
+                </div>
+                {(d.added.length + d.removed.length + d.changed.length) === 0
+                  ? <div style={{ fontSize: 12, color: 'var(--grey-400)' }}>No item differences between these versions.</div>
+                  : <div style={{ fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {d.added.map((it, i) => <div key={'a' + i} style={{ color: 'var(--green)' }}>+ {it.description} ×{it.quantity}</div>)}
+                      {d.removed.map((it, i) => <div key={'r' + i} style={{ color: 'var(--red)' }}>− {it.description} ×{it.quantity}</div>)}
+                      {d.changed.map((c, i) => <div key={'c' + i} style={{ color: 'var(--orange)' }}>~ {c.to.description}: ×{c.from.quantity} → ×{c.to.quantity}</div>)}
+                    </div>}
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       {/* Sourcing — vendor RFQs (Milestone S, S2b). Appears once the client RFQ is approved.
           Behind VITE_ENABLE_VENDOR_RFQ so the in-progress feature stays hidden in prod until the
