@@ -4,3 +4,7 @@ supabase/.branches/
 
 # Local-only debugging tool for the RFQ gateway — keep on disk, don't publish to GitHub Pages
 tools/rfq-test.html
+
+# never commit DB dumps
+isheeka_*_backup_*.sql
+*.dump
