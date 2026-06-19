@@ -96,6 +96,8 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div>;
   if (!d || !d.rfq) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--grey-400)' }}>Could not load costing. <button className="btn sm" onClick={onBack}>← Back</button></div>;
 
+  const readOnly = !!(d && d.eventClosed);
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -106,7 +108,8 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
         <button className="btn sm" onClick={onBack}>← Back</button>
       </div>
 
-      {d.columns.length === 0 && <div style={{ background: 'var(--orange-light)', color: '#854F0B', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>No vendor has submitted a bid yet — you can still price items in-house below.</div>}
+      {readOnly && <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', color: 'var(--grey-600)', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>🔒 The event for this RFQ is completed or cancelled — this costing is <b>view-only</b>. You can review the chosen bids and margins, but can't re-price or regenerate the quote.</div>}
+      {!readOnly && d.columns.length === 0 && <div style={{ background: 'var(--orange-light)', color: '#854F0B', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>No vendor has submitted a bid yet — you can still price items in-house below.</div>}
 
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', overflowX: 'auto', marginBottom: 14 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 560 }}>
@@ -131,16 +134,16 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
                     if (b.can_supply === false) return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--red)' }} title="Can't supply">✕</td>;
                     const isChosen = !r.inHouse && r.chosen === c.vendor_id;
                     return (
-                      <td key={c.vendor_id} onClick={() => setRow(i, { inHouse: false, chosen: c.vendor_id })} title={(b.item_note ? ('Note: ' + b.item_note + '  ') : '') + (isChosen ? 'chosen' : 'click to choose')} style={{ padding: '9px 8px', cursor: 'pointer', background: isChosen ? 'var(--green-light)' : 'transparent', color: isChosen ? 'var(--green)' : 'var(--grey-800)', fontWeight: isChosen ? 600 : 400 }}>
+                      <td key={c.vendor_id} onClick={() => { if (!readOnly) setRow(i, { inHouse: false, chosen: c.vendor_id }); }} title={(b.item_note ? ('Note: ' + b.item_note + '  ') : '') + (readOnly ? (isChosen ? 'chosen' : '') : (isChosen ? 'chosen' : 'click to choose'))} style={{ padding: '9px 8px', cursor: readOnly ? 'default' : 'pointer', background: isChosen ? 'var(--green-light)' : 'transparent', color: isChosen ? 'var(--green)' : 'var(--grey-800)', fontWeight: isChosen ? 600 : 400 }}>
                         {b.unit_cost != null ? Number(b.unit_cost).toLocaleString('en-IN') : '—'}{b.item_note ? ' 📝' : ''}
                       </td>
                     );
                   })}
                   <td style={{ padding: '9px 8px', background: r.inHouse ? 'var(--green-light)' : 'transparent', whiteSpace: 'nowrap' }}>
-                    <input type="checkbox" checked={r.inHouse} onChange={(e) => setRow(i, { inHouse: e.target.checked, chosen: e.target.checked ? null : r.autoCheapest })} title="Manage in-house" style={{ verticalAlign: 'middle' }} />
-                    {r.inHouse && <input value={r.inHouseCost} onChange={(e) => setRow(i, { inHouseCost: e.target.value })} placeholder="cost" inputMode="numeric" style={{ width: 64, marginLeft: 4, fontSize: 12, padding: '3px 6px' }} />}
+                    <input type="checkbox" checked={r.inHouse} disabled={readOnly} onChange={(e) => setRow(i, { inHouse: e.target.checked, chosen: e.target.checked ? null : r.autoCheapest })} title="Manage in-house" style={{ verticalAlign: 'middle' }} />
+                    {r.inHouse && <input value={r.inHouseCost} disabled={readOnly} onChange={(e) => setRow(i, { inHouseCost: e.target.value })} placeholder="cost" inputMode="numeric" style={{ width: 64, marginLeft: 4, fontSize: 12, padding: '3px 6px' }} />}
                   </td>
-                  <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}><input value={r.markup} onChange={(e) => setRow(i, { markup: e.target.value, markupOverridden: true })} inputMode="numeric" style={{ width: 46, fontSize: 12, padding: '3px 6px', textAlign: 'right' }} />%</td>
+                  <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}><input value={r.markup} disabled={readOnly} onChange={(e) => setRow(i, { markup: e.target.value, markupOverridden: true })} inputMode="numeric" style={{ width: 46, fontSize: 12, padding: '3px 6px', textAlign: 'right' }} />%</td>
                   <td style={{ padding: '9px 12px', fontWeight: 600 }}>{cu != null ? inr(cu * r.quantity) : <span style={{ color: 'var(--red)' }}>—</span>}</td>
                 </tr>
               );
@@ -160,14 +163,14 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
 
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '14px 18px', marginBottom: 14 }}>
         <label className="field-label">Internal notes (saved to the costing summary)</label>
-        <textarea className="field-textarea" rows={2} value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} placeholder="e.g. went with Petal on lighting — Blooms booked that week" />
+        <textarea className="field-textarea" rows={2} value={internalNotes} disabled={readOnly} onChange={(e) => setInternalNotes(e.target.value)} placeholder="e.g. went with Petal on lighting — Blooms booked that week" />
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+      {!readOnly && <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <button className="btn" disabled={busy} onClick={onSaveSummary}>Save costing summary</button>
         <button className="btn primary" disabled={busy} onClick={onGenerate}>{busy ? 'Working…' : 'Generate quote →'}</button>
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--grey-400)' }}>Tip: click a vendor's cost to choose it · the cheapest is picked automatically · 📝 = vendor note</div>
+      </div>}
+      {!readOnly && <div style={{ fontSize: 11.5, color: 'var(--grey-400)' }}>Tip: click a vendor's cost to choose it · the cheapest is picked automatically · 📝 = vendor note</div>}
 
       {warn && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={() => setWarn(null)}>

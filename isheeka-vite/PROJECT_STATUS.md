@@ -140,6 +140,25 @@ on the Vendor profile; per-item split across vendors at quote time; role-aware a
   add them as editable engagements (`agreed_amount` = winning cost, service = "Sourced via
   vendor RFQ"). Only suggests vendors not already on the event; manual ＋ Add vendor unchanged.
 
+## Status cascade + screen gating (2026-06-18, batch 4)
+
+When an event ends, the RFQ chain and the screens that key off it now behave correctly:
+
+- **Cascade** (`closeEventRfqs` in EventsModule): **cancel** → source client RFQ + its vendor RFQs
+  → `withdrawn` (with `rfq_activity` notes), mirroring how cancel already rejects the quote;
+  **complete** → open vendor RFQs → `withdrawn` (client RFQ stays `converted` = fulfilled).
+- **`dealClosed`** (linked event completed/cancelled) is now derived on the RFQ detail and in the
+  costing loader (rfq → quote → event.status):
+  - RFQ detail Sourcing panel: hides **Send vendor RFQ**, relabels **Open costing → View costing
+    (read-only)**, shows a lock note, and hides **Regenerate link** when closed/terminal.
+  - **Costing screen**: full **view-only** mode — vendor pick / in-house / markup / notes disabled,
+    Generate-quote + Save-summary hidden, banner shown.
+  - Quote **Source vendors →** hidden when its event is completed/cancelled.
+  - Lead **Send RFQ** hidden when the lead is completed (was: only lost).
+  - Event costing-vendor suggestion banner hidden on a closed event.
+- Quotes/invoices/events already gated correctly on their own statuses (audited): quote `editable`/
+  `histClosed`, invoice `locked`/`canRecordPay`, event Edit→Reopen — left as-is.
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +

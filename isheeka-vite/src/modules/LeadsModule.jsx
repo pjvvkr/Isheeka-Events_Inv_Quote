@@ -497,7 +497,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
             {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
           </span>
           {lead.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:lead.client_id,label:(lead.first_name+' '+lead.last_name).trim()||'Client'})}>👤 View client →</button>}
-          {!isLost&&(()=>{ const activeRfq=leadRfqs.find(r=>!['converted','withdrawn','expired'].includes(r.status)); const tip=activeRfq?('An active RFQ ('+activeRfq.ref_number+') already exists — open it below.'):'Send a requirements link to capture event details'; return (
+          {!isLost&&lead.stage!=='completed'&&(()=>{ const activeRfq=leadRfqs.find(r=>!['converted','withdrawn','expired'].includes(r.status)); const tip=activeRfq?('An active RFQ ('+activeRfq.ref_number+') already exists — open it below.'):'Send a requirements link to capture event details'; return (
             <span title={tip} style={{display:'inline-flex'}}>
               <button className="btn sm" disabled={!!activeRfq} style={activeRfq?{opacity:0.5,cursor:'not-allowed',pointerEvents:'none'}:{}} onClick={()=>onNavigate&&onNavigate('rfqs',{mode:'new',label:'New RFQ',prefill:{lead_id:lead.lead_id,client_id:lead.client_id||null,contact_first_name:lead.first_name,contact_last_name:lead.last_name,contact_phone:lead.phone,contact_email:lead.email,event_type:lead.event_type,location:lead.location}})}>📝 Send RFQ</button>
             </span>

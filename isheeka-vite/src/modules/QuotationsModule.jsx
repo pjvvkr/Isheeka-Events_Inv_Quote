@@ -300,7 +300,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
           {quot.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:quot.client_id,label:quot.client_name||'Client'})}>👤 View client →</button>}
-          {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') && sourceRfq && <button className="btn sm" title="Send vendor RFQs and price this quote via the costing screen" onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:sourceRfq.rfq_id,label:sourceRfq.ref_number})}>🔧 Source vendors →</button>}
+          {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') && sourceRfq && !eventCancelled && !(srcEvent && (srcEvent.status||'').toLowerCase()==='completed') && <button className="btn sm" title="Send vendor RFQs and price this quote via the costing screen" onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:sourceRfq.rfq_id,label:sourceRfq.ref_number})}>🔧 Source vendors →</button>}
           {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
           {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}

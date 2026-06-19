@@ -528,6 +528,33 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     setEvent(ev=>({...ev,status:newStatus}));
   };
 
+  // Close the source RFQ chain when an event ends. mode 'cancel' withdraws the client RFQ
+  // (and its vendor RFQs); mode 'complete' leaves the client RFQ Converted but closes any
+  // still-open vendor RFQs. Non-fatal — never blocks the complete/cancel itself.
+  const closeEventRfqs = async (mode, reason, uid) => {
+    try {
+      const qIds = (quotations || []).map(q => q.quotation_id).filter(Boolean);
+      if (!qIds.length) return;
+      const { data: crfqs } = await supabase.from('rfqs').select('rfq_id,status').eq('party_type', 'client').in('quotation_id', qIds).eq('is_deleted', false);
+      const clientIds = (crfqs || []).map(r => r.rfq_id);
+      if (mode === 'cancel') {
+        const toClose = (crfqs || []).filter(r => !['withdrawn', 'expired'].includes(r.status)).map(r => r.rfq_id);
+        if (toClose.length) {
+          await supabase.from('rfqs').update({ status: 'withdrawn', updated_at: new Date().toISOString() }).in('rfq_id', toClose);
+          for (const id of toClose) { try { await supabase.from('rfq_activity').insert({ rfq_id: id, actor: uid || 'staff', action: 'withdrawn', notes: reason }); } catch (e) {} }
+        }
+      }
+      if (clientIds.length) {
+        const { data: vrfqs } = await supabase.from('rfqs').select('rfq_id,status').eq('party_type', 'vendor').in('parent_rfq_id', clientIds).eq('is_deleted', false);
+        const vClose = (vrfqs || []).filter(r => !['withdrawn', 'expired'].includes(r.status)).map(r => r.rfq_id);
+        if (vClose.length) {
+          await supabase.from('rfqs').update({ status: 'withdrawn', updated_at: new Date().toISOString() }).in('rfq_id', vClose);
+          for (const id of vClose) { try { await supabase.from('rfq_activity').insert({ rfq_id: id, actor: uid || 'staff', action: 'withdrawn', notes: reason }); } catch (e) {} }
+        }
+      }
+    } catch (e) { /* non-fatal */ }
+  };
+
   const markEventCompleted = async () => {
     if(!funnel.canComplete){ notify('Can’t complete yet — '+(funnel.blocker||'the client invoice isn’t fully paid.'),'error'); return; }
     const leadNote = linkedLead ? ('\n\nThis will also close the source lead '+(linkedLead.ref_number||'')+'.') : '';
@@ -540,6 +567,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       const {error:lse}=await runDb(supabase.from('leads').update({stage:'completed',updated_at:new Date().toISOString()}).eq('lead_id',linkedLead.lead_id),'close source lead');
       if(!lse) setLinkedLead(l=>l?{...l,stage:'completed'}:l);
     }
+    // Close any still-open vendor RFQs (the client RFQ stays Converted = fulfilled).
+    try { const uid=await _currentUid(); await closeEventRfqs('complete','Event '+(event.ref_number||'')+' completed',uid); } catch(e){}
     setSuccessMsg('Event marked completed.'+(linkedLead?' Source lead '+(linkedLead.ref_number||'')+' closed.':''));
     setTimeout(()=>setSuccessMsg(''),6000);
   };
@@ -579,6 +608,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         const qIds=(eqs||[]).filter(q=>!['rejected','superseded','expired'].includes(q.status)).map(q=>q.quotation_id);
         if(qIds.length){ await supabase.from('quotations').update({status:'rejected',updated_at:new Date().toISOString()}).in('quotation_id',qIds);
           for(const qid of qIds){ try{ await supabase.from('quotation_activity_log').insert({quotation_id:qid, action:'rejected', notes:'Event '+(event.ref_number||'')+' cancelled — '+cancelReason.trim(), logged_by:uid}); }catch(e){} } } }
+      // Withdraw the source client RFQ + its vendor RFQs (mirrors quote→rejected) so nothing looks live.
+      await closeEventRfqs('cancel', reason, uid);
       for(const i of cancelInvList){ const h=invHandling[i.invoice_id]; if(h&&h.mode==='refund'){ const amt=Math.min(parseFloat(h.amount)||0,parseFloat(i.total_received)||0); if(amt>0) await recordClientRefund({...i,status:'cancelled'},{amount:amt,reason,date:todayLocalStr()}); } }
       // 2) vendor refunds (recovered amounts) before installment cleanup
       for(const v of cancelVenList){ const h=venHandling[v.event_vendor_id]; if(h&&h.mode==='recover'){ const amt=Math.min(parseFloat(h.amount)||0,parseFloat(v.total_paid)||0); if(amt>0) await recordVendorRefund(v,{amount:amt,reason,date:todayLocalStr()}); } }
@@ -1012,7 +1043,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         </div>
         {(()=>{ const paid=eventVendors.reduce((s,v)=>s+(parseFloat(v.total_paid)||0),0); const out=eventVendors.reduce((s,v)=>s+(parseFloat(v.outstanding)||0),0); const agr=eventVendors.reduce((s,v)=>s+(parseFloat(v.agreed_amount)||0),0); return <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:12}}>Vendor cost: <b style={{color:'var(--grey-800)'}}>₹{Math.round(paid).toLocaleString('en-IN')} paid</b> · ₹{Math.round(out).toLocaleString('en-IN')} outstanding · ₹{Math.round(agr).toLocaleString('en-IN')} agreed</div>; })()}
         {/* Suggest-and-confirm: vendors chosen during costing that aren't on this event yet. */}
-        {(()=>{ const pending=costingSuggestion.filter(s=>!eventVendors.some(v=>String(v.vendor_id)===String(s.vendor_id))); if(!pending.length) return null; const tot=pending.reduce((x,s)=>x+(s.amount||0),0); return (
+        {(()=>{ if(['completed','cancelled'].includes(event.status?.toLowerCase())) return null; const pending=costingSuggestion.filter(s=>!eventVendors.some(v=>String(v.vendor_id)===String(s.vendor_id))); if(!pending.length) return null; const tot=pending.reduce((x,s)=>x+(s.amount||0),0); return (
           <div style={{background:'var(--blue-light)',border:'1px solid #BFDBFE',borderRadius:'var(--radius-md)',padding:'10px 12px',marginBottom:12}}>
             <div style={{fontSize:12.5,color:'var(--grey-700)',marginBottom:8}}>🔧 From this event's costing: <b>{pending.length}</b> vendor{pending.length>1?'s':''} chosen (₹{Math.round(tot).toLocaleString('en-IN')} cost). Add {pending.length>1?'them':'it'} to this event?</div>
             <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>{pending.map(s=>(<span key={s.vendor_id} style={{fontSize:11.5,background:'white',border:'1px solid #BFDBFE',borderRadius:20,padding:'2px 9px',color:'var(--grey-700)'}}>{s.name} · ₹{Math.round(s.amount||0).toLocaleString('en-IN')} · {s.item_count} item{s.item_count>1?'s':''}</span>))}</div>

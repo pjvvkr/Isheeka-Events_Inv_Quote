@@ -154,7 +154,7 @@ function diffRevItems(aItems, bItems) {
 }
 
 // Milestone S · S2b — Sourcing panel: send/track vendor RFQs from an approved client RFQ.
-function SourcingPanel({ clientRfq, itemCount, onNavigate }) {
+function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
   const [vrfqs, setVrfqs] = React.useState([]);
   const [vendorMap, setVendorMap] = React.useState({});
   const [summ, setSumm] = React.useState({});
@@ -233,8 +233,9 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>Sourcing — vendor RFQs</div>
           <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>Item list frozen · {itemCount} item{itemCount === 1 ? '' : 's'} · default markup {markup}%</div>
         </div>
-        <button className="btn sm primary" onClick={() => { setShowSend(true); setJustSent([]); }}>+ Send vendor RFQ</button>
+        {!dealClosed && <button className="btn sm primary" onClick={() => { setShowSend(true); setJustSent([]); }}>+ Send vendor RFQ</button>}
       </div>
+      {dealClosed && <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', padding: '8px 12px', marginTop: 10, fontSize: 12.5, color: 'var(--grey-600)' }}>🔒 The event for this RFQ is completed or cancelled — sourcing is read-only. You can still view bids and the costing summary.</div>}
 
       {justSent.length > 0 && (
         <div style={{ background: 'var(--green-light)', border: '1px solid #86EFAC', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginTop: 12 }}>
@@ -287,7 +288,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate }) {
             <span style={{ fontSize: 12, color: 'var(--grey-400)' }}>{respondedN} of {vrfqs.length} responded</span>
             {vrfqs.some((v) => v.status !== 'submitted') && <button className="btn sm" onClick={remindAll}>Remind all pending</button>}
           </div>
-          <button className="btn sm primary" disabled={respondedN === 0} onClick={() => onNavigate && onNavigate('rfqs', { costingRfqId: clientRfq.rfq_id, label: 'Costing & markup' })}>Open costing & markup →</button>
+          <button className="btn sm primary" disabled={respondedN === 0} onClick={() => onNavigate && onNavigate('rfqs', { costingRfqId: clientRfq.rfq_id, label: 'Costing & markup' })}>{dealClosed ? 'View costing (read-only) →' : 'Open costing & markup →'}</button>
         </div>
       )}
 
@@ -335,6 +336,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [viewRev, setViewRev] = React.useState(null);
   const [openAct, setOpenAct] = React.useState(0);
   const [dupe, setDupe] = React.useState(null);
+  const [eventClosed, setEventClosed] = React.useState(false);   // linked event completed/cancelled → sourcing/costing read-only
   const load = async () => { setLoading(true);
     const [{ data: rfq }, { data: its }, { data: act }] = await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id', rfqId).single(),
@@ -354,6 +356,15 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
       }
       if (cur !== rfq.quotation_id) { try { await supabase.from('rfqs').update({ quotation_id: cur, updated_at: new Date().toISOString() }).eq('rfq_id', rfqId); } catch (e) { /* noop */ } rfq.quotation_id = cur; }
     }
+    // Is the deal closed? (linked event completed/cancelled) → sourcing + costing go read-only.
+    let evClosed = false;
+    if (rfq && rfq.quotation_id) {
+      try {
+        const { data: q } = await supabase.from('quotations').select('event_id').eq('quotation_id', rfq.quotation_id).maybeSingle();
+        if (q && q.event_id) { const { data: ev } = await supabase.from('events').select('status').eq('event_id', q.event_id).maybeSingle(); evClosed = !!(ev && ['completed', 'cancelled'].includes((ev.status || '').toLowerCase())); }
+      } catch (e) { evClosed = false; }
+    }
+    setEventClosed(evClosed);
     setR(rfq || null); setItems(its || []); setActivity(act || []); setRevisions(revs); setLoading(false);
   };
   React.useEffect(() => { load(); }, [rfqId]);
@@ -445,7 +456,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
             {r.lead_id && <button className="btn sm" title="Open the source lead" onClick={() => onNavigate && onNavigate('leads', { leadId: r.lead_id, label: r.contact_name || 'Lead' })}>🎯 View lead →</button>}
             {r.client_id && <button className="btn sm" title="Open the client 360" onClick={() => onNavigate && onNavigate('clients', { clientId: r.client_id, label: r.contact_name || 'Client' })}>👤 View client →</button>}
             {r.quotation_id && <button className="btn sm" onClick={() => onNavigate && onNavigate('quotations', { quotId: r.quotation_id, label: 'Quote' })}>📄 Go to quote →</button>}
-            <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>
+            {!eventClosed && !['withdrawn', 'expired'].includes(r.status) && <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>}
           </div>
         </div>
         {subs.length > 0 && <div style={{ fontSize: 12, color: 'var(--grey-600)', marginTop: 10, background: 'var(--grey-50)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>{subs.map((s) => s.name + (s.planned_date ? (' ' + fmtDate(s.planned_date, { day: 'numeric', month: 'short' })) : '')).join(' · ')}</div>}
@@ -508,7 +519,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
       {/* Sourcing — vendor RFQs (Milestone S, S2b). Appears once the client RFQ is approved.
           Behind VITE_ENABLE_VENDOR_RFQ so the in-progress feature stays hidden in prod until the
           full loop (S1 migration + gateway + portal + costing) ships. On locally for testing. */}
-      {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ === 'true') && r.party_type !== 'vendor' && r.status === 'converted' && <SourcingPanel clientRfq={r} itemCount={items.length} onNavigate={onNavigate} />}
+      {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ === 'true') && r.party_type !== 'vendor' && r.status === 'converted' && <SourcingPanel clientRfq={r} itemCount={items.length} onNavigate={onNavigate} dealClosed={eventClosed} />}
 
       {/* Revisions */}
       {revisions.length > 0 && <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>

@@ -36,12 +36,22 @@ export async function loadCostingData(clientRfqId) {
   });
   const columns = submittedIds.map((id) => ({ vendor_id: id, name: (vendorMap[id] || {}).name || 'Vendor' }));
 
+  // Is the linked event completed/cancelled? → costing becomes view-only.
+  let eventClosed = false;
+  if (rfq && rfq.quotation_id) {
+    try {
+      const { data: q } = await supabase.from('quotations').select('event_id').eq('quotation_id', rfq.quotation_id).maybeSingle();
+      if (q && q.event_id) { const { data: ev } = await supabase.from('events').select('status').eq('event_id', q.event_id).maybeSingle(); eventClosed = !!(ev && ['completed', 'cancelled'].includes((ev.status || '').toLowerCase())); }
+    } catch (e) { eventClosed = false; }
+  }
+
   return {
     rfq: rfq || null,
     clientItems: clientItems || [],
     bidsByKey, columns,
     defaultMarkup: (settings && settings.default_markup_pct != null) ? Number(settings.default_markup_pct) : 30,
     draftQuoteId: rfq ? rfq.quotation_id : null,
+    eventClosed,
     vrfqs,
   };
 }
