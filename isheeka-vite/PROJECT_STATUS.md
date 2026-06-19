@@ -159,6 +159,37 @@ When an event ends, the RFQ chain and the screens that key off it now behave cor
 - Quotes/invoices/events already gated correctly on their own statuses (audited): quote `editable`/
   `histClosed`, invoice `locked`/`canRecordPay`, event Edit→Reopen — left as-is.
 
+## Attachment → items extraction · Phase 1 (client) — built 2026-06-18
+
+Lets a client attach a photo/PDF of their list instead of keying items by hand.
+
+- **Gateway:** new session-gated `extract_items` action in `rfq-gateway` — takes a base64
+  image/PDF, calls **Claude Haiku 4.5 vision** (`claude-haiku-4-5-20251001`), returns a clean
+  `[{description, quantity, sub_event}]` JSON for REVIEW (never auto-submits). Guards: session
+  required, type allow-list (jpg/png/webp/pdf), ~6 MB cap. Needs secret **ANTHROPIC_API_KEY**.
+- **Client portal (`rfq.html`):** "📎 Attach a list / 📷 Take a photo / 📋 Paste a message" on the
+  requirements step. `extract_items` also accepts pasted **text** (WhatsApp message / typed list) —
+  text-only call, even cheaper. A WhatsApp *screenshot* already works via the photo path. Images are
+  downscaled to 1280px JPEG client-side. Extracted items merge into the form (mapping/creating
+  sub-events), then the client edits + submits as normal.
+- **Vendor portal (`rfq.html`):** same 📎/📷/📋 controls on the cost form. New gateway action
+  **`extract_costs`** sends the vendor's photo/PDF/text **plus the fixed item list** to Haiku and
+  gets back per-item `{rfq_item_id, unit_cost, can_supply}` — it *matches prices to existing items*
+  (doesn't create items), pre-fills the cost fields for review, leaves unmatched items blank.
+- **Cost:** ~½¢ per upload on Haiku (text-only paste is cheaper still).
+
+### Phase 2 polish (built same pass)
+- **Multi-image:** both actions accept `files[]` (up to 6) — combined into one Claude call; the
+  "Attach" picker is `multiple` (handwritten lists / price sheets that span pages).
+- **Vendor match confidence:** `extract_costs` returns `confidence: high|low` per item. Low-confidence
+  matches render a red **"⚡ imported · check carefully"** badge + pink-tinted field; high-confidence
+  get the amber **"⚡ imported · review"**. Badge clears once the vendor edits/leaves the field.
+- **Client symmetry:** imported client items get a small **⚡ imported** tag so they stand out from
+  manually-added ones.
+- **To go live:** set `ANTHROPIC_API_KEY` secret + `supabase functions deploy rfq-gateway
+  --no-verify-jwt` + push `rfq.html` (Pages). Until the key+deploy land, the button degrades
+  gracefully ("photo reading isn't enabled yet — add items manually").
+
 ## Open / next up
 
 - **Custom domain** — e.g. `app.isheekaevents.com` (free on Netlify; needs a DNS record +

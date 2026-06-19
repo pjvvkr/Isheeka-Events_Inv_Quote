@@ -113,6 +113,9 @@ let subSuggest = [];      // configured sub-events for this event type (Settings
 let subSuggestType = '';  // the event type subSuggest was fetched for
 let evTypes = [];         // configured event types (Settings)
 let step = 1;
+let extractMsg = '';      // status line for the attachment → items extractor
+let showPaste = false;    // paste-a-message box visible?
+let pasteText = '';       // pasted WhatsApp message / list text
 let vitems = [];          // vendor mode: cost items [{rfq_item_id, description, quantity, unit_cost, can_supply, item_note}]
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
@@ -325,13 +328,96 @@ function renderSubDates(){
   $('subdates').querySelectorAll('input[data-i]').forEach(inp=>inp.onchange=()=>{ subEvents[+inp.getAttribute('data-i')].planned_date=inp.value||null; });
 }
 
+// ---------- attachment / photo → item list (Claude vision via gateway) ----------
+function attachErr(r){
+  const e=r&&r.error;
+  if(e==='extract_unavailable') return 'Photo reading isn’t enabled yet — please add items manually below.';
+  if(e==='too_large') return 'That file is too large — try a smaller photo.';
+  if(e==='bad_type') return 'Unsupported file — use a photo (JPG/PNG) or a PDF.';
+  if(e==='extract_unreadable') return 'Couldn’t read a clear list from that — try a sharper photo, or add items manually.';
+  if(e==='no_session') return 'Session expired — re-open your link and try again.';
+  return 'Couldn’t read that file — try again, or add items manually below.';
+}
+// Read a file into { media_type, data(base64) }. Images are downscaled to keep payload + cost low.
+function fileToPayload(file){
+  return new Promise((resolve,reject)=>{
+    if(file.type==='application/pdf'){
+      const fr=new FileReader();
+      fr.onload=()=>{ try{ resolve({media_type:'application/pdf',data:String(fr.result).split(',')[1]}); }catch(e){ reject(e); } };
+      fr.onerror=reject; fr.readAsDataURL(file); return;
+    }
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      const max=1280; let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+      if(Math.max(w,h)>max){ const s=max/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
+      try{ const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve({media_type:'image/jpeg',data:c.toDataURL('image/jpeg',0.85).split(',')[1]}); }
+      catch(e){ reject(e); }
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error('unreadable_image')); };
+    img.src=url;
+  });
+}
+// Merge the extracted items into `items`, mapping each to a chosen function (creating one if needed).
+function mergeExtracted(list){
+  let added=0;
+  (Array.isArray(list)?list:[]).forEach(ex=>{
+    const desc=String((ex&&ex.description)||'').trim(); if(!desc) return;
+    let seName=null;
+    if(ex.sub_event){
+      const m=subEvents.find(s=>s.name.toLowerCase().trim()===String(ex.sub_event).toLowerCase().trim());
+      if(m) seName=m.name; else { seName=String(ex.sub_event).trim().slice(0,80); subEvents.push({name:seName,planned_date:null}); }
+    }
+    if(!seName){ if(!subEvents.length) subEvents.push({name:'General',planned_date:null}); seName=subEvents[0].name; }
+    const qty=Math.max(1,Math.round(Number(ex.quantity)||1));
+    const dup=items.find(it=>it.sub_event_name===seName && it.description.toLowerCase()===desc.toLowerCase());
+    if(dup){ dup.quantity=Math.max(dup.quantity,qty); } else { items.push({sub_event_name:seName,description:desc,quantity:qty,source:'attachment'}); added++; }
+  });
+  return added;
+}
+async function extractFromText(){
+  const t=(pasteText||'').trim();
+  if(t.length<3){ extractMsg='Type or paste your list first.'; renderStep3(); return; }
+  const st=$('attachStatus'); if(st) st.textContent='Reading your message… ⏳';
+  try{
+    const r=await api('extract_items',{session,text:t});
+    if(r&&r.ok){ const n=mergeExtracted(r.items); showPaste=false; pasteText=''; extractMsg = n ? (n+' item'+(n>1?'s':'')+' added from your message — review & adjust below.') : 'No items found in that message — add them manually below.'; renderStep3(); save(true,true); }
+    else { extractMsg=attachErr(r); renderStep3(); }
+  }catch(e){ extractMsg='Couldn’t read that message — try again, or add items manually.'; renderStep3(); }
+}
+// Read up to 6 files into payloads (multi-page lists / several photos in one go).
+async function filesToPayloads(fileList){
+  const arr=Array.from(fileList||[]).slice(0,6); const out=[];
+  for(const f of arr){ try{ out.push(await fileToPayload(f)); }catch(e){} }
+  return out;
+}
+function pickAndExtract(camera){
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept = camera ? 'image/*' : 'image/*,application/pdf';
+  if(camera) inp.setAttribute('capture','environment'); else inp.multiple=true;
+  inp.onchange=async()=>{
+    const fl=inp.files; if(!fl||!fl.length) return;
+    const st=$('attachStatus'); if(st) st.textContent='Reading your list… ⏳';
+    try{
+      const files=await filesToPayloads(fl);
+      if(!files.length){ extractMsg='Couldn’t read that file — try a clear photo or a PDF.'; renderStep3(); return; }
+      const r=await api('extract_items',{session,files});
+      if(r&&r.ok){ const n=mergeExtracted(r.items); extractMsg = n ? (n+' item'+(n>1?'s':'')+' added from your list — review & adjust below.') : 'No items found in that file — add them manually below.'; renderStep3(); save(true,true); }
+      else { extractMsg=attachErr(r); renderStep3(); }
+    }catch(e){ extractMsg='Couldn’t read that file — try a clear photo or a PDF, or add items manually.'; renderStep3(); }
+  };
+  inp.click();
+}
+
 // ---------- step 3: requirements (items) grouped by chosen function ----------
 function itemRow(se, desc){
   const it=items.find(x=>x.sub_event_name===se && x.description===desc);
   const right = it
     ? '<span class="qty"><button data-act="dec" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">−</button><b>'+it.quantity+'</b><button data-act="inc" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">+</button><button class="rm" data-act="rm" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">✕</button></span>'
     : '<button class="addbtn" data-act="add" data-se="'+esc(se)+'" data-d="'+esc(desc)+'">+ Add</button>';
-  return '<div class="itemrow'+(it?'':' off')+'"><span class="idesc">'+esc(desc)+'</span>'+right+'</div>';
+  const mark = (it&&it.source==='attachment')?' <span style="font-size:9.5px;background:#FCEFD2;color:#9a6a12;border-radius:10px;padding:1px 7px;white-space:nowrap">⚡ imported</span>':'';
+  return '<div class="itemrow'+(it?'':' off')+'"><span class="idesc">'+esc(desc)+mark+'</span>'+right+'</div>';
 }
 function renderStep3(){
   if(!subEvents.length){
@@ -339,6 +425,13 @@ function renderStep3(){
     $('b3').onclick=()=>{step=2;renderForm();}; return;
   }
   let html='<h1>Your requirements</h1><div class="sub">Pick what you\'d like for each function. No prices — we\'ll quote these.</div>';
+  html+='<div style="background:#FBF7F0;border:1px solid #ecdfca;border-radius:12px;padding:12px 14px;margin:8px 0 14px">'
+    +'<div style="font-weight:600;font-size:14px;color:#7a1533">⚡ Have your list ready?</div>'
+    +'<div class="sub" style="margin:2px 0 8px">Attach a photo or PDF of your list and we\'ll fill these in for you — then adjust as needed.</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" id="attachFile" type="button">📎 Attach a list</button><button class="btn ghost" id="attachCam" type="button">📷 Take a photo</button><button class="btn ghost" id="attachPaste" type="button">📋 Paste a message</button></div>'
+    +(showPaste?('<div style="margin-top:10px"><textarea id="pasteBox" rows="4" style="width:100%;box-sizing:border-box;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:8px" placeholder="Paste your WhatsApp message or typed list here…">'+esc(pasteText)+'</textarea><div style="display:flex;gap:8px;margin-top:6px"><button class="btn primary" id="pasteGo" type="button">✨ Build from this</button><button class="btn ghost" id="pasteCancel" type="button">Cancel</button></div></div>'):'')
+    +'<div id="attachStatus" class="sub" style="margin-top:8px;color:#7a1533">'+esc(extractMsg)+'</div>'
+    +'</div>';
   subEvents.forEach(se=>{
     const matches=catalog.filter(c=>(c.sub_event_name||'').toLowerCase().trim()===se.name.toLowerCase().trim());
     const customs=items.filter(it=>it.sub_event_name===se.name && !matches.some(m=>m.description===it.description));
@@ -353,6 +446,12 @@ function renderStep3(){
   $('stepbody').innerHTML=html;
   $('back3').onclick=async()=>{ await save(true,true); step=2; renderForm(); };
   $('next3').onclick=async()=>{ await save(true,true); step=4; renderForm(); };
+  if($('attachFile')) $('attachFile').onclick=()=>pickAndExtract(false);
+  if($('attachCam')) $('attachCam').onclick=()=>pickAndExtract(true);
+  if($('attachPaste')) $('attachPaste').onclick=()=>{ showPaste=true; extractMsg=''; renderStep3(); if($('pasteBox')) $('pasteBox').focus(); };
+  if($('pasteCancel')) $('pasteCancel').onclick=()=>{ showPaste=false; pasteText=''; renderStep3(); };
+  if($('pasteBox')) $('pasteBox').oninput=(e)=>{ pasteText=e.target.value; };
+  if($('pasteGo')) $('pasteGo').onclick=()=>extractFromText();
   $('stepbody').querySelectorAll('[data-act]').forEach(b=>b.onclick=async()=>{
     const se=b.getAttribute('data-se'), d=b.getAttribute('data-d'), act=b.getAttribute('data-act');
     const idx=items.findIndex(x=>x.sub_event_name===se && x.description===d);
@@ -397,7 +496,7 @@ function renderStep4(){
     $('submitBtn').textContent='Submitting…';
     await save(true,true);
     const r=await api('submit_rfq',{session});
-    if(r.ok) renderSubmitted();
+    if(r.ok) renderSubmitted(true);
     else { $('submitBtn').textContent='Submit my requirements ✓'; $('serr').textContent = r._http===401?'Session expired — re-enter your PIN.':'Could not submit. Please try again.'; }
   };
 }
@@ -414,6 +513,45 @@ function renderSubmitted(editable){
 }
 
 // ---------- Milestone S — vendor cost-entry portal ----------
+// ---------- vendor: price list (photo/PDF/paste) → match to fixed items, fill costs ----------
+function applyExtractedCosts(costs){
+  let filled=0;
+  (Array.isArray(costs)?costs:[]).forEach(c=>{
+    const it=vitems.find(x=>String(x.rfq_item_id)===String(c.rfq_item_id));
+    if(!it) return;
+    if(c.can_supply===false){ it.can_supply=false; it.unit_cost=''; it.imported=true; it.lowConf=(c.confidence==='low'); filled++; }
+    else if(c.unit_cost!=null){ it.unit_cost=String(c.unit_cost); it.can_supply=true; it.imported=true; it.lowConf=(c.confidence==='low'); filled++; }
+  });
+  return filled;
+}
+async function pickAndExtractCosts(camera){
+  const inp=document.createElement('input');
+  inp.type='file'; inp.accept = camera ? 'image/*' : 'image/*,application/pdf';
+  if(camera) inp.setAttribute('capture','environment'); else inp.multiple=true;
+  inp.onchange=async()=>{
+    const fl=inp.files; if(!fl||!fl.length) return;
+    const st=$('vattachStatus'); if(st) st.textContent='Reading your price list… ⏳';
+    try{
+      const files=await filesToPayloads(fl);
+      if(!files.length){ extractMsg='Couldn’t read that file — try a clear photo or PDF.'; renderVendorForm(); return; }
+      const r=await api('extract_costs',{session,files});
+      if(r&&r.ok){ const n=applyExtractedCosts(r.costs); extractMsg = n ? (n+' price'+(n>1?'s':'')+' filled in — please review each before submitting.') : 'Couldn’t match any prices — enter them manually below.'; renderVendorForm(); vsaveDraft(true); }
+      else { extractMsg=attachErr(r); renderVendorForm(); }
+    }catch(e){ extractMsg='Couldn’t read that file — try a clear photo or PDF, or enter prices manually.'; renderVendorForm(); }
+  };
+  inp.click();
+}
+async function extractCostsFromText(){
+  const t=(pasteText||'').trim();
+  if(t.length<3){ extractMsg='Paste your price list first.'; renderVendorForm(); return; }
+  const st=$('vattachStatus'); if(st) st.textContent='Matching your prices… ⏳';
+  try{
+    const r=await api('extract_costs',{session,text:t});
+    if(r&&r.ok){ const n=applyExtractedCosts(r.costs); showPaste=false; pasteText=''; extractMsg = n ? (n+' price'+(n>1?'s':'')+' filled in — please review before submitting.') : 'Couldn’t match any prices — enter them manually below.'; renderVendorForm(); vsaveDraft(true); }
+    else { extractMsg=attachErr(r); renderVendorForm(); }
+  }catch(e){ extractMsg='Couldn’t read that — try again, or enter prices manually.'; renderVendorForm(); }
+}
+
 function renderVendorPortal(r){
   vitems = (Array.isArray(r.items)? r.items : []).map(it=>({
     rfq_item_id: it.rfq_item_id,
@@ -438,11 +576,18 @@ function renderVendorForm(){
   let html = '<div class="pad">'
     + '<h1>Your pricing</h1>'
     + '<div class="sub">'+esc(evbits)+'. Enter your unit cost for each item, or mark any you can’t supply. You can save and resume; you can revise after submitting until pricing is finalised.</div>';
+  html += '<div style="background:#FBF7F0;border:1px solid #ecdfca;border-radius:12px;padding:12px 14px;margin:8px 0 14px">'
+    + '<div style="font-weight:600;font-size:14px;color:#7a1533">⚡ Have a price list ready?</div>'
+    + '<div class="sub" style="margin:2px 0 8px">Attach a photo/PDF or paste your quote — we’ll match the prices to the items below for you to review.</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost" id="vattachFile" type="button">📎 Attach</button><button class="btn ghost" id="vattachCam" type="button">📷 Photo</button><button class="btn ghost" id="vattachPaste" type="button">📋 Paste</button></div>'
+    + (showPaste?('<div style="margin-top:10px"><textarea id="vpasteBox" rows="4" style="width:100%;box-sizing:border-box;font-size:14px;padding:8px;border:1px solid #ddd;border-radius:8px" placeholder="Paste your price list / quote here…">'+esc(pasteText)+'</textarea><div style="display:flex;gap:8px;margin-top:6px"><button class="btn primary" id="vpasteGo" type="button">✨ Match prices</button><button class="btn ghost" id="vpasteCancel" type="button">Cancel</button></div></div>'):'')
+    + '<div id="vattachStatus" class="sub" style="margin-top:8px;color:#7a1533">'+esc(extractMsg)+'</div>'
+    + '</div>';
   vitems.forEach((it,i)=>{
     html += '<div class="itemrow'+(it.can_supply?'':' off')+'" style="flex-direction:column;align-items:stretch;gap:6px">'
-      + '<div style="display:flex;justify-content:space-between;gap:8px"><span class="idesc">'+esc(it.description)+'</span><span style="color:var(--muted);white-space:nowrap;font-size:12px">×'+it.quantity+'</span></div>'
+      + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="idesc">'+esc(it.description)+(it.imported?(it.lowConf?' <span style="font-size:9.5px;background:#FCE3E3;color:#a32d2d;border-radius:10px;padding:1px 7px;white-space:nowrap">⚡ imported · check carefully</span>':' <span style="font-size:9.5px;background:#FCEFD2;color:#9a6a12;border-radius:10px;padding:1px 7px;white-space:nowrap">⚡ imported · review</span>'):'')+'</span><span style="color:var(--muted);white-space:nowrap;font-size:12px">×'+it.quantity+'</span></div>'
       + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
-        + '<div style="display:flex;align-items:center;gap:4px"><span style="font-size:13px">₹</span><input data-vi="'+i+'" data-k="unit_cost" inputmode="numeric" style="width:120px" value="'+esc(it.unit_cost)+'"'+(it.can_supply?'':' disabled')+'></div>'
+        + '<div style="display:flex;align-items:center;gap:4px"><span style="font-size:13px">₹</span><input data-vi="'+i+'" data-k="unit_cost" inputmode="numeric" style="width:120px'+(it.imported?(it.lowConf?';border:1px solid #e0a0a0;background:#FDF0F0':';border:1px solid #cdbd9f;background:#FCF7EC'):'')+'" value="'+esc(it.unit_cost)+'"'+(it.can_supply?'':' disabled')+'></div>'
         + '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin:0"><input type="checkbox" data-vi="'+i+'" data-k="can_supply" style="width:auto" '+(it.can_supply?'':'checked')+'> Can’t supply</label>'
       + '</div>'
       + '<input data-vi="'+i+'" data-k="item_note" placeholder="Note (optional)" value="'+esc(it.item_note)+'" style="font-size:12px">'
@@ -460,10 +605,16 @@ function renderVendorForm(){
       inp.onchange=()=>{ vitems[i].can_supply = !inp.checked; renderVendorForm(); vsaveDraft(true); };
     } else {
       inp.oninput=()=>{ vitems[i][k]= inp.value; if(k==='unit_cost' && $('vtot')) $('vtot').textContent='₹'+vendorTotal().toLocaleString('en-IN'); };
-      inp.onblur=()=>vsaveDraft(true);
+      inp.onblur=()=>{ if(k==='unit_cost' && vitems[i].imported){ vitems[i].imported=false; renderVendorForm(); } vsaveDraft(true); };
     }
   });
   $('v_notes').onblur=()=>vsaveDraft(true);
+  if($('vattachFile')) $('vattachFile').onclick=()=>pickAndExtractCosts(false);
+  if($('vattachCam')) $('vattachCam').onclick=()=>pickAndExtractCosts(true);
+  if($('vattachPaste')) $('vattachPaste').onclick=()=>{ showPaste=true; extractMsg=''; renderVendorForm(); if($('vpasteBox')) $('vpasteBox').focus(); };
+  if($('vpasteCancel')) $('vpasteCancel').onclick=()=>{ showPaste=false; pasteText=''; renderVendorForm(); };
+  if($('vpasteBox')) $('vpasteBox').oninput=(e)=>{ pasteText=e.target.value; };
+  if($('vpasteGo')) $('vpasteGo').onclick=()=>extractCostsFromText();
   $('vsave').onclick=async()=>{ await vsaveDraft(false); };
   $('vsubmit').onclick=async()=>{
     $('vsubmit').textContent='Submitting…';

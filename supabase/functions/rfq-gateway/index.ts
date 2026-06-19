@@ -11,6 +11,7 @@
 //
 // Auto-injected env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 // Secrets to set:    SESSION_SECRET (required), RESEND_API_KEY + EMAIL_FROM (email),
+//                    ANTHROPIC_API_KEY (for extract_items: attachment/photo → item list),
 //                    optional: LINK_TTL_DAYS=21, OTP_TTL_MIN=10, MAX_ATTEMPTS=5,
 //                    ALLOWED_ORIGIN (CORS; default "*").
 // Spec: docs/rfq-portal-spec.md §F.
@@ -26,6 +27,7 @@ const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
 const LINK_TTL_DAYS = parseInt(Deno.env.get("LINK_TTL_DAYS") ?? "21", 10);
 const OTP_TTL_MIN = parseInt(Deno.env.get("OTP_TTL_MIN") ?? "10", 10);
 const MAX_ATTEMPTS = parseInt(Deno.env.get("MAX_ATTEMPTS") ?? "5", 10);
+const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";   // for extract_items (attachment → item list)
 const SESSION_TTL_MIN = 120;
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
@@ -40,6 +42,26 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 }
 const enc = new TextEncoder();
+
+// extract_* helpers: build a Claude content block per file, and validate an uploaded set.
+function fileBlock(f: any) {
+  return f.media_type === "application/pdf"
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: f.data } }
+    : { type: "image", source: { type: "base64", media_type: f.media_type, data: f.data } };
+}
+function validateFiles(files: any[]): string | null {
+  if (files.length > 6) return "too_many";
+  const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+  for (const f of files) {
+    if (!f || !f.data || !f.media_type) return "no_file";
+    if (!allowed.includes(f.media_type)) return "bad_type";
+    if (f.data.length > 8_000_000) return "too_large";
+  }
+  return null;
+}
+function fileErrStatus(code: string): number {
+  return code === "bad_type" ? 415 : (code === "too_large" || code === "too_many") ? 413 : 400;
+}
 
 async function sha256hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", enc.encode(s));
@@ -323,6 +345,126 @@ Deno.serve(async (req) => {
         await db.from("rfqs").update({ status: "submitted", revision_number: revNo, client_submitted_at: new Date().toISOString() }).eq("rfq_id", s.rfq_id);
         await logActivity(s.rfq_id, who, "submitted", "Revision " + revNo);
         return json({ ok: true, revision_number: revNo });
+      }
+
+      // ── attachment → item list (Claude vision). Session-gated; returns items for REVIEW. ──
+      case "extract_items": {
+        const s = await readSession(body.session);
+        if (!s) return json({ error: "no_session" }, 401);
+        if (!ANTHROPIC_API_KEY) return json({ error: "extract_unavailable" }, 503);
+        const text = (typeof body.text === "string") ? body.text.trim() : "";   // pasted message / list — optional
+        const files = Array.isArray(body.files) ? body.files : (body.file ? [body.file] : []);  // one or more photos/PDFs
+        if (!text && !files.length) return json({ error: "no_input" }, 400);
+        if (text && text.length > 20000) return json({ error: "too_large" }, 413);
+        if (!text) { const v = validateFiles(files); if (v) return json({ error: v }, fileErrStatus(v)); }
+
+        const prompt =
+          "You are reading a customer's event-requirements list (it may be typed, printed, or handwritten, " +
+          "possibly a phone photo). Extract the requested items. Return ONLY a JSON array — no prose, no code fences — " +
+          "of objects: {\"description\": string, \"quantity\": number, \"sub_event\": string|null}. " +
+          "description = the item/service requested. quantity = the number requested (use 1 if not stated). " +
+          "sub_event = the function/section it belongs to if the list is grouped (e.g. \"Mehendi\", \"Reception\"), else null. " +
+          "Ignore prices, money, totals, headings, page numbers and contact details. If you cannot read any items, return [].";
+
+        const content: any[] = text
+          ? [{ type: "text", text: prompt + "\n\nHere is the message / list to read:\n\n" + text }]
+          : [...files.map(fileBlock), { type: "text", text: prompt }];
+
+        let aiText = "";
+        try {
+          const resp = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+            body: JSON.stringify({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 1500,
+              messages: [{ role: "user", content }],
+            }),
+          });
+          if (!resp.ok) { const t = await resp.text(); console.error("[extract_items] anthropic", resp.status, t); return json({ error: "extract_failed", status: resp.status }, 502); }
+          const data = await resp.json();
+          aiText = ((data?.content || []) as any[]).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
+        } catch (e) { console.error("[extract_items] fetch", e); return json({ error: "extract_failed" }, 502); }
+
+        let items: any[] = [];
+        try {
+          let t = aiText.replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+          const a = t.indexOf("["), b = t.lastIndexOf("]");
+          if (a >= 0 && b > a) t = t.slice(a, b + 1);
+          const parsed = JSON.parse(t);
+          if (Array.isArray(parsed)) items = parsed;
+        } catch (e) { console.error("[extract_items] parse", aiText); return json({ error: "extract_unreadable" }, 422); }
+
+        const clean = items.map((it: any) => ({
+          description: String(it.description ?? it.item ?? "").trim().slice(0, 300),
+          quantity: Math.max(1, Math.round(Number(it.quantity) || 1)),
+          sub_event: it.sub_event ? String(it.sub_event).trim().slice(0, 80) : null,
+        })).filter((it: any) => it.description);
+
+        return json({ ok: true, items: clean });
+      }
+
+      // ── vendor: price list (photo/PDF/text) → match to the fixed items, fill costs (for REVIEW) ──
+      case "extract_costs": {
+        const s = await readSession(body.session);
+        if (!s) return json({ error: "no_session" }, 401);
+        if (!ANTHROPIC_API_KEY) return json({ error: "extract_unavailable" }, 503);
+        const text = (typeof body.text === "string") ? body.text.trim() : "";
+        const files = Array.isArray(body.files) ? body.files : (body.file ? [body.file] : []);
+        if (!text && !files.length) return json({ error: "no_input" }, 400);
+        if (text && text.length > 20000) return json({ error: "too_large" }, 413);
+        if (!text) { const v = validateFiles(files); if (v) return json({ error: v }, fileErrStatus(v)); }
+        // the fixed items the vendor is pricing
+        const { data: its } = await db.from("rfq_items").select("rfq_item_id,description,quantity").eq("rfq_id", s.rfq_id).eq("is_deleted", false).order("sort_order");
+        const itemRows = its || [];
+        if (!itemRows.length) return json({ error: "no_items" }, 400);
+        const itemList = itemRows.map((it) => ({ id: it.rfq_item_id, description: it.description, quantity: it.quantity }));
+
+        const prompt =
+          "You are matching a vendor's price list to a FIXED list of items the customer needs. " +
+          "ITEMS (JSON): " + JSON.stringify(itemList) + ". " +
+          "Read the vendor's price document/message and, for each item id above, find the vendor's matching PER-UNIT price. " +
+          "Return ONLY a JSON array (no prose, no code fences) of objects: " +
+          "{\"rfq_item_id\": string, \"unit_cost\": number|null, \"can_supply\": boolean, \"confidence\": \"high\"|\"low\"}. " +
+          "unit_cost = per-unit price as a plain number (no currency symbols); if only a line total is given, divide by that item's quantity. " +
+          "confidence = \"high\" when the vendor's line clearly corresponds to the item; \"low\" when the match is a guess or the wording differs a lot. " +
+          "If the vendor marks an item unavailable, set can_supply=false and unit_cost=null. " +
+          "If you cannot match an item at all, set unit_cost=null, can_supply=true, confidence=\"low\". " +
+          "Use ONLY the rfq_item_id values provided — never invent items.";
+
+        const content2: any[] = text
+          ? [{ type: "text", text: prompt + "\n\nVendor's price list:\n\n" + text }]
+          : [...files.map(fileBlock), { type: "text", text: prompt }];
+
+        let aiText2 = "";
+        try {
+          const resp = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1500, messages: [{ role: "user", content: content2 }] }),
+          });
+          if (!resp.ok) { const t = await resp.text(); console.error("[extract_costs] anthropic", resp.status, t); return json({ error: "extract_failed", status: resp.status }, 502); }
+          const data = await resp.json();
+          aiText2 = ((data?.content || []) as any[]).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
+        } catch (e) { console.error("[extract_costs] fetch", e); return json({ error: "extract_failed" }, 502); }
+
+        let parsed2: any[] = [];
+        try {
+          let t = aiText2.replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+          const a = t.indexOf("["), b = t.lastIndexOf("]");
+          if (a >= 0 && b > a) t = t.slice(a, b + 1);
+          const p = JSON.parse(t);
+          if (Array.isArray(p)) parsed2 = p;
+        } catch (e) { console.error("[extract_costs] parse", aiText2); return json({ error: "extract_unreadable" }, 422); }
+
+        const valid = new Set(itemRows.map((it) => String(it.rfq_item_id)));
+        const costs = parsed2.filter((c: any) => c && valid.has(String(c.rfq_item_id))).map((c: any) => ({
+          rfq_item_id: String(c.rfq_item_id),
+          unit_cost: (c.unit_cost == null || c.unit_cost === "") ? null : Math.max(0, Math.round(Number(c.unit_cost) || 0)),
+          can_supply: c.can_supply !== false,
+          confidence: (c.confidence === "low") ? "low" : "high",
+        }));
+        return json({ ok: true, costs, matched: costs.filter((c) => c.unit_cost != null).length, total: itemRows.length });
       }
 
       default:
