@@ -31,18 +31,44 @@ export async function filesToPayloads(fileList) {
   return out;
 }
 
-// Call the authenticated extract function. opts: { files?: [...], text?: string }
-export async function extractItems(opts) {
+// One extract call (one chunk).
+async function extractOne(body) {
   try {
-    const { data, error } = await supabase.functions.invoke('extract', { body: opts });
+    const { data, error } = await supabase.functions.invoke('extract', { body });
     if (error) {
-      // functions.invoke surfaces non-2xx as an error; try to read the JSON body for our code
       let code = '';
       try { const c = await error.context?.json?.(); code = c?.error || ''; } catch (e) { /* noop */ }
       return { ok: false, error: code || error.message || 'extract_failed' };
     }
     return data || { ok: false, error: 'no_response' };
   } catch (e) { return { ok: false, error: (e && e.message) || 'extract_failed' }; }
+}
+
+const CHUNK_LINES = 80; // split big pastes so no single call hits the output-token ceiling
+function chunkText(text) {
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length <= CHUNK_LINES) return [String(text)];
+  const out = []; for (let i = 0; i < lines.length; i += CHUNK_LINES) out.push(lines.slice(i, i + CHUNK_LINES).join('\n'));
+  return out;
+}
+
+// Chunks large inputs (text by lines, files one-per-call), extracts in parallel, merges + de-dupes.
+// opts: { files?: [...], file?, text?: string }
+export async function extractItems(opts) {
+  opts = opts || {};
+  const calls = [];
+  if (opts.text && String(opts.text).trim()) chunkText(opts.text).forEach((c) => calls.push({ text: c }));
+  const files = opts.files || (opts.file ? [opts.file] : []);
+  (files || []).forEach((f) => calls.push({ files: [f] }));
+  if (!calls.length) return { ok: false, error: 'no_input' };
+  if (calls.length === 1) return await extractOne(calls[0]);
+
+  const results = await Promise.all(calls.map(extractOne));
+  const ok = results.filter((r) => r && r.ok);
+  if (!ok.length) return results.find((r) => r && r.error) || { ok: false, error: 'extract_failed' };
+  const seen = new Set(); const items = [];
+  ok.flatMap((r) => r.items || []).forEach((it) => { const k = (it.description || '').toLowerCase() + '|' + (it.sub_event || ''); if (!seen.has(k)) { seen.add(k); items.push(it); } });
+  return { ok: true, items, partial: ok.length < results.length };
 }
 
 export function extractErrMsg(r) {

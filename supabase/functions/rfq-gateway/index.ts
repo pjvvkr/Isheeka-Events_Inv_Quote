@@ -380,7 +380,7 @@ Deno.serve(async (req) => {
             headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
             body: JSON.stringify({
               model: "claude-haiku-4-5-20251001",
-              max_tokens: 1500,
+              max_tokens: 8000,
               messages: [{ role: "user", content }],
             }),
           });
@@ -430,11 +430,12 @@ Deno.serve(async (req) => {
           "The vendor's list may be in English, Telugu, Hindi or a mix and may be handwritten — read it faithfully. " +
           "Return ONLY a JSON array (no prose, no code fences) of objects: " +
           "{\"rfq_item_id\": string, \"unit_cost\": number|null, \"can_supply\": boolean, \"confidence\": \"high\"|\"low\", \"source\": string}. " +
+          "IMPORTANT: include an entry ONLY for items you can actually match to something in the vendor's list (or that the vendor explicitly marks unavailable). " +
+          "OMIT every item you can't match — do not return null-price rows for unmatched items. Returning 2-6 matched items is normal. " +
           "unit_cost = per-unit price as a plain number (no currency symbols); if only a line total is given, divide by that item's quantity. " +
-          "source = a short snippet of the vendor's own line that this price came from (e.g. \"Stage decor - 45k\"), or \"\" if none. " +
-          "confidence = \"high\" when the vendor's line clearly corresponds to the item; \"low\" when the match is a guess or the wording differs a lot. " +
-          "If the vendor marks an item unavailable, set can_supply=false and unit_cost=null. " +
-          "If you cannot match an item at all, set unit_cost=null, can_supply=true, confidence=\"low\". " +
+          "source = a short snippet of the vendor's own line the price came from (e.g. \"Stage decor - 45k\"). " +
+          "confidence = \"high\" when the vendor's line clearly corresponds to the item; \"low\" when the wording differs a lot. " +
+          "If the vendor marks an item unavailable, include it with can_supply=false and unit_cost=null. " +
           "Use ONLY the rfq_item_id values provided — never invent items.";
 
         const content2: any[] = text
@@ -446,7 +447,7 @@ Deno.serve(async (req) => {
           const resp = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1500, messages: [{ role: "user", content: content2 }] }),
+            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 8000, messages: [{ role: "user", content: content2 }] }),
           });
           if (!resp.ok) { const t = await resp.text(); console.error("[extract_costs] anthropic", resp.status, t); return json({ error: "extract_failed", status: resp.status }, 502); }
           const data = await resp.json();

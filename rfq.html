@@ -379,12 +379,30 @@ function mergeExtracted(list){
   });
   return added;
 }
+// Chunk large inputs (text by ~80 lines, files one-per-call), extract in parallel, merge + de-dupe.
+async function extractItemsChunked(opts){
+  const calls=[];
+  if(opts.text && opts.text.trim()){
+    const lines=opts.text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    if(lines.length<=80) calls.push({text:opts.text});
+    else { for(let i=0;i<lines.length;i+=80) calls.push({text:lines.slice(i,i+80).join('\n')}); }
+  }
+  if(opts.files && opts.files.length){ opts.files.forEach(f=>calls.push({files:[f]})); }
+  if(!calls.length) return {ok:false,error:'no_input'};
+  if(calls.length===1) return await api('extract_items',Object.assign({session},calls[0]));
+  const results=await Promise.all(calls.map(c=>api('extract_items',Object.assign({session},c))));
+  const ok=results.filter(r=>r&&r.ok);
+  if(!ok.length) return results.find(r=>r&&r.error)||{ok:false,error:'extract_failed'};
+  const seen={},items=[];
+  ok.forEach(r=>(r.items||[]).forEach(it=>{ const k=(it.description||'').toLowerCase()+'|'+(it.sub_event||''); if(!seen[k]){ seen[k]=1; items.push(it); } }));
+  return {ok:true,items};
+}
 async function extractFromText(){
   const t=(pasteText||'').trim();
   if(t.length<3){ extractMsg='Type or paste your list first.'; renderStep3(); return; }
   const st=$('attachStatus'); if(st) st.textContent='Reading your message… ⏳';
   try{
-    const r=await api('extract_items',{session,text:t});
+    const r=await extractItemsChunked({text:t});
     if(r&&r.ok){ showPaste=false; pasteText=''; if((r.items||[]).length){ pendingItems=r.items; extractMsg=''; } else { extractMsg='No items found in that message — add them manually below.'; } renderStep3(); }
     else { extractMsg=attachErr(r); renderStep3(); }
   }catch(e){ extractMsg='Couldn’t read that message — try again, or add items manually.'; renderStep3(); }
@@ -405,7 +423,7 @@ function pickAndExtract(camera){
     try{
       const files=await filesToPayloads(fl);
       if(!files.length){ extractMsg='Couldn’t read that file — try a clear photo or a PDF.'; renderStep3(); return; }
-      const r=await api('extract_items',{session,files});
+      const r=await extractItemsChunked({files});
       if(r&&r.ok){ if((r.items||[]).length){ pendingItems=r.items; extractMsg=''; } else { extractMsg='No items found in that file — add them manually below.'; } renderStep3(); }
       else { extractMsg=attachErr(r); renderStep3(); }
     }catch(e){ extractMsg='Couldn’t read that file — try a clear photo or a PDF, or add items manually.'; renderStep3(); }
