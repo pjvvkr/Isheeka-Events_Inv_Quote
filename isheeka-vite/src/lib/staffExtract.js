@@ -70,6 +70,30 @@ export async function extractItems(opts) {
   return { ok: true, items, partial: ok.length < results.length };
 }
 
+// Owner-expense smart capture: one receipt/bill/note (photo, PDF, or pasted text) → one
+// expense object {amount, date, category, merchant, description}. Single call (one receipt).
+export async function extractExpense(opts) {
+  opts = opts || {};
+  const files = opts.files || (opts.file ? [opts.file] : []);
+  const body = { action: 'expense' };
+  if (opts.text && String(opts.text).trim()) body.text = String(opts.text);
+  if (files.length) body.files = files;
+  if (!body.text && !body.files) return { ok: false, error: 'no_input' };
+  return await extractOne(body);
+}
+
+// Email the owners that an owner-funded expense was recorded (server builds the message).
+// expense = { amount, description, category, date, paid_by_name }
+export async function notifyOwnerExpense(recipients, expense) {
+  const to = (recipients || []).filter((e) => e && /\S+@\S+\.\S+/.test(String(e)));
+  if (!to.length) return { ok: false, error: 'no_recipients' };
+  try {
+    const { data, error } = await supabase.functions.invoke('extract', { body: { action: 'notify', to, expense } });
+    if (error) return { ok: false, error: error.message || 'notify_failed' };
+    return data || { ok: false, error: 'no_response' };
+  } catch (e) { return { ok: false, error: (e && e.message) || 'notify_failed' }; }
+}
+
 export function extractErrMsg(r) {
   const e = r && r.error;
   if (e === 'extract_unavailable') return 'Extraction isn’t enabled yet (no AI key).';

@@ -23,6 +23,7 @@ import { LeadsModule } from './modules/LeadsModule.jsx';
 import { QuotationsModule } from './modules/QuotationsModule.jsx';
 import { EventsModule } from './modules/EventsModule.jsx';
 import { UsersModule } from './modules/UsersModule.jsx';
+import { OwnerAccountModule } from './modules/OwnerAccountModule.jsx';
 
 const pageTitles = { dashboard: 'Dashboard', leads: 'Leads', clients: 'Clients', events: 'Events', quotations: 'Quotations', invoices: 'Invoices', vendors: 'Vendors', 'vendor-rfqs': 'Vendor RFQ', 'vendor-payments': 'Vendor Payments', expenses: 'Expenses', reports: 'Reports', users: 'Users', settings: 'Settings', 'owner-account': 'Owner Account' };
 
@@ -90,8 +91,10 @@ export default function Shell() {
   useEffect(() => {
     if (!user) return;
     try {
-      const id = new URLSearchParams(window.location.search).get('rfq');
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('rfq');
       if (id) { navigate('rfqs', { rfqId: id, label: 'RFQ' }); window.history.replaceState({}, '', window.location.pathname); }
+      else if (params.get('go') === 'owner') { resetTo('owner-account'); window.history.replaceState({}, '', window.location.pathname); }
     } catch (e) { /* noop */ }
   }, [user]);
 
@@ -171,6 +174,7 @@ export default function Shell() {
                         : activePage === 'invoices' ? <InvoicesModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                           : activePage === 'settings' ? <SettingsModule />
                             : activePage === 'users' ? <UsersModule />
+                            : activePage === 'owner-account' ? <OwnerAccountModule onNavigate={navigate} />
                               : <ComingSoon page={activePage} />}
         </div>
       </main>

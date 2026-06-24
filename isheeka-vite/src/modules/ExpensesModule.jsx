@@ -5,6 +5,9 @@ import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid } from '../lib/session.js';
 import { todayLocalStr, fmtDate, EXPENSE_CAT_LABEL } from '../lib/format.js';
 import { EXPENSE_CATS } from '../lib/constants.js';
+import { waLink } from '../lib/share.js';
+import { loadOwners } from '../lib/ownerAccount.js';
+import { filesToPayloads, extractExpense, notifyOwnerExpense, extractErrMsg } from '../lib/staffExtract.js';
 
 export function ExpensesModule({ onNavigate }) {
   const [rows, setRows] = React.useState([]);
@@ -18,9 +21,13 @@ export function ExpensesModule({ onNavigate }) {
   const [editRow, setEditRow] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
   const [file, setFile] = React.useState(null);
-  const emptyForm = { description: '', amount: '', date: todayLocalStr(), category: 'miscellaneous', sub_category: '', event_id: '', payment_mode: 'upi', reference_number: '', is_recurring: false, recurring_frequency: 'monthly', notes: '' };
+  const [owners, setOwners] = React.useState([]);
+  const [cap, setCap] = React.useState({ busy: false, paste: false, text: '' });
+  const emptyForm = { description: '', amount: '', date: todayLocalStr(), category: 'miscellaneous', sub_category: '', event_id: '', payment_mode: 'upi', reference_number: '', is_recurring: false, recurring_frequency: 'monthly', notes: '', paid_by: '', notify_wa: true, notify_email: true };
   const [form, setForm] = React.useState(emptyForm);
   const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  React.useEffect(() => { loadOwners().then((o) => setOwners(o || [])).catch(() => {}); }, []);
+  const ownerMap = {}; owners.forEach((o) => { ownerMap[o.user_id] = o; });
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -49,7 +56,22 @@ export function ExpensesModule({ onNavigate }) {
   });
 
   const openNew = () => { setEditRow(null); setForm({ ...emptyForm }); setFile(null); setShowForm(true); };
-  const openEdit = (r) => { setEditRow(r); setForm({ description: r.description || '', amount: r.amount || '', date: r.date || emptyForm.date, category: r.category || 'miscellaneous', sub_category: r.sub_category || '', event_id: r.event_id || '', payment_mode: r.payment_mode || 'upi', reference_number: r.reference_number || '', is_recurring: !!r.is_recurring, recurring_frequency: r.recurring_frequency || 'monthly', notes: r.notes || '' }); setFile(null); setShowForm(true); };
+  const openEdit = (r) => { setEditRow(r); setForm({ description: r.description || '', amount: r.amount || '', date: r.date || emptyForm.date, category: r.category || 'miscellaneous', sub_category: r.sub_category || '', event_id: r.event_id || '', payment_mode: r.payment_mode || 'upi', reference_number: r.reference_number || '', is_recurring: !!r.is_recurring, recurring_frequency: r.recurring_frequency || 'monthly', notes: r.notes || '', paid_by: r.paid_by || '', notify_wa: false, notify_email: false }); setFile(null); setCap({ busy: false, paste: false, text: '' }); setShowForm(true); };
+
+  // Smart capture: receipt photo / file / pasted note → AI fills the form.
+  const runCapture = async (input) => {
+    setCap((c) => ({ ...c, busy: true }));
+    let r;
+    try {
+      if (typeof input === 'string') r = await extractExpense({ text: input });
+      else { const payloads = await filesToPayloads(input); r = await extractExpense({ files: payloads }); }
+    } catch (e) { r = { ok: false, error: 'extract_failed' }; }
+    setCap({ busy: false, paste: false, text: '' });
+    if (!r || !r.ok || !r.expense) { notify(extractErrMsg(r || {}), 'error'); return; }
+    const ex = r.expense;
+    setForm((f) => ({ ...f, description: ex.description || ex.merchant || f.description, amount: ex.amount != null ? String(ex.amount) : f.amount, date: ex.date || f.date, category: ex.category || f.category }));
+    notify('Read the receipt — please review the details.', 'success');
+  };
   const save = async () => {
     if (!form.description.trim()) { notify('Description is required.', 'error'); return; }
     const amt = parseFloat(form.amount) || 0; if (amt <= 0) { notify('Enter a valid amount.', 'error'); return; }
@@ -57,11 +79,18 @@ export function ExpensesModule({ onNavigate }) {
     setSaving(true);
     let receiptUrl = editRow ? editRow.receipt_url : null;
     if (file) { try { const ext = ((file.name || '').split('.').pop() || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'png'; const path = 'receipts/expenses/exp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext; const { error: ue } = await supabase.storage.from('quotations').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true }); if (!ue) { const { data: pu } = supabase.storage.from('quotations').getPublicUrl(path); receiptUrl = (pu && pu.publicUrl) || receiptUrl; } else notify("Couldn't upload the receipt — saving without it.", 'error'); } catch (e) { notify('Receipt upload failed — saving without it.', 'error'); } }
-    const payload = { description: form.description.trim(), amount: amt, date: form.date, category: form.category, sub_category: form.sub_category || null, event_id: form.event_id || null, payment_mode: form.payment_mode || null, reference_number: form.reference_number || null, is_recurring: !!form.is_recurring, recurring_frequency: form.is_recurring ? form.recurring_frequency : null, notes: form.notes || null, receipt_url: receiptUrl, updated_at: new Date().toISOString() };
+    const payload = { description: form.description.trim(), amount: amt, date: form.date, category: form.category, sub_category: form.sub_category || null, event_id: form.event_id || null, payment_mode: form.payment_mode || null, reference_number: form.reference_number || null, is_recurring: !!form.is_recurring, recurring_frequency: form.is_recurring ? form.recurring_frequency : null, notes: form.notes || null, paid_by: form.paid_by || null, receipt_url: receiptUrl, updated_at: new Date().toISOString() };
     let err;
     if (editRow) { const { error } = await runDb(supabase.from('expenses').update(payload).eq('expense_id', editRow.expense_id), 'update expense'); err = error; }
     else { payload.created_at = new Date().toISOString(); payload.is_deleted = false; payload.created_by = await _currentUid(); const { error } = await runDb(supabase.from('expenses').insert(payload), 'record expense'); err = error; }
     setSaving(false); if (err) return;
+    // Owner-funded expense → alert the owners (new entries only).
+    if (!editRow && form.paid_by && ownerMap[form.paid_by]) {
+      const payer = ownerMap[form.paid_by];
+      const summary = { amount: amt, description: form.description.trim(), category: EXPENSE_CAT_LABEL(form.category), date: form.date, paid_by_name: payer.name };
+      if (form.notify_email) { const emails = owners.map((o) => o.email).filter(Boolean); notifyOwnerExpense(emails, summary).then((r) => { if (r && r.ok && r.sent) notify('Owners emailed about this expense.', 'success'); }).catch(() => {}); }
+      if (form.notify_wa) { const other = owners.find((o) => o.user_id !== form.paid_by) || payer; const msg = payer.name + ' paid ' + inr(amt) + ' for ' + summary.description + ' (' + summary.category + ') on ' + fmtDate(form.date, { day: 'numeric', month: 'short', year: 'numeric' }) + '. Reimbursement requested.'; try { window.open(waLink(other.phone, msg), '_blank'); } catch (e) { /* noop */ } }
+    }
     notify(editRow ? 'Expense updated.' : 'Expense recorded.', 'success'); setShowForm(false); load();
   };
   const del = async (r) => { if (!window.confirm('Delete this expense?')) return; const { error } = await runDb(supabase.from('expenses').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('expense_id', r.expense_id), 'delete expense'); if (!error) { notify('Expense deleted.', 'success'); load(); } };
@@ -97,7 +126,7 @@ export function ExpensesModule({ onNavigate }) {
             {filtered.map((r) => { const ev = r.event_id ? evMap[r.event_id] : null; return (
               <div key={r.expense_id} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 150px 130px 96px 64px', gap: 10, padding: '11px 16px', borderTop: '1px solid var(--grey-100)', alignItems: 'center', fontSize: 13 }}>
                 <div style={{ color: 'var(--grey-500)' }}>{fmtDate(r.date, { day: 'numeric', month: 'short' })}</div>
-                <div style={{ color: 'var(--grey-800)' }}>{r.description}{r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--pink)', marginLeft: 6 }}>📎</a>}</div>
+                <div style={{ color: 'var(--grey-800)' }}>{r.description}{r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--pink)', marginLeft: 6 }}>📎</a>}{r.paid_by && ownerMap[r.paid_by] && <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: 'var(--pink-light)', color: 'var(--pink-dark)' }}>by {ownerMap[r.paid_by].name}</span>}</div>
                 <div>{ev ? <a onClick={() => onNavigate && onNavigate('events', { eventId: ev.event_id, label: ev.name || ev.ref_number || 'Event' })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>{ev.ref_number}</a> : <span style={{ color: 'var(--grey-400)' }}>General</span>}</div>
                 <div><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: 'var(--blue-light)', color: 'var(--blue)' }}>{EXPENSE_CAT_LABEL(r.category)}</span></div>
                 <div style={{ textAlign: 'right', fontWeight: 500 }}>{inr(r.amount)}</div>
@@ -114,16 +143,32 @@ export function ExpensesModule({ onNavigate }) {
               <button className="btn sm" onClick={() => setShowForm(false)}>✕</button>
             </div>
             <div style={{ padding: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ gridColumn: '1 / -1', border: '1px dashed var(--pink-mid)', borderRadius: 'var(--radius-md)', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <label className="btn sm" style={{ cursor: 'pointer' }}>📷 Photo<input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { if (e.target.files && e.target.files.length) runCapture(e.target.files); e.target.value = ''; }} /></label>
+                <label className="btn sm" style={{ cursor: 'pointer' }}>📎 File<input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={(e) => { if (e.target.files && e.target.files.length) runCapture(e.target.files); e.target.value = ''; }} /></label>
+                <button className="btn sm" type="button" onClick={() => setCap((c) => ({ ...c, paste: !c.paste }))}>📋 Paste</button>
+                <span style={{ fontSize: 11.5, color: 'var(--grey-400)' }}>{cap.busy ? '⏳ Reading the receipt…' : '✨ AI fills amount, date & category — just review'}</span>
+                {cap.paste && <div style={{ width: '100%', display: 'flex', gap: 8, marginTop: 6 }}>
+                  <textarea className="field-textarea" rows={3} style={{ flex: 1, fontSize: 12 }} value={cap.text} onChange={(e) => setCap((c) => ({ ...c, text: e.target.value }))} placeholder="Paste the bill / payment message…" />
+                  <button className="btn sm primary" type="button" disabled={cap.busy || !cap.text.trim()} onClick={() => runCapture(cap.text)}>Read</button>
+                </div>}
+              </div>
               <div style={{ gridColumn: '1 / -1' }}><label className="field-label">Description <span style={{ color: 'var(--pink)' }}>*</span></label><input className="field-input" value={form.description} onChange={(e) => setF('description', e.target.value)} placeholder="e.g. Mandap florals" /></div>
               <div><label className="field-label">Amount (₹) <span style={{ color: 'var(--pink)' }}>*</span></label><input type="number" className="field-input" value={form.amount} onChange={(e) => setF('amount', e.target.value)} placeholder="0" /></div>
               <div><label className="field-label">Date <span style={{ color: 'var(--pink)' }}>*</span></label><input type="date" className="field-input" value={form.date} onChange={(e) => setF('date', e.target.value)} /></div>
               <div><label className="field-label">Category</label><select className="field-input" value={form.category} onChange={(e) => setF('category', e.target.value)}>{EXPENSE_CATS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+              <div><label className="field-label">Paid by</label><select className="field-input" value={form.paid_by} onChange={(e) => setF('paid_by', e.target.value)}><option value="">Business funds</option>{owners.map((o) => <option key={o.user_id} value={o.user_id}>{o.name}</option>)}</select></div>
               <div><label className="field-label">Sub-category</label><input className="field-input" value={form.sub_category} onChange={(e) => setF('sub_category', e.target.value)} placeholder="optional" /></div>
               <div><label className="field-label">Link to event</label><select className="field-input" value={form.event_id} onChange={(e) => setF('event_id', e.target.value)}><option value="">General (no event)</option>{events.map((e) => <option key={e.event_id} value={e.event_id}>{e.ref_number} · {e.name}{e.client_name ? (' · ' + e.client_name) : ''}{e.main_date ? (' · ' + fmtDate(e.main_date, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}</option>)}</select></div>
               <div><label className="field-label">Payment mode</label><select className="field-input" value={form.payment_mode} onChange={(e) => setF('payment_mode', e.target.value)}>{[['upi', 'UPI'], ['neft', 'Bank / NEFT'], ['cash', 'Cash'], ['cheque', 'Cheque']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
               <div><label className="field-label">Reference no.</label><input className="field-input" value={form.reference_number} onChange={(e) => setF('reference_number', e.target.value)} placeholder="optional" /></div>
               <div><label className="field-label">Receipt</label><input type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files && e.target.files[0])} style={{ fontSize: 12 }} /></div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8 }}><input type="checkbox" checked={form.is_recurring} onChange={(e) => setF('is_recurring', e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--pink)' }} /><span style={{ fontSize: 13 }}>Recurring</span>{form.is_recurring && <select className="field-input" style={{ width: 140 }} value={form.recurring_frequency} onChange={(e) => setF('recurring_frequency', e.target.value)}>{[['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['yearly', 'Yearly']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>}</div>
+              {form.paid_by && !editRow && <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', background: 'var(--pink-light)', borderRadius: 'var(--radius-md)', padding: '8px 12px' }}>
+                <span style={{ fontSize: 12.5, color: 'var(--pink-dark)', fontWeight: 500 }}>Owner-funded — alert the owners:</span>
+                <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={form.notify_wa} onChange={(e) => setF('notify_wa', e.target.checked)} /> 💬 WhatsApp</label>
+                <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={form.notify_email} onChange={(e) => setF('notify_email', e.target.checked)} /> ✉️ Email both</label>
+              </div>}
               <div style={{ gridColumn: '1 / -1' }}><label className="field-label">Notes</label><textarea className="field-textarea" rows={2} value={form.notes} onChange={(e) => setF('notes', e.target.value)} placeholder="optional" /></div>
             </div>
             <div style={{ padding: '14px 24px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

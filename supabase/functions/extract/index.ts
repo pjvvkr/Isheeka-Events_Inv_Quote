@@ -9,6 +9,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";   // shared with the gateway (owner-expense alerts)
+const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "Isheeka Events <onboarding@resend.dev>";
+const ERP_URL = Deno.env.get("ERP_URL") ?? "https://isheeka-events-erp.netlify.app";
 
 const cors = {
   "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
@@ -34,6 +37,21 @@ function validateFiles(files: any[]): string | null {
   return null;
 }
 
+// Resend send (shared secret with the gateway). Stub-safe: no key → logs only.
+async function sendEmail(to: string, subject: string, html: string, text: string): Promise<boolean> {
+  if (!RESEND_API_KEY) { console.log("[extract:email STUB]", { to, subject }); return false; }
+  try {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: EMAIL_FROM, to: [to], subject, html, text }),
+    });
+    if (!r.ok) { console.error("[extract:email] resend", r.status, await r.text()); return false; }
+    return true;
+  } catch (e) { console.error("[extract:email] exception", e); return false; }
+}
+const inr = (n: number) => "₹" + Math.round(n || 0).toLocaleString("en-IN");
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -51,13 +69,35 @@ Deno.serve(async (req) => {
 
   let body: any = {};
   try { body = await req.json(); } catch { return json({ error: "bad_json" }, 400); }
+  const action = (typeof body.action === "string") ? body.action : "items";
+
+  // ── notify: email the owners that an owner-funded expense was recorded ──────
+  if (action === "notify") {
+    const recipients: string[] = (Array.isArray(body.to) ? body.to : [])
+      .filter((e: any) => typeof e === "string" && /\S+@\S+\.\S+/.test(e)).slice(0, 6);
+    if (!recipients.length) return json({ error: "no_recipients" }, 400);
+    const ex = body.expense || {};
+    const amtStr = inr(Number(ex.amount) || 0);
+    const who = String(ex.paid_by_name || "An owner").slice(0, 80);
+    const desc = String(ex.description || "a business expense").slice(0, 200);
+    const cat = ex.category ? (" (" + String(ex.category).slice(0, 60) + ")") : "";
+    const when = ex.date ? (" on " + String(ex.date).slice(0, 40)) : "";
+    const subject = "[Isheeka] Expense recorded — " + amtStr + " by " + who;
+    const line = who + " paid " + amtStr + " for " + desc + cat + when + ". Reimbursement requested.";
+    const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>${line}</p><p><a href="${ERP_URL}/?go=owner" style="display:inline-block;background:#e8185a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Open Owner Account →</a></p><p style="color:#888;font-size:12px">${ERP_URL}</p></div>`;
+    const text2 = line + "\n\nOpen: " + ERP_URL + "/?go=owner";
+    let sent = 0;
+    for (const to of recipients) { if (await sendEmail(to, subject, html, text2)) sent++; }
+    return json({ ok: true, sent });
+  }
+
   const text = (typeof body.text === "string") ? body.text.trim() : "";
   const files = Array.isArray(body.files) ? body.files : (body.file ? [body.file] : []);
   if (!text && !files.length) return json({ error: "no_input" }, 400);
   if (text && text.length > 20000) return json({ error: "too_large" }, 413);
   if (!text) { const v = validateFiles(files); if (v) return json({ error: v }, v === "bad_type" ? 415 : 413); }
 
-  const prompt =
+  const itemsPrompt =
     "You are reading an event-requirements list (typed, printed, or handwritten; may be a phone photo or a pasted message). " +
     "Extract the requested items. Return ONLY a JSON array — no prose, no code fences — of objects: " +
     "{\"description\": string, \"quantity\": number, \"sub_event\": string|null}. " +
@@ -67,8 +107,21 @@ Deno.serve(async (req) => {
     "Read counts like \"2 tubs\", \"200 chairs\", \"8x12 backdrop\" as the number and keep any size/spec in the description. " +
     "Ignore prices, money, totals, headings and contact details. If you cannot read any items, return [].";
 
+  // expense mode: read a single receipt/bill/note → one expense object.
+  const expensePrompt =
+    "You are reading a receipt, bill, or a short typed/pasted note about ONE business expense (may be a phone photo, possibly handwritten, English/Telugu/Hindi or a mix). " +
+    "Return ONLY a JSON object — no prose, no code fences: " +
+    "{\"amount\": number|null, \"date\": string|null, \"category\": string|null, \"merchant\": string|null, \"description\": string|null}. " +
+    "amount = the total paid as a plain number (no currency symbols; the grand total if several lines). " +
+    "date = the bill/expense date as YYYY-MM-DD if visible, else null. " +
+    "category = the single best fit from EXACTLY this list: marketing, operations, travel, staff, event_incidentals, professional, banking, miscellaneous. " +
+    "merchant = the shop/vendor/payee name if visible. " +
+    "description = a short plain-English label of what it was for (e.g. \"Mandap flowers\", \"Cab to venue\"). " +
+    "If you cannot read it, return {}.";
+
+  const prompt = action === "expense" ? expensePrompt : itemsPrompt;
   const content: any[] = text
-    ? [{ type: "text", text: prompt + "\n\nHere is the list to read:\n\n" + text }]
+    ? [{ type: "text", text: prompt + "\n\nHere is what to read:\n\n" + text }]
     : [...files.map(fileBlock), { type: "text", text: prompt }];
 
   let aiText = "";
@@ -82,6 +135,28 @@ Deno.serve(async (req) => {
     const d = await r.json();
     aiText = ((d?.content || []) as any[]).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
   } catch (e) { console.error("[extract] fetch", e); return json({ error: "extract_failed" }, 502); }
+
+  // expense mode → one object
+  if (action === "expense") {
+    let obj: any = {};
+    try {
+      let t = aiText.replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+      const a = t.indexOf("{"), b = t.lastIndexOf("}");
+      if (a >= 0 && b > a) t = t.slice(a, b + 1);
+      obj = JSON.parse(t) || {};
+    } catch (e) { console.error("[extract] expense parse", aiText); return json({ error: "extract_unreadable" }, 422); }
+    const cats = ["marketing", "operations", "travel", "staff", "event_incidentals", "professional", "banking", "miscellaneous"];
+    const cat = (obj.category && cats.includes(String(obj.category))) ? String(obj.category) : null;
+    const amount = (obj.amount == null || obj.amount === "") ? null : Math.max(0, Math.round(Number(String(obj.amount).replace(/[,\s]/g, "")) || 0));
+    const date = (typeof obj.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(obj.date.trim())) ? obj.date.trim() : null;
+    return json({ ok: true, expense: {
+      amount,
+      date,
+      category: cat,
+      merchant: obj.merchant ? String(obj.merchant).trim().slice(0, 120) : null,
+      description: obj.description ? String(obj.description).trim().slice(0, 200) : (obj.merchant ? String(obj.merchant).trim().slice(0, 120) : null),
+    } });
+  }
 
   let items: any[] = [];
   try {
