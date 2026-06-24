@@ -24,6 +24,7 @@ import { QuotationsModule } from './modules/QuotationsModule.jsx';
 import { EventsModule } from './modules/EventsModule.jsx';
 import { UsersModule } from './modules/UsersModule.jsx';
 import { OwnerAccountModule } from './modules/OwnerAccountModule.jsx';
+import { effectiveModules } from './lib/access.js';
 
 const pageTitles = { dashboard: 'Dashboard', leads: 'Leads', clients: 'Clients', events: 'Events', quotations: 'Quotations', invoices: 'Invoices', vendors: 'Vendors', 'vendor-rfqs': 'Vendor RFQ', 'vendor-payments': 'Vendor Payments', expenses: 'Expenses', reports: 'Reports', users: 'Users', settings: 'Settings', 'owner-account': 'Owner Account' };
 
@@ -52,6 +53,7 @@ export default function Shell() {
   // RFQs awaiting review (status 'submitted' incl. client resubmissions/revisions) — shown
   // as a count badge on the Client RFQ nav item so it's visible from any screen.
   const [reviewCount, setReviewCount] = useState(0);
+  const [profile, setProfile] = useState(null);   // signed-in user's app row (role, is_owner, module_access)
   const lastActivity = useRef(Date.now());
   const warningTimer = useRef(null);
   const logoutTimer = useRef(null);
@@ -78,6 +80,13 @@ export default function Shell() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null));
     return () => subscription.unsubscribe();
   }, []);
+
+  // Load the signed-in user's app profile → drives module access (sidebar + route gating).
+  useEffect(() => {
+    if (!user) { setProfile(null); return; }
+    supabase.from('users').select('user_id,role,is_owner,module_access').eq('email', user.email).maybeSingle()
+      .then(({ data }) => setProfile(data || null)).catch(() => setProfile(null));
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -107,7 +116,8 @@ export default function Shell() {
   // Refresh the count on login and whenever the active page changes (so it clears after review).
   useEffect(() => { if (user) loadReviewCount(); }, [user, activePage, loadReviewCount]);
 
-  const role = 'admin';
+  const allowed = effectiveModules(profile);
+  const role = (profile && profile.role) || 'admin';
 
   if (loading) return <div className="loading"><div className="spinner"></div><div style={{ color: 'var(--grey-400)', fontSize: 14 }}>Loading Isheeka Events...</div></div>;
   if (!user) return (<><ToastHost /><LoginScreen onLogin={(u) => { setUser(u); resetTimers(); }} /></>);
@@ -130,7 +140,7 @@ export default function Shell() {
           {NAV.map((group, gi) => (
             <div key={gi} className="nav-section">
               {group.section && <div className="nav-section-title">{group.section}</div>}
-              {group.items.filter((item) => item.roles.includes(role)).map((item) => (
+              {group.items.filter((item) => allowed.has(item.id)).map((item) => (
                 <button key={item.id} className={`nav-item ${activePage === item.id ? 'active' : ''}`} onClick={() => resetTo(item.id)}>
                   <span className="nav-icon">{item.icon}</span>{item.label}
                   {item.id === 'rfqs' && reviewCount > 0 && <span title={reviewCount + ' RFQ' + (reviewCount > 1 ? 's' : '') + ' awaiting review'} style={{ marginLeft: 'auto', background: 'var(--pink)', color: 'white', fontSize: 11, fontWeight: 600, borderRadius: 20, padding: '0 7px', minWidth: 18, height: 18, lineHeight: '18px', textAlign: 'center' }}>{reviewCount}</span>}
@@ -142,7 +152,7 @@ export default function Shell() {
         <div className="sidebar-footer">
           <div className="user-info">
             <div className="user-avatar">{(user.email || 'U').charAt(0).toUpperCase()}</div>
-            <div><div className="user-name">{user.email?.split('@')[0]}</div><div className="user-role">Admin</div></div>
+            <div><div className="user-name">{user.email?.split('@')[0]}</div><div className="user-role">{role.charAt(0).toUpperCase() + role.slice(1)}</div></div>
           </div>
           <button className="logout-btn" onClick={handleLogout}>🚪 Sign out</button>
         </div>
@@ -160,7 +170,8 @@ export default function Shell() {
         </div>
         <div className="page-body">
           <NavBar stack={navStack} onBack={goBack} onJump={jumpTo} />
-          {activePage === 'dashboard' ? <Dashboard user={user} onNavigate={navigate} />
+          {!allowed.has(activePage) ? <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: 48, textAlign: 'center', color: 'var(--grey-500)' }}><div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div><div style={{ fontSize: 15, fontWeight: 600, color: 'var(--grey-700)' }}>No access to this section</div><div style={{ fontSize: 13, marginTop: 6 }}>Ask an admin to grant it in Settings → Access control.</div></div>
+            : activePage === 'dashboard' ? <Dashboard user={user} onNavigate={navigate} />
             : activePage === 'leads' ? <LeadsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
             : activePage === 'events' ? <EventsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
             : activePage === 'expenses' ? <ExpensesModule onNavigate={navigate} />

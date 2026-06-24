@@ -7,6 +7,7 @@ import { notify, runDb } from '../lib/toast.jsx';
 import { fetchSuggestions, InputField, SelectField } from '../components/fields.jsx';
 import { useEventTypes, clearLeadSourcesCache, clearEventTypesCache } from '../lib/data.js';
 import { eventTypeLabel } from '../lib/format.js';
+import { MODULE_SECTIONS, GRANTABLE, defaultAccessForRole } from '../lib/access.js';
 
 // Stable inputs for template editor
 function TplNameInput({ value, onChange }) {
@@ -697,6 +698,72 @@ function SettingsField({ field, label, required, type = 'text', placeholder = ''
   );
 }
 
+function AccessTab() {
+  const [users, setUsers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [sel, setSel] = React.useState('');
+  const [role, setRole] = React.useState('staff');
+  const [access, setAccess] = React.useState({});
+  const [saving, setSaving] = React.useState(false);
+  const load = async () => { setLoading(true); const { data } = await supabase.from('users').select('user_id,first_name,last_name,email,role,is_owner,module_access').eq('is_deleted', false).order('first_name'); setUsers(data || []); setLoading(false); };
+  React.useEffect(() => { load(); }, []);
+  const selUser = users.find((u) => u.user_id === sel);
+  React.useEffect(() => {
+    if (!selUser) { setRole('staff'); setAccess({}); return; }
+    const r = selUser.role || 'staff'; setRole(r);
+    setAccess((selUser.module_access && typeof selUser.module_access === 'object') ? { ...defaultAccessForRole(r), ...selUser.module_access } : defaultAccessForRole(r));
+  }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const uname = (u) => ((((u.first_name || '') + ' ' + (u.last_name || '')).trim()) || u.email);
+  const fullAccess = selUser && (selUser.is_owner || role === 'admin');
+  const applyPreset = (r) => { setRole(r); setAccess(defaultAccessForRole(r)); };
+  const toggle = (id) => setAccess((a) => ({ ...a, [id]: !a[id] }));
+  const grantedCount = Object.values(access).filter(Boolean).length;
+  const save = async () => { if (!selUser) return; setSaving(true); const { error } = await runDb(supabase.from('users').update({ role, module_access: access, updated_at: new Date().toISOString() }).eq('user_id', selUser.user_id), 'save access'); setSaving(false); if (!error) { notify('Access updated for ' + uname(selUser) + '.', 'success'); load(); } };
+
+  return (
+    <div>
+      <div className="settings-section-title">Access control</div>
+      <div style={{ fontSize: 13, color: 'var(--grey-400)', marginBottom: 16 }}>Choose who can see and open each module. Owners and Admins always have full access. This controls what users see in the app — a database-level lockdown is a separate, future step.</div>
+      {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
+        <>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+            <div style={{ flex: 1, minWidth: 220 }}><label className="field-label">User</label>
+              <select className="field-input" value={sel} onChange={(e) => setSel(e.target.value)}><option value="">Select a user…</option>{users.map((u) => <option key={u.user_id} value={u.user_id}>{uname(u)} · {u.email}{u.is_owner ? ' (owner)' : ''}</option>)}</select>
+            </div>
+            {selUser && <div><label className="field-label">Role preset</label>
+              <select className="field-input" style={{ width: 160 }} value={role} onChange={(e) => applyPreset(e.target.value)} disabled={!!selUser.is_owner}><option value="admin">Admin</option><option value="manager">Manager</option><option value="staff">Staff</option></select>
+            </div>}
+          </div>
+
+          {!selUser ? <div style={{ fontSize: 13, color: 'var(--grey-400)', padding: '20px 0' }}>Pick a user to set their module access.</div>
+            : fullAccess ? <div className="info-box">✅ {uname(selUser)} {selUser.is_owner ? 'is an owner' : 'is an admin'} — full access to all modules. Set the role to Manager or Staff to restrict.</div>
+              : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 28px', marginBottom: 14 }}>
+                    {MODULE_SECTIONS.map((sec) => (
+                      <div key={sec.section}>
+                        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--grey-400)', margin: '0 0 4px' }}>{sec.section}</div>
+                        {sec.items.map(([id, label]) => (
+                          <label key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--grey-100)', fontSize: 13, cursor: 'pointer' }}>
+                            <span>{label}</span>
+                            <input type="checkbox" checked={!!access[id]} onChange={() => toggle(id)} style={{ width: 16, height: 16, accentColor: 'var(--pink)' }} />
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--grey-100)', paddingTop: 12, flexWrap: 'wrap', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--grey-400)' }}>{uname(selUser)} can access {grantedCount} of {GRANTABLE.length} modules</span>
+                    <div style={{ display: 'flex', gap: 8 }}><button className="btn" onClick={() => applyPreset(role)}>Reset to role</button><button className="btn primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save access'}</button></div>
+                  </div>
+                </>
+              )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SettingsModule() {
   const [activeTab, setActiveTab] = useState('company');
   const [settings, setSettings] = useState(null);
@@ -777,6 +844,7 @@ export function SettingsModule() {
     { id: 'templates', label: 'Templates', icon: '📋' },
     { id: 'lead_sources', label: 'Lead sources', icon: '🏷️' },
     { id: 'event_types', label: 'Event types', icon: '🎉' },
+    { id: 'access', label: 'Access control', icon: '🔐' },
   ];
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60 }}><div className="spinner"></div></div>;
@@ -930,8 +998,9 @@ export function SettingsModule() {
         {activeTab === 'templates' && <TemplatesTab />}
         {activeTab === 'lead_sources' && <LeadSourcesTab />}
         {activeTab === 'event_types' && <EventTypesTab />}
+        {activeTab === 'access' && <AccessTab />}
 
-        {activeTab !== 'templates' && activeTab !== 'lead_sources' && activeTab !== 'event_types' && (
+        {activeTab !== 'templates' && activeTab !== 'lead_sources' && activeTab !== 'event_types' && activeTab !== 'access' && (
           <div className="save-bar">
             <div className="save-hint">
               {saved
