@@ -21,6 +21,7 @@ export const NAV = [
   ] },
   { section: 'VENDORS', items: [
     { id: 'vendors', label: 'Vendors', icon: '🔧', roles: ['admin', 'manager', 'staff'] },
+    { id: 'vendor-rfqs', label: 'Vendor RFQ', icon: '📨', roles: ['admin', 'manager', 'staff'] },
     { id: 'vendor-payments', label: 'Vendor Payments', icon: '💳', roles: ['admin', 'manager'] },
   ] },
   { section: 'FINANCE', items: [

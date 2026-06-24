@@ -100,7 +100,7 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
   const detailId = nav && nav.rfqId;
   const isNew = !!(nav && nav.mode === 'new');
 
-  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,created_at,client_submitted_at,revision_number').eq('is_deleted', false).eq('party_type', 'client').eq('is_sourcing_anchor', false).order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
+  const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,event_date,created_at,client_submitted_at,revision_number').eq('is_deleted', false).eq('party_type', 'client').eq('is_sourcing_anchor', false).order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
   React.useEffect(() => { if (!detailId && !isNew && !created) load(); }, [detailId, isNew, created]);
 
   if (created) { return <div><div style={{ marginBottom: 12 }}><button className="btn sm" onClick={() => { setCreated(null); }}>← All RFQs</button></div><RFQShareCard created={created} contact={created.contact} onDone={() => { setCreated(null); }} /></div>; }
@@ -131,8 +131,11 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
           : <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', overflow: 'hidden' }}>
             {list.map((r, i) => { const sc = RFQ_STATUS[r.status] || RFQ_STATUS.sent; return (
               <div key={r.rfq_id} onClick={() => onNavigate('rfqs', { rfqId: r.rfq_id, label: r.ref_number })} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i > 0 ? '1px solid var(--grey-100)' : 'none', cursor: 'pointer' }}>
-                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--pink)', width: 120 }}>{r.ref_number}</span>
-                <span style={{ flex: 1, fontSize: 13, color: 'var(--grey-800)' }}>{r.contact_name || '—'}{r.event_type ? (' · ' + r.event_type) : ''}</span>
+                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--pink)', width: 120, flexShrink: 0 }}>{r.ref_number}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.contact_name || '—'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 1 }}>{r.event_type || 'Event'}{r.event_date ? (' · ' + fmtDate(r.event_date, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}</div>
+                </div>
                 {(r.revision_number || 0) > 1 && <span title={'Client revised this ' + r.revision_number + '×'} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 600, background: 'var(--orange-light)', color: 'var(--orange)' }}>🔄 Rev {r.revision_number}</span>}
                 <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c }}>{sc.l}</span>
               </div>

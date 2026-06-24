@@ -436,6 +436,13 @@ function LeadSourcesTab() {
     clearLeadSourcesCache();
   };
 
+  const handleDelete = async (src) => {
+    if (!window.confirm('Delete "' + src.label + '"? It will be removed from the dropdown. Existing leads keep their recorded source. (Use "Inactive" instead if you only want to hide it.)')) return;
+    const { error } = await runDb(supabase.from('lead_sources').delete().eq('source_id', src.source_id), 'delete lead source');
+    if (error) return;
+    await loadSources(); clearLeadSourcesCache();
+  };
+
   const moveUp = async (idx) => {
     if (idx === 0) return;
     const a = sources[idx], b = sources[idx - 1];
@@ -472,7 +479,7 @@ function LeadSourcesTab() {
                   onClick={() => toggleActive(src)}>
                   {src.is_active ? 'Active' : 'Inactive'}
                 </button>
-                <div style={{ width: 20 }} />
+                <button className="btn sm" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--red)' }} title="Delete source" onClick={() => handleDelete(src)}>🗑</button>
               </div>
             ))}
             {sources.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--grey-400)', fontSize: 13 }}>No sources yet</div>}
@@ -577,6 +584,15 @@ function EventTypesTab() {
     clearEventTypesCache();
   };
 
+  const handleDelete = async (t) => {
+    if (!window.confirm('Delete "' + t.label + '" and its functions (sub-events)? Existing leads/events keep their recorded type. (Use "Inactive" instead if you only want to hide it.)')) return;
+    try { await supabase.from('event_type_subevents').delete().eq('event_type_id', t.event_type_id); } catch (e) { /* table optional */ }
+    const { error } = await runDb(supabase.from('event_types').delete().eq('event_type_id', t.event_type_id), 'delete event type');
+    if (error) return;
+    if (expanded === t.event_type_id) setExpanded(null);
+    await loadTypes(); clearEventTypesCache();
+  };
+
   const moveUp = async (idx) => {
     if (idx === 0) return;
     const a = types[idx], b = types[idx - 1];
@@ -614,7 +630,10 @@ function EventTypesTab() {
                     onClick={() => toggleActive(t)}>
                     {t.is_active ? 'Active' : 'Inactive'}
                   </button>
-                  <button className="btn sm" style={{ padding: '2px 8px' }} title="Manage functions (sub-events)" onClick={() => setExpanded(expanded === t.event_type_id ? null : t.event_type_id)}>{expanded === t.event_type_id ? '▾' : '▸'}</button>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button className="btn sm" style={{ padding: '2px 8px' }} title="Manage functions (sub-events)" onClick={() => setExpanded(expanded === t.event_type_id ? null : t.event_type_id)}>{expanded === t.event_type_id ? '▾' : '▸'}</button>
+                    <button className="btn sm" style={{ padding: '2px 8px', color: 'var(--red)' }} title="Delete event type" onClick={() => handleDelete(t)}>🗑</button>
+                  </div>
                 </div>
                 {expanded === t.event_type_id && <div style={{ borderBottom: '1px solid var(--grey-100)', background: 'var(--grey-50)', padding: '10px 16px' }}><SubEventEditor eventTypeId={t.event_type_id} /></div>}
               </React.Fragment>
@@ -645,6 +664,7 @@ function EventTypesTab() {
 }
 
 function SettingsField({ field, label, required, type = 'text', placeholder = '', readOnly = false, hint = '', rows = 3, form, errors, handleChange }) {
+  const roStyle = readOnly ? { background: 'var(--grey-50)', color: 'var(--grey-600)', cursor: 'default' } : {};
   return (
     <div>
       <label className="field-label">
@@ -657,7 +677,8 @@ function SettingsField({ field, label, required, type = 'text', placeholder = ''
           value={form[field] || ''}
           onChange={(e) => handleChange(field, e.target.value)}
           placeholder={placeholder}
-          style={errors[field] ? { borderColor: 'var(--red)' } : {}}
+          readOnly={readOnly}
+          style={{ ...roStyle, ...(errors[field] ? { borderColor: 'var(--red)' } : {}) }}
         />
       ) : (
         <input
@@ -667,7 +688,7 @@ function SettingsField({ field, label, required, type = 'text', placeholder = ''
           onChange={(e) => handleChange(field, type === 'number' ? parseInt(e.target.value) || 0 : e.target.value)}
           placeholder={placeholder}
           readOnly={readOnly}
-          style={errors[field] ? { borderColor: 'var(--red)' } : {}}
+          style={{ ...roStyle, ...(errors[field] ? { borderColor: 'var(--red)' } : {}) }}
         />
       )}
       {errors[field] && <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>⚠ {errors[field]}</div>}
@@ -685,6 +706,7 @@ export function SettingsModule() {
   const [saveError, setSaveError] = useState('');
   const [form, setForm] = useState({});
   const [errors, setErrors] = useState({});
+  const [editMode, setEditMode] = useState(false);   // form tabs open read-only; "Edit" unlocks them
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -740,7 +762,7 @@ export function SettingsModule() {
         .update({ ...form, updated_at: new Date().toISOString() })
         .eq('setting_id', settings.setting_id);
       if (error) throw error;
-      setSaved(true); setSettings(form);
+      setSaved(true); setSettings(form); setEditMode(false);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       setSaveError('Could not save settings. Please try again.');
@@ -765,7 +787,7 @@ export function SettingsModule() {
         {tabs.map((tab) => (
           <button key={tab.id}
             className={`settings-nav-item ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => { setActiveTab(tab.id); setErrors({}); setSaveError(''); setSaved(false); }}>
+            onClick={() => { setActiveTab(tab.id); setErrors({}); setSaveError(''); setSaved(false); setEditMode(false); setForm(settings || {}); }}>
             <span style={{ fontSize: 16 }}>{tab.icon}</span>{tab.label}
           </button>
         ))}
@@ -779,7 +801,7 @@ export function SettingsModule() {
         )}
 
         {activeTab === 'company' && (
-          <>
+          <fieldset disabled={!editMode} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
             <div className="settings-section-title">Company profile</div>
             <div className="settings-section-sub">
               Your business details that appear on all quotations and invoices.
@@ -816,11 +838,11 @@ export function SettingsModule() {
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="gst_number" label="GST number" placeholder="Enter GST number" />
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="pan_number" label="PAN number" placeholder="Enter PAN number" />
             </div>
-          </>
+          </fieldset>
         )}
 
         {activeTab === 'bank' && (
-          <>
+          <fieldset disabled={!editMode} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
             <div className="settings-section-title">Bank details</div>
             <div className="settings-section-sub">
               Payment details shown on all invoices and quotations.
@@ -849,11 +871,11 @@ export function SettingsModule() {
                 {form.upi_id && <> &nbsp;|&nbsp; <strong>UPI:</strong> {form.upi_id}</>}
               </div>
             </div>
-          </>
+          </fieldset>
         )}
 
         {activeTab === 'documents' && (
-          <>
+          <fieldset disabled={!editMode} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
             <div className="settings-section-title">Document defaults</div>
             <div className="settings-section-sub">
               Default values used when creating new quotations and invoices.
@@ -865,11 +887,11 @@ export function SettingsModule() {
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="default_invoice_due_days" label="Invoice due date (days)" required type="number"
                 hint="Default: 14 days from invoice date" />
             </div>
-          </>
+          </fieldset>
         )}
 
         {activeTab === 'terms' && (
-          <>
+          <fieldset disabled={!editMode} style={{ border: 'none', margin: 0, padding: 0, minWidth: 0 }}>
             <div className="settings-section-title">Payment terms & conditions</div>
             <div className="settings-section-sub">
               Default terms that appear on all quotations and invoices.
@@ -902,7 +924,7 @@ export function SettingsModule() {
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--pink)', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 8 }}>Additional Terms & Conditions</div>
               <div style={{ fontSize: 13, color: 'var(--grey-600)', whiteSpace: 'pre-line', lineHeight: 1.8 }}>{form.default_terms || 'No terms set yet.'}</div>
             </div>
-          </>
+          </fieldset>
         )}
 
         {activeTab === 'templates' && <TemplatesTab />}
@@ -914,11 +936,18 @@ export function SettingsModule() {
             <div className="save-hint">
               {saved
                 ? <span style={{ color: 'var(--green)', fontWeight: 500 }}>✅ Settings saved successfully!</span>
-                : <span>Fields marked <span style={{ color: 'var(--pink)' }}>*</span> are required</span>}
+                : editMode
+                  ? <span>Editing — fields marked <span style={{ color: 'var(--pink)' }}>*</span> are required</span>
+                  : <span>🔒 View only — click <b>Edit</b> to make changes</span>}
             </div>
-            <button className="btn primary" onClick={handleSave} disabled={saving}>
-              {saving ? '⏳ Saving...' : '💾 Save settings'}
-            </button>
+            {editMode ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn" onClick={() => { setForm(settings || {}); setErrors({}); setSaveError(''); setEditMode(false); }} disabled={saving}>Cancel</button>
+                <button className="btn primary" onClick={handleSave} disabled={saving}>{saving ? '⏳ Saving...' : '💾 Save settings'}</button>
+              </div>
+            ) : (
+              <button className="btn primary" onClick={() => { setEditMode(true); setSaved(false); setSaveError(''); }}>✏️ Edit</button>
+            )}
           </div>
         )}
       </div>

@@ -15,6 +15,7 @@ import { VendorPaymentsModule } from './modules/VendorPaymentsModule.jsx';
 import { VendorsModule } from './modules/VendorsModule.jsx';
 import { ReportsModule } from './modules/ReportsModule.jsx';
 import { RFQsModule } from './modules/RFQsModule.jsx';
+import { VendorRFQsModule } from './modules/VendorRFQsModule.jsx';
 import { ClientsModule } from './modules/ClientsModule.jsx';
 import { InvoicesModule } from './modules/InvoicesModule.jsx';
 import { SettingsModule } from './modules/SettingsModule.jsx';
@@ -23,7 +24,7 @@ import { QuotationsModule } from './modules/QuotationsModule.jsx';
 import { EventsModule } from './modules/EventsModule.jsx';
 import { UsersModule } from './modules/UsersModule.jsx';
 
-const pageTitles = { dashboard: 'Dashboard', leads: 'Leads', clients: 'Clients', events: 'Events', quotations: 'Quotations', invoices: 'Invoices', vendors: 'Vendors', 'vendor-payments': 'Vendor Payments', expenses: 'Expenses', reports: 'Reports', users: 'Users', settings: 'Settings', 'owner-account': 'Owner Account' };
+const pageTitles = { dashboard: 'Dashboard', leads: 'Leads', clients: 'Clients', events: 'Events', quotations: 'Quotations', invoices: 'Invoices', vendors: 'Vendors', 'vendor-rfqs': 'Vendor RFQ', 'vendor-payments': 'Vendor Payments', expenses: 'Expenses', reports: 'Reports', users: 'Users', settings: 'Settings', 'owner-account': 'Owner Account' };
 
 export default function Shell() {
   const [user, setUser] = useState(null);
@@ -34,7 +35,7 @@ export default function Shell() {
   const activePage = current.page;
   const navigate = useCallback((page, opts = {}) => {
     const o = opts || {};
-    const rest = {}; ['eventId', 'leadId', 'invoiceId', 'quotId', 'clientId', 'vendorId', 'expenseId', 'rfqId', 'costingRfqId', 'prefill', 'mode', 'referenceEvent', 'referenceData'].forEach((k) => { if (o[k] !== undefined && o[k] !== null) rest[k] = o[k]; });
+    const rest = {}; ['eventId', 'leadId', 'invoiceId', 'quotId', 'clientId', 'vendorId', 'expenseId', 'rfqId', 'vendorRfqId', 'costingRfqId', 'prefill', 'mode', 'referenceEvent', 'referenceData'].forEach((k) => { if (o[k] !== undefined && o[k] !== null) rest[k] = o[k]; });
     const hasPayload = Object.keys(rest).length > 0;
     const label = o.label || pageTitles[page] || page;
     setNavStack((st) => {
@@ -162,6 +163,7 @@ export default function Shell() {
             : activePage === 'expenses' ? <ExpensesModule onNavigate={navigate} />
               : activePage === 'vendor-payments' ? <VendorPaymentsModule onNavigate={navigate} />
                 : activePage === 'vendors' ? <VendorsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
+                : activePage === 'vendor-rfqs' ? <VendorRFQsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                   : activePage === 'reports' ? <ReportsModule onNavigate={navigate} />
                     : activePage === 'rfqs' ? <RFQsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                       : activePage === 'clients' ? <ClientsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
