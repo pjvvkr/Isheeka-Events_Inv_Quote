@@ -8,6 +8,7 @@ import { fetchSuggestions, InputField, SelectField } from '../components/fields.
 import { useEventTypes, clearLeadSourcesCache, clearEventTypesCache } from '../lib/data.js';
 import { eventTypeLabel } from '../lib/format.js';
 import { MODULE_SECTIONS, GRANTABLE, defaultAccessForRole } from '../lib/access.js';
+import { NOTIF_EVENTS, NOTIF_CHANNELS, resolvedPrefs } from '../lib/notifyPrefs.js';
 
 // Stable inputs for template editor
 function TplNameInput({ value, onChange }) {
@@ -764,6 +765,55 @@ function AccessTab() {
   );
 }
 
+function NotificationsTab() {
+  const [users, setUsers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [sel, setSel] = React.useState('');
+  const [prefs, setPrefs] = React.useState({});
+  const [saving, setSaving] = React.useState(false);
+  const load = async () => { setLoading(true); const { data } = await supabase.from('users').select('user_id,first_name,last_name,email,role,is_owner,notify_prefs').eq('is_deleted', false).order('first_name'); setUsers((data || []).filter((u) => u.is_owner || u.role === 'admin')); setLoading(false); };
+  React.useEffect(() => { load(); }, []);
+  const selUser = users.find((u) => u.user_id === sel);
+  React.useEffect(() => { setPrefs(selUser ? resolvedPrefs(selUser.notify_prefs) : {}); }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const uname = (u) => ((((u.first_name || '') + ' ' + (u.last_name || '')).trim()) || u.email);
+  const toggle = (ev, ch) => setPrefs((p) => ({ ...p, [ev]: { ...p[ev], [ch]: !(p[ev] && p[ev][ch]) } }));
+  const save = async () => { if (!selUser) return; setSaving(true); const { error } = await runDb(supabase.from('users').update({ notify_prefs: prefs, updated_at: new Date().toISOString() }).eq('user_id', selUser.user_id), 'save preferences'); setSaving(false); if (!error) { notify('Notification preferences saved for ' + uname(selUser) + '.', 'success'); load(); } };
+
+  return (
+    <div>
+      <div className="settings-section-title">Notifications</div>
+      <div style={{ fontSize: 13, color: 'var(--grey-400)', marginBottom: 16 }}>How each owner/admin is alerted for each event. Turn on phone push from the 🔔 bell on each device (install the app to Home Screen first on iPhone). The business inbox always receives RFQ alerts regardless.</div>
+      {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
+        <>
+          <div style={{ marginBottom: 14, maxWidth: 380 }}>
+            <label className="field-label">User</label>
+            <select className="field-input" value={sel} onChange={(e) => setSel(e.target.value)}><option value="">Select an owner/admin…</option>{users.map((u) => <option key={u.user_id} value={u.user_id}>{uname(u)} · {u.email}</option>)}</select>
+          </div>
+          {!selUser ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>Pick a user to set their notification channels.</div> : (
+            <>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, maxWidth: 560 }}>
+                <thead><tr style={{ color: 'var(--grey-400)', fontSize: 12 }}>
+                  <th style={{ textAlign: 'left', padding: '6px 4px', fontWeight: 500 }}>Event</th>
+                  {NOTIF_CHANNELS.map(([c, l]) => <th key={c} style={{ padding: '6px 8px', fontWeight: 500 }}>{l}</th>)}
+                </tr></thead>
+                <tbody>
+                  {NOTIF_EVENTS.map((ev) => (
+                    <tr key={ev.key} style={{ borderTop: '1px solid var(--grey-100)' }}>
+                      <td style={{ padding: '8px 4px' }}>{ev.label}</td>
+                      {NOTIF_CHANNELS.map(([c]) => <td key={c} style={{ textAlign: 'center', padding: '8px' }}><input type="checkbox" checked={!!(prefs[ev.key] && prefs[ev.key][c])} onChange={() => toggle(ev.key, c)} style={{ width: 16, height: 16, accentColor: 'var(--pink)' }} /></td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ marginTop: 14 }}><button className="btn primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save preferences'}</button></div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SettingsModule() {
   const [activeTab, setActiveTab] = useState('company');
   const [settings, setSettings] = useState(null);
@@ -845,6 +895,7 @@ export function SettingsModule() {
     { id: 'lead_sources', label: 'Lead sources', icon: '🏷️' },
     { id: 'event_types', label: 'Event types', icon: '🎉' },
     { id: 'access', label: 'Access control', icon: '🔐' },
+    { id: 'notifications', label: 'Notifications', icon: '🔔' },
   ];
 
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 60 }}><div className="spinner"></div></div>;
@@ -999,8 +1050,9 @@ export function SettingsModule() {
         {activeTab === 'lead_sources' && <LeadSourcesTab />}
         {activeTab === 'event_types' && <EventTypesTab />}
         {activeTab === 'access' && <AccessTab />}
+        {activeTab === 'notifications' && <NotificationsTab />}
 
-        {activeTab !== 'templates' && activeTab !== 'lead_sources' && activeTab !== 'event_types' && activeTab !== 'access' && (
+        {activeTab !== 'templates' && activeTab !== 'lead_sources' && activeTab !== 'event_types' && activeTab !== 'access' && activeTab !== 'notifications' && (
           <div className="save-bar">
             <div className="save-hint">
               {saved

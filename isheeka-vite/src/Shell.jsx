@@ -104,6 +104,7 @@ export default function Shell() {
       const params = new URLSearchParams(window.location.search);
       const id = params.get('rfq');
       if (id) { navigate('rfqs', { rfqId: id, label: 'RFQ' }); window.history.replaceState({}, '', window.location.pathname); }
+      else if (params.get('inv')) { navigate('invoices', { invoiceId: params.get('inv'), label: 'Invoice' }); window.history.replaceState({}, '', window.location.pathname); }
       else if (params.get('go') === 'owner') { resetTo('owner-account'); window.history.replaceState({}, '', window.location.pathname); }
     } catch (e) { /* noop */ }
   }, [user]);

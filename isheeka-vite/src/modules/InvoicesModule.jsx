@@ -3,6 +3,9 @@
 // Ported verbatim from isheeka-erp-v22.html (incl. the refund-reopen + self-heal + discount work).
 import React from 'react';
 import { supabase } from '../lib/supabase';
+import { createNotifications } from '../lib/notifications.js';
+import { sendPush } from '../lib/push.js';
+import { resolveAudience } from '../lib/notifyPrefs.js';
 import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid, logInvoiceActivity } from '../lib/session.js';
 import { recordClientRefund, reconcileInvoiceInstallments } from '../lib/money.js';
@@ -431,6 +434,12 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
       if (inv.quotation_id) { await supabase.from('quotations').update({ status: 'invoiced', updated_at: new Date().toISOString() }).eq('quotation_id', inv.quotation_id); }
       try { await logInvoiceActivity(invoiceId, { action: 'paid_in_full', new_value: '₹' + grand.toLocaleString('en-IN'), reason: 'Invoice fully paid — locked for edits', revision_number: inv.revision_number || 0 }); } catch (e) { /* noop */ }
     }
+    try {
+      const aud = await resolveAudience('payment_received');
+      const pbody = '₹' + Math.round(amt).toLocaleString('en-IN') + ' from ' + (inv.client_name || 'client') + (fullyPaid ? ' · paid in full' : '');
+      createNotifications(aud.inappIds, { type: 'payment_received', title: 'Payment received', body: pbody, doc_ref: inv.ref_number || '', link_page: 'invoices', link_opts: { invoiceId } });
+      sendPush(aud.pushIds, { title: 'Payment received — ' + (inv.ref_number || ''), body: pbody, url: window.location.origin + '/?inv=' + invoiceId, tag: 'pay-' + invoiceId });
+    } catch (e) { /* non-fatal */ }
     setPaySaving(false); setShowPay(false);
     notify('Payment of ₹' + amt.toLocaleString('en-IN') + ' recorded.', 'success');
     await loadAll();

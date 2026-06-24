@@ -10,8 +10,9 @@ import { getNextExpenseRef } from '../lib/refs.js';
 import { loadOwners } from '../lib/ownerAccount.js';
 import { filesToPayloads, extractExpense, notifyOwnerExpense, extractErrMsg } from '../lib/staffExtract.js';
 import { openStoredFile } from '../lib/storage.js';
-import { ownerAdminIds, createNotifications } from '../lib/notifications.js';
+import { createNotifications } from '../lib/notifications.js';
 import { sendPush } from '../lib/push.js';
+import { resolveAudience } from '../lib/notifyPrefs.js';
 
 export function ExpensesModule({ onNavigate }) {
   const [rows, setRows] = React.useState([]);
@@ -97,9 +98,13 @@ export function ExpensesModule({ onNavigate }) {
     if (!editRow && form.paid_by && ownerMap[form.paid_by]) {
       const payer = ownerMap[form.paid_by];
       const summary = { amount: amt, description: form.description.trim(), category: EXPENSE_CAT_LABEL(form.category), date: form.date, paid_by_name: payer.name };
-      if (form.notify_email) { const emails = owners.map((o) => o.email).filter(Boolean); notifyOwnerExpense(emails, summary).then((r) => { if (r && r.ok && r.sent) notify('Owners emailed about this expense.', 'success'); }).catch(() => {}); }
+      const notifBody = payer.name + ' paid ' + inr(amt) + ' for ' + summary.description;
+      resolveAudience('owner_expense').then((aud) => {
+        createNotifications(aud.inappIds, { type: 'owner_expense', title: 'Expense recorded', body: notifBody, doc_ref: payload.expense_no || '', link_page: 'owner-account' });
+        sendPush(aud.pushIds, { title: 'Expense recorded — ' + (payload.expense_no || ''), body: notifBody, url: window.location.origin + '/?go=owner', tag: payload.expense_no || 'expense' });
+        if (aud.emailAddrs.length) notifyOwnerExpense(aud.emailAddrs, summary).catch(() => {});
+      }).catch(() => {});
       if (form.notify_wa) { const other = owners.find((o) => o.user_id !== form.paid_by) || payer; const msg = payer.name + ' paid ' + inr(amt) + ' for ' + summary.description + ' (' + summary.category + ') on ' + fmtDate(form.date, { day: 'numeric', month: 'short', year: 'numeric' }) + '. Reimbursement requested.'; try { window.open(waLink(other.phone, msg), '_blank'); } catch (e) { /* noop */ } }
-      ownerAdminIds().then((ids) => { createNotifications(ids, { type: 'owner_expense', title: 'Expense recorded', body: payer.name + ' paid ' + inr(amt) + ' for ' + summary.description, doc_ref: payload.expense_no || '', link_page: 'owner-account' }); sendPush(ids, { title: 'Expense recorded — ' + (payload.expense_no || ''), body: payer.name + ' paid ' + inr(amt) + ' for ' + summary.description, url: window.location.origin + '/?go=owner', tag: payload.expense_no || 'expense' }); }).catch(() => {});
     }
     notify(editRow ? 'Expense updated.' : 'Expense recorded.', 'success'); setShowForm(false); load();
   };
@@ -182,9 +187,8 @@ export function ExpensesModule({ onNavigate }) {
               <div><label className="field-label">Receipt</label><input type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files && e.target.files[0])} style={{ fontSize: 12 }} /></div>
               <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8 }}><input type="checkbox" checked={form.is_recurring} onChange={(e) => setF('is_recurring', e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--pink)' }} /><span style={{ fontSize: 13 }}>Recurring</span>{form.is_recurring && <select className="field-input" style={{ width: 140 }} value={form.recurring_frequency} onChange={(e) => setF('recurring_frequency', e.target.value)}>{[['monthly', 'Monthly'], ['quarterly', 'Quarterly'], ['yearly', 'Yearly']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>}</div>
               {form.paid_by && !editRow && <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', background: 'var(--pink-light)', borderRadius: 'var(--radius-md)', padding: '8px 12px' }}>
-                <span style={{ fontSize: 12.5, color: 'var(--pink-dark)', fontWeight: 500 }}>Owner-funded — alert the owners:</span>
-                <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={form.notify_wa} onChange={(e) => setF('notify_wa', e.target.checked)} /> 💬 WhatsApp</label>
-                <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={form.notify_email} onChange={(e) => setF('notify_email', e.target.checked)} /> ✉️ Email both</label>
+                <span style={{ fontSize: 12.5, color: 'var(--pink-dark)', fontWeight: 500 }}>Owners are alerted per their notification settings (in-app · push · email).</span>
+                <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={form.notify_wa} onChange={(e) => setF('notify_wa', e.target.checked)} /> 💬 Also WhatsApp the other owner</label>
               </div>}
               <div style={{ gridColumn: '1 / -1' }}><label className="field-label">Notes</label><textarea className="field-textarea" rows={2} value={form.notes} onChange={(e) => setF('notes', e.target.value)} placeholder="optional" /></div>
             </div>

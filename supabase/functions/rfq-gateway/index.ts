@@ -45,6 +45,13 @@ function json(body: unknown, status = 200) {
 }
 const enc = new TextEncoder();
 
+// Per-user notification pref (server mirror of lib/notifyPrefs.js). Submissions default ON.
+function prefOn(prefs: any, ev: string, ch: string): boolean {
+  const p = prefs && prefs[ev];
+  if (p && typeof p[ch] === "boolean") return p[ch];
+  return true;
+}
+
 // extract_* helpers: build a Claude content block per file, and validate an uploaded set.
 function fileBlock(f: any) {
   return f.media_type === "application/pdf"
@@ -369,10 +376,21 @@ Deno.serve(async (req) => {
           ? ((vendorName || "A vendor") + " priced" + (clientName ? (" — client " + clientName) : "") + (evType ? (" · " + evType) : ""))
           : ((clientName || "A client") + (evType ? (" · " + evType) : "") + (revNo > 1 ? (" · rev " + revNo) : ""));
 
-        // Email — recipients from the company profile.
+        const evKey = isVendor ? "vendor_bid" : "rfq_submitted";
+        // Audience (owners/admins) partitioned by each user's notification prefs.
+        let inappIds: string[] = [], pushIds: string[] = [], personalEmails: string[] = [];
+        try {
+          const { data: us } = await db.from("users").select("user_id,email,role,is_owner,notify_prefs").eq("is_deleted", false);
+          const aud = (us || []).filter((u: any) => u.is_owner || u.role === "admin");
+          inappIds = aud.filter((u: any) => prefOn(u.notify_prefs, evKey, "inapp")).map((u: any) => u.user_id);
+          pushIds = aud.filter((u: any) => prefOn(u.notify_prefs, evKey, "push")).map((u: any) => u.user_id);
+          personalEmails = aud.filter((u: any) => prefOn(u.notify_prefs, evKey, "email")).map((u: any) => u.email).filter(Boolean);
+        } catch (e) { console.error("[submit_rfq] audience", e); }
+
+        // Email — company inbox (always) + owners who opted into email, deduped.
         try {
           const { data: st } = await db.from("settings").select("email,notify_email_2").limit(1).maybeSingle();
-          const recips = [st?.email, st?.notify_email_2].filter((e: any) => e && /\S+@\S+\.\S+/.test(String(e)));
+          const recips = [...new Set([st?.email, st?.notify_email_2, ...personalEmails].filter((e: any) => e && /\S+@\S+\.\S+/.test(String(e))).map((e: any) => String(e).toLowerCase()))];
           if (recips.length) {
             const subject = "[Isheeka] " + headline + " — " + docId;
             const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>${emailLine}</p><p><a href="${url}" style="display:inline-block;background:#e8185a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Open ${docId} →</a></p><p style="color:#888;font-size:12px">${url}</p></div>`;
@@ -381,25 +399,21 @@ Deno.serve(async (req) => {
           }
         } catch (e) { console.error("[submit_rfq] notify", e); }
 
-        // In-app notifications + web push → owners/admins.
+        // In-app notifications.
         try {
-          const { data: us } = await db.from("users").select("user_id,role,is_owner").eq("is_deleted", false);
-          const recips = (us || []).filter((u: any) => u.is_owner || u.role === "admin").map((u: any) => u.user_id);
-          if (recips.length) {
+          if (inappIds.length) {
             const link_opts = { rfqId: targetRfq };
-            const rows = recips.map((uid: string) => ({ recipient_user_id: uid, type: isVendor ? "vendor_bid" : "rfq_submitted", title: headline, body: inappBody, doc_ref: docId, link_page: "rfqs", link_opts }));
+            const rows = inappIds.map((uid: string) => ({ recipient_user_id: uid, type: evKey, title: headline, body: inappBody, doc_ref: docId, link_page: "rfqs", link_opts }));
             await db.from("notifications").insert(rows);
-            try {
-              if (PUSH_INTERNAL_SECRET) {
-                await fetch(SUPABASE_URL + "/functions/v1/push-send", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", "x-internal-secret": PUSH_INTERNAL_SECRET },
-                  body: JSON.stringify({ user_ids: recips, payload: { title: headline + " — " + docId, body: inappBody, url, tag: docId } }),
-                });
-              }
-            } catch (e) { /* push best-effort */ }
           }
         } catch (e) { console.error("[submit_rfq] notify-inapp", e); }
+
+        // Web push.
+        try {
+          if (pushIds.length && PUSH_INTERNAL_SECRET) {
+            await fetch(SUPABASE_URL + "/functions/v1/push-send", { method: "POST", headers: { "Content-Type": "application/json", "x-internal-secret": PUSH_INTERNAL_SECRET }, body: JSON.stringify({ user_ids: pushIds, payload: { title: headline + " — " + docId, body: inappBody, url, tag: docId } }) });
+          }
+        } catch (e) { /* push best-effort */ }
         return json({ ok: true, revision_number: revNo });
       }
 
