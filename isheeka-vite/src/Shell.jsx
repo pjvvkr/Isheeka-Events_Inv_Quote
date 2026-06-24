@@ -85,6 +85,15 @@ export default function Shell() {
     return () => { events.forEach((e) => document.removeEventListener(e, resetTimers)); clearTimeout(warningTimer.current); clearTimeout(logoutTimer.current); };
   }, [user, resetTimers]);
 
+  // Deep link: ?rfq=<id> (from the email alerts) opens that RFQ once signed in, then cleans the URL.
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const id = new URLSearchParams(window.location.search).get('rfq');
+      if (id) { navigate('rfqs', { rfqId: id, label: 'RFQ' }); window.history.replaceState({}, '', window.location.pathname); }
+    } catch (e) { /* noop */ }
+  }, [user]);
+
   const loadReviewCount = useCallback(async () => {
     try {
       const { count } = await supabase.from('rfqs').select('rfq_id', { count: 'exact', head: true }).eq('is_deleted', false).eq('party_type', 'client').eq('status', 'submitted');

@@ -374,8 +374,8 @@ function mergeExtracted(list){
     }
     if(!seName){ if(!subEvents.length) subEvents.push({name:'General',planned_date:null}); seName=subEvents[0].name; }
     const qty=Math.max(1,Math.round(Number(ex.quantity)||1));
-    const dup=items.find(it=>it.sub_event_name===seName && it.description.toLowerCase()===desc.toLowerCase());
-    if(dup){ dup.quantity=Math.max(dup.quantity,qty); } else { items.push({sub_event_name:seName,description:desc,quantity:qty,source:'attachment'}); added++; }
+    // Keep every imported line as its own row (no auto-merge) — duplicates are removed in review.
+    items.push({sub_event_name:seName,description:desc,quantity:qty,source:'attachment'}); added++;
   });
   return added;
 }
@@ -393,8 +393,7 @@ async function extractItemsChunked(opts){
   const results=await Promise.all(calls.map(c=>api('extract_items',Object.assign({session},c))));
   const ok=results.filter(r=>r&&r.ok);
   if(!ok.length) return results.find(r=>r&&r.error)||{ok:false,error:'extract_failed'};
-  const seen={},items=[];
-  ok.forEach(r=>(r.items||[]).forEach(it=>{ const k=(it.description||'').toLowerCase()+'|'+(it.sub_event||''); if(!seen[k]){ seen[k]=1; items.push(it); } }));
+  const items=[]; ok.forEach(r=>(r.items||[]).forEach(it=>items.push(it)));   // keep all (no de-dup)
   return {ok:true,items};
 }
 async function extractFromText(){

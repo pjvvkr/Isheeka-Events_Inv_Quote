@@ -28,6 +28,7 @@ const LINK_TTL_DAYS = parseInt(Deno.env.get("LINK_TTL_DAYS") ?? "21", 10);
 const OTP_TTL_MIN = parseInt(Deno.env.get("OTP_TTL_MIN") ?? "10", 10);
 const MAX_ATTEMPTS = parseInt(Deno.env.get("MAX_ATTEMPTS") ?? "5", 10);
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";   // for extract_items (attachment → item list)
+const ERP_URL = Deno.env.get("ERP_URL") ?? "https://isheeka-events-erp.netlify.app";   // deep-link base for staff submission alerts
 const SESSION_TTL_MIN = 120;
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
@@ -344,6 +345,24 @@ Deno.serve(async (req) => {
         await db.from("rfq_revisions").insert({ rfq_id: s.rfq_id, revision_number: revNo, snapshot, submitted_by: who });
         await db.from("rfqs").update({ status: "submitted", revision_number: revNo, client_submitted_at: new Date().toISOString() }).eq("rfq_id", s.rfq_id);
         await logActivity(s.rfq_id, who, "submitted", "Revision " + revNo);
+        // Notify staff by email (non-fatal) — recipients from the company profile.
+        try {
+          const { data: st } = await db.from("settings").select("email,notify_email_2").limit(1).maybeSingle();
+          const recips = [st?.email, st?.notify_email_2].filter((e: any) => e && /\S+@\S+\.\S+/.test(String(e)));
+          if (recips.length) {
+            const isVendor = r.party_type === "vendor";
+            const docId = r.ref_number || s.rfq_id;
+            const url = ERP_URL + "/?rfq=" + (isVendor ? (r.parent_rfq_id || s.rfq_id) : s.rfq_id);
+            const headline = isVendor ? "Vendor bid received" : "Client RFQ submitted";
+            const line = isVendor
+              ? "A vendor has submitted their pricing for " + docId + "."
+              : "A client has submitted their requirements for " + docId + (revNo > 1 ? " (revision " + revNo + ")" : "") + ".";
+            const subject = "[Isheeka] " + headline + " — " + docId;
+            const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>${line}</p><p><a href="${url}" style="display:inline-block;background:#e8185a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Open ${docId} →</a></p><p style="color:#888;font-size:12px">${url}</p></div>`;
+            const text = line + "\n\nOpen: " + url;
+            for (const to of recips) { try { await sendEmail({ to: String(to), subject, html, text }); } catch (e) { /* per-recipient */ } }
+          }
+        } catch (e) { console.error("[submit_rfq] notify", e); }
         return json({ ok: true, revision_number: revNo });
       }
 
@@ -423,54 +442,65 @@ Deno.serve(async (req) => {
         if (!itemRows.length) return json({ error: "no_items" }, 400);
         const itemList = itemRows.map((it) => ({ id: it.rfq_item_id, description: it.description, quantity: it.quantity }));
 
-        const prompt =
+        // Batch the items (≤50/call) so a large client list never overflows the model's output.
+        const buildPrompt = (batch: any[]) =>
           "You are matching a vendor's price list to a FIXED list of items the customer needs. " +
-          "ITEMS (JSON): " + JSON.stringify(itemList) + ". " +
+          "ITEMS (JSON): " + JSON.stringify(batch) + ". " +
           "Read the vendor's price document/message and, for each item id above, find the vendor's matching PER-UNIT price. " +
           "The vendor's list may be in English, Telugu, Hindi or a mix and may be handwritten — read it faithfully. " +
           "Return ONLY a JSON array (no prose, no code fences) of objects: " +
           "{\"rfq_item_id\": string, \"unit_cost\": number|null, \"can_supply\": boolean, \"confidence\": \"high\"|\"low\", \"source\": string}. " +
           "IMPORTANT: include an entry ONLY for items you can actually match to something in the vendor's list (or that the vendor explicitly marks unavailable). " +
-          "OMIT every item you can't match — do not return null-price rows for unmatched items. Returning 2-6 matched items is normal. " +
+          "OMIT every item you can't match — do not return null-price rows for unmatched items. " +
           "unit_cost = per-unit price as a plain number (no currency symbols); if only a line total is given, divide by that item's quantity. " +
           "source = a short snippet of the vendor's own line the price came from (e.g. \"Stage decor - 45k\"). " +
           "confidence = \"high\" when the vendor's line clearly corresponds to the item; \"low\" when the wording differs a lot. " +
           "If the vendor marks an item unavailable, include it with can_supply=false and unit_cost=null. " +
           "Use ONLY the rfq_item_id values provided — never invent items.";
 
-        const content2: any[] = text
-          ? [{ type: "text", text: prompt + "\n\nVendor's price list:\n\n" + text }]
-          : [...files.map(fileBlock), { type: "text", text: prompt }];
+        const batches: any[][] = [];
+        for (let i = 0; i < itemList.length; i += 50) batches.push(itemList.slice(i, i + 50));
 
-        let aiText2 = "";
-        try {
-          const resp = await fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-            body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 8000, messages: [{ role: "user", content: content2 }] }),
-          });
-          if (!resp.ok) { const t = await resp.text(); console.error("[extract_costs] anthropic", resp.status, t); return json({ error: "extract_failed", status: resp.status }, 502); }
-          const data = await resp.json();
-          aiText2 = ((data?.content || []) as any[]).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
-        } catch (e) { console.error("[extract_costs] fetch", e); return json({ error: "extract_failed" }, 502); }
+        const callBatch = async (batch: any[]): Promise<{ ok: boolean; rows: any[] }> => {
+          const p = buildPrompt(batch);
+          const content2: any[] = text
+            ? [{ type: "text", text: p + "\n\nVendor's price list:\n\n" + text }]
+            : [...files.map(fileBlock), { type: "text", text: p }];
+          try {
+            const resp = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+              body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 8000, messages: [{ role: "user", content: content2 }] }),
+            });
+            if (!resp.ok) { console.error("[extract_costs] anthropic", resp.status, await resp.text()); return { ok: false, rows: [] }; }
+            const data = await resp.json();
+            const aiText2 = ((data?.content || []) as any[]).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
+            let t = aiText2.replace(/^```(json)?/i, "").replace(/```$/, "").trim();
+            const a = t.indexOf("["), b = t.lastIndexOf("]");
+            if (a >= 0 && b > a) t = t.slice(a, b + 1);
+            const arr = JSON.parse(t);
+            return { ok: true, rows: Array.isArray(arr) ? arr : [] };
+          } catch (e) { console.error("[extract_costs] batch", e); return { ok: false, rows: [] }; }
+        };
 
-        let parsed2: any[] = [];
-        try {
-          let t = aiText2.replace(/^```(json)?/i, "").replace(/```$/, "").trim();
-          const a = t.indexOf("["), b = t.lastIndexOf("]");
-          if (a >= 0 && b > a) t = t.slice(a, b + 1);
-          const p = JSON.parse(t);
-          if (Array.isArray(p)) parsed2 = p;
-        } catch (e) { console.error("[extract_costs] parse", aiText2); return json({ error: "extract_unreadable" }, 422); }
+        const batchResults = await Promise.all(batches.map(callBatch));
+        if (!batchResults.some((r) => r.ok)) return json({ error: "extract_unreadable" }, 422);
+        const parsed2 = batchResults.flatMap((r) => r.rows);
 
         const valid = new Set(itemRows.map((it) => String(it.rfq_item_id)));
-        const costs = parsed2.filter((c: any) => c && valid.has(String(c.rfq_item_id))).map((c: any) => ({
-          rfq_item_id: String(c.rfq_item_id),
-          unit_cost: (c.unit_cost == null || c.unit_cost === "") ? null : Math.max(0, Math.round(Number(c.unit_cost) || 0)),
-          can_supply: c.can_supply !== false,
-          confidence: (c.confidence === "low") ? "low" : "high",
-          source: c.source ? String(c.source).trim().slice(0, 120) : "",
-        }));
+        const byId = new Map<string, any>();
+        for (const c of parsed2) {
+          if (!c) continue; const id = String(c.rfq_item_id);
+          if (!valid.has(id) || byId.has(id)) continue;
+          byId.set(id, {
+            rfq_item_id: id,
+            unit_cost: (c.unit_cost == null || c.unit_cost === "") ? null : Math.max(0, Math.round(Number(c.unit_cost) || 0)),
+            can_supply: c.can_supply !== false,
+            confidence: (c.confidence === "low") ? "low" : "high",
+            source: c.source ? String(c.source).trim().slice(0, 120) : "",
+          });
+        }
+        const costs = [...byId.values()];
         return json({ ok: true, costs, matched: costs.filter((c) => c.unit_cost != null).length, total: itemRows.length });
       }
 

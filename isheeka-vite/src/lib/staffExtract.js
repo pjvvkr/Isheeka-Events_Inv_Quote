@@ -66,8 +66,7 @@ export async function extractItems(opts) {
   const results = await Promise.all(calls.map(extractOne));
   const ok = results.filter((r) => r && r.ok);
   if (!ok.length) return results.find((r) => r && r.error) || { ok: false, error: 'extract_failed' };
-  const seen = new Set(); const items = [];
-  ok.flatMap((r) => r.items || []).forEach((it) => { const k = (it.description || '').toLowerCase() + '|' + (it.sub_event || ''); if (!seen.has(k)) { seen.add(k); items.push(it); } });
+  const items = ok.flatMap((r) => r.items || []);   // keep every item (no de-dup) — review handles duplicates
   return { ok: true, items, partial: ok.length < results.length };
 }
 

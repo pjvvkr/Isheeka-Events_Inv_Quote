@@ -790,6 +790,10 @@ export function SettingsModule() {
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="email" label="Email" required type="email" placeholder="isheekaevents@gmail.com" />
             </div>
             <div className="form-grid">
+              <SettingsField form={form} errors={errors} handleChange={handleChange} field="notify_email_2" label="Notification email 2 (optional)" type="email" placeholder="second@isheekaevents.com" />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--grey-400)', margin: '-4px 0 10px' }}>📬 Submission alerts (client RFQ submitted · vendor bid received) are emailed to the Email above and to Notification email 2 if set.</div>
+            <div className="form-grid">
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="phone_1" label="Phone 1" required placeholder="+91 78423 95867" />
               <SettingsField form={form} errors={errors} handleChange={handleChange} field="phone_2" label="Phone 2" placeholder="+91 XXXXX XXXXX" />
             </div>
