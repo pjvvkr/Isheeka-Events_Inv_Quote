@@ -5,7 +5,8 @@
 import React from 'react';
 import { notify } from '../lib/toast.jsx';
 import { fmtDate, todayLocalStr, EXPENSE_CAT_LABEL } from '../lib/format.js';
-import { loadOwnerData, reconcile, expenseReimbursements, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, buildStatementCsv } from '../lib/ownerAccount.js';
+import { waLink } from '../lib/share.js';
+import { loadOwnerData, reconcile, expenseReimbursements, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, uploadOwnerProof, buildStatementCsv } from '../lib/ownerAccount.js';
 
 const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
 const MODES = [['', '—'], ['upi', 'UPI'], ['neft', 'Bank / NEFT'], ['cash', 'Cash'], ['cheque', 'Cheque'], ['card', 'Card'], ['other', 'Other']];
@@ -50,8 +51,8 @@ export function OwnerAccountModule({ onNavigate }) {
 
   const reimburseExpense = (e, st) => openType('reimbursement', { to_user: e.paid_by, amount: String(Math.round((st && st.remaining) || (parseFloat(e.amount) || 0))), expense_id: e.expense_id, _forExpenseNo: e.expense_no, notes: 'Reimbursement for ' + (e.expense_no || 'expense') });
 
-  const openType = (type, preset) => setForm({ entry_type: type, entry_date: todayLocalStr(), amount: '', from_user: '', to_user: '', expense_id: '', payment_mode: '', reference_number: '', notes: '', ...(preset || {}) });
-  const openEdit = (l) => setForm({ ledger_id: l.ledger_id, entry_type: l.entry_type, entry_date: l.entry_date, amount: String(l.amount || ''), from_user: l.from_user || '', to_user: l.to_user || '', expense_id: l.expense_id || '', payment_mode: l.payment_mode || '', reference_number: l.reference_number || '', notes: l.notes || '' });
+  const openType = (type, preset) => setForm({ entry_type: type, entry_date: todayLocalStr(), amount: '', from_user: '', to_user: '', expense_id: '', attachment_url: '', _proofFile: null, _proofName: '', notify_wa: true, payment_mode: '', reference_number: '', notes: '', ...(preset || {}) });
+  const openEdit = (l) => setForm({ ledger_id: l.ledger_id, entry_type: l.entry_type, entry_date: l.entry_date, amount: String(l.amount || ''), from_user: l.from_user || '', to_user: l.to_user || '', expense_id: l.expense_id || '', attachment_url: l.attachment_url || '', _proofFile: null, _proofName: '', notify_wa: false, payment_mode: l.payment_mode || '', reference_number: l.reference_number || '', notes: l.notes || '' });
   const setFf = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const saveEntry = async () => {
@@ -62,8 +63,21 @@ export function OwnerAccountModule({ onNavigate }) {
     if (form.entry_type === 'settlement' && (!form.from_user || !form.to_user)) { notify('Pick both owners.', 'error'); return; }
     if (form.entry_type === 'settlement' && form.from_user === form.to_user) { notify('From and To must differ.', 'error'); return; }
     setSaving(true);
-    const { error } = form.ledger_id ? await updateLedgerEntry(form.ledger_id, form) : await addLedgerEntry(form);
+    let entry = form;
+    if (form._proofFile) { const url = await uploadOwnerProof(form._proofFile); if (url) entry = { ...form, attachment_url: url }; else notify("Couldn't upload the proof — saving without it.", 'error'); }
+    const { error } = form.ledger_id ? await updateLedgerEntry(form.ledger_id, entry) : await addLedgerEntry(entry);
     setSaving(false); if (error) return;
+    if (form.notify_wa) {
+      let recip = owners.find((o) => o.user_id === form.to_user);
+      if (!recip && form.entry_type === 'funding') recip = owners.find((o) => o.user_id !== form.from_user);
+      if (recip) {
+        const amtStr = inr(amt);
+        const msg = form.entry_type === 'reimbursement' ? ('Reimbursed you ' + amtStr + (form._forExpenseNo ? (' for ' + form._forExpenseNo) : '') + '.')
+          : form.entry_type === 'funding' ? (nameOf(form.from_user) + ' added ' + amtStr + ' funding to the business.')
+            : ('Paid you ' + amtStr + '.');
+        try { window.open(waLink(recip.phone, msg), '_blank'); } catch (e) { /* noop */ }
+      }
+    }
     notify(form.ledger_id ? 'Entry updated.' : 'Entry recorded.', 'success'); setForm(null); load();
   };
   const removeEntry = async (l) => { if (!window.confirm('Delete this ' + (TYPE_META[l.entry_type] || {}).l + ' entry?')) return; const { error } = await deleteLedgerEntry(l.ledger_id); if (!error) { notify('Deleted.', 'success'); load(); } };
@@ -134,7 +148,7 @@ export function OwnerAccountModule({ onNavigate }) {
               <span style={{ fontSize: 12, color: 'var(--grey-400)', width: 56, flexShrink: 0 }}>{fmtDate(f.date, { day: 'numeric', month: 'short' })}</span>
               <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: m.bg, color: m.c, flexShrink: 0 }}>{m.l}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.refNo && <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--grey-400)', marginRight: 6 }}>{f.refNo}</span>}{f.label}</div>
+                <div style={{ fontSize: 13, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.refNo && <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--grey-400)', marginRight: 6 }}>{f.refNo}</span>}{f.label}{f.entry && f.entry.attachment_url && <a href={f.entry.attachment_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ marginLeft: 6, color: 'var(--pink)' }}>📎</a>}</div>
                 {f.sub && <div style={{ fontSize: 11.5, color: 'var(--grey-400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.sub}</div>}
               </div>
               <span style={{ fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{inr(f.amount)}</span>
@@ -174,7 +188,7 @@ function EntryModal({ form, owners, setFf, saving, onSave, onClose }) {
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--grey-800)' }}>{form.ledger_id ? 'Edit entry' : 'Add entry'}</div>
           <button className="btn sm" onClick={onClose}>✕</button>
         </div>
-        <div style={{ padding: 22 }}>
+        <div style={{ padding: 22 }} onPaste={(e) => { const items = (e.clipboardData || {}).items || []; for (const it of items) { if (it.type && it.type.indexOf('image') === 0) { const f = it.getAsFile(); if (f) { setFf('_proofFile', f); setFf('_proofName', f.name || 'pasted-image.png'); } e.preventDefault(); break; } } }}>
           {!form.ledger_id && !form.expense_id && <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
             {['funding', 'reimbursement', 'settlement'].map((k) => (
               <button key={k} className={'btn sm' + (t === k ? ' primary' : '')} onClick={() => setFf('entry_type', k)}>{TYPE_META[k].l}</button>
@@ -198,6 +212,18 @@ function EntryModal({ form, owners, setFf, saving, onSave, onClose }) {
             <div><label className="field-label">Payment mode</label><select className="field-input" value={form.payment_mode} onChange={(e) => setFf('payment_mode', e.target.value)}>{MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
             <div><label className="field-label">Reference no.</label><input className="field-input" value={form.reference_number} onChange={(e) => setFf('reference_number', e.target.value)} placeholder="optional" /></div>
             <div style={{ gridColumn: '1 / -1' }}><label className="field-label">Notes</label><textarea className="field-textarea" rows={2} value={form.notes} onChange={(e) => setFf('notes', e.target.value)} placeholder="optional" /></div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="field-label">Proof (optional)</label>
+              <div style={{ border: '1px dashed var(--grey-200)', borderRadius: 'var(--radius-md)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <label className="btn sm" style={{ cursor: 'pointer' }}>📷 Photo<input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) { setFf('_proofFile', f); setFf('_proofName', f.name); } e.target.value = ''; }} /></label>
+                <label className="btn sm" style={{ cursor: 'pointer' }}>📎 File<input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) { setFf('_proofFile', f); setFf('_proofName', f.name); } e.target.value = ''; }} /></label>
+                <span style={{ fontSize: 11.5, color: 'var(--grey-400)' }}>or paste a screenshot (Ctrl/Cmd-V)</span>
+                {(form._proofName || form.attachment_url) && <span style={{ fontSize: 11.5, color: 'var(--green)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>🖼 {form._proofName || 'attached'} <span style={{ cursor: 'pointer', color: 'var(--grey-400)' }} onClick={() => { setFf('_proofFile', null); setFf('_proofName', ''); setFf('attachment_url', ''); }}>✕</span></span>}
+              </div>
+            </div>
+            <label style={{ gridColumn: '1 / -1', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--green-light)', borderRadius: 'var(--radius-md)', padding: '8px 12px' }}>
+              <input type="checkbox" checked={!!form.notify_wa} onChange={(e) => setFf('notify_wa', e.target.checked)} /> 💬 Notify the other owner on WhatsApp (opens pre-filled on save)
+            </label>
           </div>
         </div>
         <div style={{ padding: '14px 22px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

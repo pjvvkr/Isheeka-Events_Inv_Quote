@@ -1,13 +1,14 @@
 // Reports module — KPI dashboard, 12-month charts, pipeline, per-event P&L,
 // Excel + PDF exports. Ported verbatim except jsPDF comes from npm (not window.jspdf).
 import React from 'react';
-import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { supabase } from '../lib/supabase';
 import { notify } from '../lib/toast.jsx';
 import { todayLocalStr, fmtDate, leadStageDisplay } from '../lib/format.js';
 import { EventQuickView } from '../components/EventQuickView.jsx';
+import { ReceivablesReport, PayablesReport, OwnerSettlementReport } from './ReportViews.jsx';
+import { downloadBrandedWorkbook } from '../lib/brandedXlsx.js';
 
 export function ReportsModule({ onNavigate }) {
   const [loading, setLoading] = React.useState(true);
@@ -19,6 +20,9 @@ export function ReportsModule({ onNavigate }) {
   const [events, setEvents] = React.useState([]);
   const [leads, setLeads] = React.useState([]);
   const [popupEvent, setPopupEvent] = React.useState(null);
+  const [tab, setTab] = React.useState('overview');   // overview | receivables | payables | settlement
+  const [cFrom, setCFrom] = React.useState(new Date().getFullYear() + '-01-01');
+  const [cTo, setCTo] = React.useState(todayLocalStr());
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -39,6 +43,7 @@ export function ReportsModule({ onNavigate }) {
   const today = todayLocalStr(); const now = new Date(); const yr = now.getFullYear();
   const rangeBounds = () => {
     if (range === 'all') return [null, null];
+    if (range === 'custom') { let e = null; if (cTo) { const d = new Date(cTo + 'T00:00:00'); d.setDate(d.getDate() + 1); e = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); } return [cFrom || null, e]; }
     if (range === 'year') return [yr + '-01-01', (yr + 1) + '-01-01'];
     if (range === 'month') { const m = String(now.getMonth() + 1).padStart(2, '0'); const nm = now.getMonth() === 11 ? (yr + 1) + '-01-01' : yr + '-' + String(now.getMonth() + 2).padStart(2, '0') + '-01'; return [yr + '-' + m + '-01', nm]; }
     const q = Math.floor(now.getMonth() / 3); const sm = q * 3; const start = yr + '-' + String(sm + 1).padStart(2, '0') + '-01';
@@ -46,7 +51,7 @@ export function ReportsModule({ onNavigate }) {
   };
   const [rStart, rEnd] = rangeBounds();
   const inRange = (d) => { if (!d) return false; const s = String(d).slice(0, 10); if (rStart && s < rStart) return false; if (rEnd && s >= rEnd) return false; return true; };
-  const rangeLabel = { month: 'This month', quarter: 'This quarter', year: 'This year', all: 'All time' }[range];
+  const rangeLabel = range === 'custom' ? (cFrom + ' to ' + cTo) : { month: 'This month', quarter: 'This quarter', year: 'This year', all: 'All time' }[range];
 
   // ---- locked profitability helpers ----
   const invEvent = {}; invoices.forEach((i) => { invEvent[i.invoice_id] = i.event_id; });
@@ -117,37 +122,27 @@ export function ReportsModule({ onNavigate }) {
   const rangeExpenses = expenses.filter((x) => range === 'all' || inRange(x.date));
   const rangeVpays = vpays.filter((x) => !x.is_voided && (range === 'all' || inRange(x.payment_date)));
   const stamp = todayLocalStr();
-  const safeRange = ({ month: 'Month', quarter: 'Quarter', year: 'Year', all: 'AllTime' }[range]);
+  const safeRange = ({ month: 'Month', quarter: 'Quarter', year: 'Year', all: 'AllTime', custom: 'Custom' }[range]);
 
   const doExportExcel = async () => {
     setExporting(true);
     try {
-      const { data: s } = await supabase.from('settings').select('company_name').single();
+      const { data: s } = await supabase.from('settings').select('company_name').maybeSingle();
       const co = (s && s.company_name) || 'Isheeka Events';
-      const wb = XLSX.utils.book_new();
-      const sum = [[co + ' — Performance Report'], [rangeLabel + '  (generated ' + stamp + ')'], [],
-        ['KPI', 'Amount (₹)'],
-        ['Billed (fee)', Math.round(billed)],
-        ['Collected', Math.round(collected)],
-        ['Outstanding (current, all open)', Math.round(outstanding)],
-        ['Expenses', Math.round(totExp)],
-        ['Vendor payments', Math.round(totVend)],
-        ['Event profit (sum)', Math.round(sumEventProfit)],
-        ['General/overhead expenses', Math.round(genExpRange)],
-        ['Net profit (period)', Math.round(periodProfit)],
+      const sumRows = [
+        ['Billed (fee)', Math.round(billed)], ['Collected', Math.round(collected)], ['Outstanding (current, all open)', Math.round(outstanding)],
+        ['Expenses', Math.round(totExp)], ['Vendor payments', Math.round(totVend)], ['Event profit (sum)', Math.round(sumEventProfit)],
+        ['General/overhead expenses', Math.round(genExpRange)], ['Net profit (period)', Math.round(periodProfit)],
       ];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), 'Summary');
-      const pnl = [['Event ref', 'Event', 'Date', 'Client', 'Fee', 'Expenses', 'Vendors', 'Profit', 'Margin %']];
-      perEvent.forEach((e) => pnl.push([e.ref_number || '', e.name || '', e.main_date || '', e.client_name || '', Math.round(e.fee), Math.round(e.ex), Math.round(e.vn), Math.round(e.profit), e.fee > 0 ? Math.round(e.margin) : '']));
-      pnl.push(['', 'TOTAL (' + perEvent.length + ' events)', '', '', Math.round(perEvent.reduce((s, e) => s + e.fee, 0)), Math.round(perEvent.reduce((s, e) => s + e.ex, 0)), Math.round(perEvent.reduce((s, e) => s + e.vn, 0)), Math.round(sumEventProfit), '']);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pnl), 'Per-Event P&L');
-      const exl = [['Date', 'Category', 'Event', 'Amount']];
-      rangeExpenses.slice().sort((a, b) => String(b.date || '').localeCompare(a.date || '')).forEach((x) => exl.push([x.date || '', x.category || '', x.event_id ? (evRefMap[x.event_id] || x.event_id) : 'General', Math.round(parseFloat(x.amount) || 0)]));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(exl), 'Expenses');
-      const vpl = [['Date', 'Event', 'Amount']];
-      rangeVpays.slice().sort((a, b) => String(b.payment_date || '').localeCompare(a.payment_date || '')).forEach((x) => vpl.push([x.payment_date || '', x.event_id ? (evRefMap[x.event_id] || x.event_id) : '—', Math.round(parseFloat(x.amount) || 0)]));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(vpl), 'Vendor Payments');
-      XLSX.writeFile(wb, 'Isheeka_Report_' + safeRange + '_' + stamp + '.xlsx');
+      const pnlRows = perEvent.map((e) => [e.ref_number || '', e.name || '', e.main_date || '', e.client_name || '', Math.round(e.fee), Math.round(e.ex), Math.round(e.vn), Math.round(e.profit), e.fee > 0 ? Math.round(e.margin) : '']);
+      const expRows = rangeExpenses.slice().sort((a, b) => String(b.date || '').localeCompare(a.date || '')).map((x) => [x.date || '', x.category || '', x.event_id ? (evRefMap[x.event_id] || x.event_id) : 'General', Math.round(parseFloat(x.amount) || 0)]);
+      const vpRows = rangeVpays.slice().sort((a, b) => String(b.payment_date || '').localeCompare(a.payment_date || '')).map((x) => [x.payment_date || '', x.event_id ? (evRefMap[x.event_id] || x.event_id) : '—', Math.round(parseFloat(x.amount) || 0)]);
+      await downloadBrandedWorkbook('Isheeka_Report_' + safeRange + '_' + stamp + '.xlsx', co, [
+        { name: 'Summary', title: 'Performance report', subtitle: rangeLabel + ' · generated ' + stamp, columns: [{ label: 'KPI', width: 32 }, { label: 'Amount', width: 18, align: 'right', fmt: 'money' }], rows: sumRows },
+        { name: 'Per-Event P&L', title: 'Per-event P&L', subtitle: rangeLabel, columns: [{ label: 'Ref', width: 12 }, { label: 'Event', width: 22 }, { label: 'Date', width: 12 }, { label: 'Client', width: 18 }, { label: 'Fee', width: 13, align: 'right', fmt: 'money' }, { label: 'Expenses', width: 13, align: 'right', fmt: 'money' }, { label: 'Vendors', width: 13, align: 'right', fmt: 'money' }, { label: 'Profit', width: 13, align: 'right', fmt: 'money' }, { label: 'Margin %', width: 10, align: 'right' }], rows: pnlRows, totals: ['', 'TOTAL (' + perEvent.length + ')', '', '', Math.round(perEvent.reduce((a, e) => a + e.fee, 0)), Math.round(perEvent.reduce((a, e) => a + e.ex, 0)), Math.round(perEvent.reduce((a, e) => a + e.vn, 0)), Math.round(sumEventProfit), ''] },
+        { name: 'Expenses', title: 'Expenses', subtitle: rangeLabel, columns: [{ label: 'Date', width: 12 }, { label: 'Category', width: 18 }, { label: 'Event', width: 26 }, { label: 'Amount', width: 14, align: 'right', fmt: 'money' }], rows: expRows },
+        { name: 'Vendor Payments', title: 'Vendor payments', subtitle: rangeLabel, columns: [{ label: 'Date', width: 12 }, { label: 'Event', width: 26 }, { label: 'Amount', width: 14, align: 'right', fmt: 'money' }], rows: vpRows },
+      ]);
       notify('Excel report downloaded.', 'success');
     } catch (err) { console.error('[Isheeka ERP] excel export failed:', err); notify('Could not export Excel: ' + (err && err.message ? err.message : 'try again'), 'error'); }
     setExporting(false);
@@ -200,15 +195,22 @@ export function ReportsModule({ onNavigate }) {
       {popupEvent && <EventQuickView eventId={popupEvent} onClose={() => setPopupEvent(null)} onNavigate={onNavigate} />}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>Reports</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {tab === 'overview' && <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {range === 'custom' && <><input type="date" className="field-input" style={{ width: 140, fontSize: 12 }} value={cFrom} onChange={(e) => setCFrom(e.target.value)} /><span style={{ color: 'var(--grey-400)' }}>→</span><input type="date" className="field-input" style={{ width: 140, fontSize: 12 }} value={cTo} onChange={(e) => setCTo(e.target.value)} /></>}
           <div style={{ display: 'flex', gap: 4, background: 'var(--grey-100)', padding: 3, borderRadius: 'var(--radius-md)' }}>
-            {[['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year'], ['all', 'All']].map(([k, l]) => <button key={k} onClick={() => setRange(k)} style={{ border: 'none', cursor: 'pointer', fontSize: 12, padding: '5px 12px', borderRadius: 'var(--radius-sm)', background: range === k ? 'white' : 'transparent', color: range === k ? 'var(--pink)' : 'var(--grey-400)', fontWeight: range === k ? 600 : 400, boxShadow: range === k ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>{l}</button>)}
+            {[['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year'], ['all', 'All'], ['custom', 'Custom']].map(([k, l]) => <button key={k} onClick={() => setRange(k)} style={{ border: 'none', cursor: 'pointer', fontSize: 12, padding: '5px 12px', borderRadius: 'var(--radius-sm)', background: range === k ? 'white' : 'transparent', color: range === k ? 'var(--pink)' : 'var(--grey-400)', fontWeight: range === k ? 600 : 400, boxShadow: range === k ? '0 1px 2px rgba(0,0,0,0.08)' : 'none' }}>{l}</button>)}
           </div>
           <button className="btn sm" disabled={exporting} onClick={doExportExcel} title="Export to Excel">{exporting ? '…' : '⬇ Excel'}</button>
           <button className="btn sm" disabled={exporting} onClick={doExportPDF} title="Export to PDF">{exporting ? '…' : '⬇ PDF'}</button>
-        </div>
+        </div>}
       </div>
 
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--grey-100)', flexWrap: 'wrap' }}>
+        {[['overview', 'Overview'], ['receivables', 'Receivables'], ['payables', 'Payables'], ['settlement', 'Owner settlement']].map(([k, l]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, padding: '8px 12px', color: tab === k ? 'var(--pink)' : 'var(--grey-500)', fontWeight: tab === k ? 600 : 400, borderBottom: tab === k ? '2px solid var(--pink)' : '2px solid transparent', marginBottom: -1 }}>{l}</button>
+        ))}
+      </div>
+      {tab === 'receivables' ? <ReceivablesReport /> : tab === 'payables' ? <PayablesReport /> : tab === 'settlement' ? <OwnerSettlementReport /> : (<>
       {/* KPI cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 16 }}>
         {[['Billed (fee)', billed, 'var(--blue)', '📄'], ['Collected', collected, 'var(--green)', '💰'], ['Outstanding', outstanding, 'var(--red)', '⏳'], ['Expenses + vendors', totExp + totVend, 'var(--orange)', '🧾'], ['Net profit', periodProfit, periodProfit >= 0 ? 'var(--green)' : 'var(--red)', '📈']].map(([l, v, c, ic]) => (
@@ -284,6 +286,7 @@ export function ReportsModule({ onNavigate }) {
           </div>
         </>}
       </div>
+      </>)}
     </div>
   );
 }

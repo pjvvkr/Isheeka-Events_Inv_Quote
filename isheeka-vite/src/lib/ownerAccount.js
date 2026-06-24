@@ -25,7 +25,7 @@ export async function loadOwners() {
 export async function loadOwnerData() {
   const [owners, expRes, ledRes] = await Promise.all([
     loadOwners(),
-    supabase.from('expenses').select('expense_id,amount,date,description,category,paid_by,payment_mode,event_id,receipt_url').eq('is_deleted', false).order('date', { ascending: false }),
+    supabase.from('expenses').select('expense_id,expense_no,amount,date,description,category,paid_by,payment_mode,event_id,receipt_url').eq('is_deleted', false).order('date', { ascending: false }),
     supabase.from('owner_ledger').select('*').eq('is_deleted', false).order('entry_date', { ascending: false }),
   ]);
   return { owners, expenses: expRes.data || [], ledger: ledRes.data || [] };
@@ -75,6 +75,7 @@ export async function addLedgerEntry(entry) {
     from_user: entry.from_user || null,
     to_user: entry.to_user || null,
     expense_id: entry.expense_id || null,
+    attachment_url: entry.attachment_url || null,
     payment_mode: entry.payment_mode || null,
     reference_number: entry.reference_number || null,
     notes: entry.notes || null,
@@ -89,7 +90,7 @@ export async function updateLedgerEntry(id, entry) {
     entry_type: entry.entry_type, entry_date: entry.entry_date,
     amount: Math.max(0, Math.round(parseFloat(entry.amount) || 0)),
     from_user: entry.from_user || null, to_user: entry.to_user || null,
-    expense_id: entry.expense_id || null,
+    expense_id: entry.expense_id || null, attachment_url: entry.attachment_url || null,
     payment_mode: entry.payment_mode || null, reference_number: entry.reference_number || null,
     notes: entry.notes || null, updated_at: new Date().toISOString(),
   };
@@ -112,6 +113,19 @@ export function expenseReimbursements(expenses, ledger) {
 
 export async function deleteLedgerEntry(id) {
   return await runDb(supabase.from('owner_ledger').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('ledger_id', id), 'delete entry');
+}
+
+// Upload a proof image/file to storage; returns the public URL (or null on failure).
+export async function uploadOwnerProof(file) {
+  if (!file) return null;
+  try {
+    const ext = ((file.name || 'img').split('.').pop() || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'png';
+    const path = 'receipts/owner/ol_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext;
+    const { error } = await supabase.storage.from('quotations').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true });
+    if (error) return null;
+    const { data } = supabase.storage.from('quotations').getPublicUrl(path);
+    return (data && data.publicUrl) || null;
+  } catch (e) { return null; }
 }
 
 // CSV statement: every owner-funded expense + every ledger entry, chronological.
