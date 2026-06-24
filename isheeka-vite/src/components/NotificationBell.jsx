@@ -2,6 +2,8 @@
 // signed-in user's notifications, shows an unread badge, and deep-links on click.
 import React from 'react';
 import { loadNotifications, markRead, markAllRead } from '../lib/notifications.js';
+import { pushSupported, pushPermission, enablePush, sendTestPush } from '../lib/push.js';
+import { notify } from '../lib/toast.jsx';
 import { fmtDate } from '../lib/format.js';
 
 const ago = (d) => {
@@ -41,6 +43,14 @@ export function NotificationBell({ userId, onNavigate }) {
   };
   const allRead = async () => { await markAllRead(userId); setList((l) => l.map((x) => ({ ...x, is_read: true }))); };
 
+  const [perm, setPerm] = React.useState(pushPermission());
+  const onEnable = async () => {
+    const r = await enablePush(userId);
+    if (r.ok) { setPerm('granted'); notify('Phone alerts enabled on this device.', 'success'); }
+    else notify(r.error === 'denied' ? 'Permission blocked — turn on notifications in your browser settings.' : r.error === 'unsupported' ? 'Push not supported here. On iPhone, install the app to Home Screen first.' : "Couldn't enable alerts.", 'error');
+  };
+  const onTest = async () => { const r = await sendTestPush(userId); notify(r && r.ok ? 'Test push sent — check your device.' : "Couldn't send the test.", r && r.ok ? 'success' : 'error'); };
+
   if (!userId) return null;
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -64,6 +74,13 @@ export function NotificationBell({ userId, onNavigate }) {
                 </div>
               </div>
             ))}
+          <div style={{ padding: '10px 14px', borderTop: '1px solid var(--grey-100)', position: 'sticky', bottom: 0, background: 'white' }}>
+            {pushSupported()
+              ? (perm === 'granted'
+                ? <button className="btn sm" style={{ width: '100%' }} onClick={onTest}>🔔 Send a test push</button>
+                : <button className="btn sm primary" style={{ width: '100%' }} onClick={onEnable}>🔔 Enable phone alerts</button>)
+              : <div style={{ fontSize: 11.5, color: 'var(--grey-400)', textAlign: 'center' }}>Phone push isn’t supported on this browser. On iPhone, install the app to your Home Screen first.</div>}
+          </div>
         </div>
       )}
     </div>

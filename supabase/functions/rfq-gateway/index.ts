@@ -29,6 +29,7 @@ const OTP_TTL_MIN = parseInt(Deno.env.get("OTP_TTL_MIN") ?? "10", 10);
 const MAX_ATTEMPTS = parseInt(Deno.env.get("MAX_ATTEMPTS") ?? "5", 10);
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";   // for extract_items (attachment → item list)
 const ERP_URL = Deno.env.get("ERP_URL") ?? "https://isheeka-events-erp.netlify.app";   // deep-link base for staff submission alerts
+const PUSH_INTERNAL_SECRET = Deno.env.get("PUSH_INTERNAL_SECRET") ?? "";   // server-to-server auth for push-send
 const SESSION_TTL_MIN = 120;
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
@@ -345,38 +346,58 @@ Deno.serve(async (req) => {
         await db.from("rfq_revisions").insert({ rfq_id: s.rfq_id, revision_number: revNo, snapshot, submitted_by: who });
         await db.from("rfqs").update({ status: "submitted", revision_number: revNo, client_submitted_at: new Date().toISOString() }).eq("rfq_id", s.rfq_id);
         await logActivity(s.rfq_id, who, "submitted", "Revision " + revNo);
-        // Notify staff by email (non-fatal) — recipients from the company profile.
+        // ── Who is this about? Resolve client + vendor names once (used by all channels). ──
+        const isVendor = r.party_type === "vendor";
+        const docId = r.ref_number || s.rfq_id;
+        const targetRfq = isVendor ? (r.parent_rfq_id || s.rfq_id) : s.rfq_id;
+        const url = ERP_URL + "/?rfq=" + targetRfq;
+        let clientName = isVendor ? "" : (r.contact_name || "");
+        let vendorName = "";
+        let evType = r.event_type || "";
+        if (isVendor) {
+          try {
+            if (r.vendor_id) { const { data: v } = await db.from("vendors").select("name").eq("vendor_id", r.vendor_id).maybeSingle(); vendorName = (v && v.name) || r.contact_name || ""; }
+            else vendorName = r.contact_name || "";
+            if (r.parent_rfq_id) { const { data: p } = await db.from("rfqs").select("contact_name,event_type").eq("rfq_id", r.parent_rfq_id).maybeSingle(); if (p) { clientName = p.contact_name || ""; if (!evType) evType = p.event_type || ""; } }
+          } catch (e) { /* names best-effort */ }
+        }
+        const headline = isVendor ? "Vendor bid received" : "Client RFQ submitted";
+        const emailLine = isVendor
+          ? ((vendorName || "A vendor") + " submitted pricing for " + docId + (clientName ? (" (client: " + clientName + ")") : "") + ".")
+          : ((clientName || "A client") + " submitted requirements for " + docId + (revNo > 1 ? " (revision " + revNo + ")" : "") + ".");
+        const inappBody = isVendor
+          ? ((vendorName || "A vendor") + " priced" + (clientName ? (" — client " + clientName) : "") + (evType ? (" · " + evType) : ""))
+          : ((clientName || "A client") + (evType ? (" · " + evType) : "") + (revNo > 1 ? (" · rev " + revNo) : ""));
+
+        // Email — recipients from the company profile.
         try {
           const { data: st } = await db.from("settings").select("email,notify_email_2").limit(1).maybeSingle();
           const recips = [st?.email, st?.notify_email_2].filter((e: any) => e && /\S+@\S+\.\S+/.test(String(e)));
           if (recips.length) {
-            const isVendor = r.party_type === "vendor";
-            const docId = r.ref_number || s.rfq_id;
-            const url = ERP_URL + "/?rfq=" + (isVendor ? (r.parent_rfq_id || s.rfq_id) : s.rfq_id);
-            const headline = isVendor ? "Vendor bid received" : "Client RFQ submitted";
-            const line = isVendor
-              ? "A vendor has submitted their pricing for " + docId + "."
-              : "A client has submitted their requirements for " + docId + (revNo > 1 ? " (revision " + revNo + ")" : "") + ".";
             const subject = "[Isheeka] " + headline + " — " + docId;
-            const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>${line}</p><p><a href="${url}" style="display:inline-block;background:#e8185a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Open ${docId} →</a></p><p style="color:#888;font-size:12px">${url}</p></div>`;
-            const text = line + "\n\nOpen: " + url;
+            const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>${emailLine}</p><p><a href="${url}" style="display:inline-block;background:#e8185a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Open ${docId} →</a></p><p style="color:#888;font-size:12px">${url}</p></div>`;
+            const text = emailLine + "\n\nOpen: " + url;
             for (const to of recips) { try { await sendEmail({ to: String(to), subject, html, text }); } catch (e) { /* per-recipient */ } }
           }
         } catch (e) { console.error("[submit_rfq] notify", e); }
-        // In-app notifications → owners/admins (Phase 1 notification center).
+
+        // In-app notifications + web push → owners/admins.
         try {
           const { data: us } = await db.from("users").select("user_id,role,is_owner").eq("is_deleted", false);
           const recips = (us || []).filter((u: any) => u.is_owner || u.role === "admin").map((u: any) => u.user_id);
           if (recips.length) {
-            const isVendor = r.party_type === "vendor";
-            const docId = r.ref_number || s.rfq_id;
-            const title = isVendor ? "Vendor bid received" : "Client RFQ submitted";
-            const body = isVendor
-              ? "A vendor submitted their pricing."
-              : ((r.contact_name || "A client") + (r.event_type ? (" · " + r.event_type) : "") + (revNo > 1 ? (" · rev " + revNo) : ""));
-            const link_opts = { rfqId: isVendor ? (r.parent_rfq_id || s.rfq_id) : s.rfq_id };
-            const rows = recips.map((uid: string) => ({ recipient_user_id: uid, type: isVendor ? "vendor_bid" : "rfq_submitted", title, body, doc_ref: docId, link_page: "rfqs", link_opts }));
+            const link_opts = { rfqId: targetRfq };
+            const rows = recips.map((uid: string) => ({ recipient_user_id: uid, type: isVendor ? "vendor_bid" : "rfq_submitted", title: headline, body: inappBody, doc_ref: docId, link_page: "rfqs", link_opts }));
             await db.from("notifications").insert(rows);
+            try {
+              if (PUSH_INTERNAL_SECRET) {
+                await fetch(SUPABASE_URL + "/functions/v1/push-send", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "x-internal-secret": PUSH_INTERNAL_SECRET },
+                  body: JSON.stringify({ user_ids: recips, payload: { title: headline + " — " + docId, body: inappBody, url, tag: docId } }),
+                });
+              }
+            } catch (e) { /* push best-effort */ }
           }
         } catch (e) { console.error("[submit_rfq] notify-inapp", e); }
         return json({ ok: true, revision_number: revNo });

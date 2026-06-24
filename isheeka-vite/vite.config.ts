@@ -12,6 +12,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.js",
       includeAssets: ["icons/icon-192.png", "icons/icon-512.png", "icons/icon-512-maskable.png"],
       manifest: {
         name: "Isheeka Events ERP",
@@ -30,8 +33,7 @@ export default defineConfig({
           { src: "/icons/icon-512-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
       },
-      workbox: {
-        navigateFallback: "/index.html",
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,png,svg,woff2}"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // app bundle is ~1.9 MB
       },
