@@ -181,7 +181,7 @@ export default function Shell() {
               : activePage === 'vendor-payments' ? <VendorPaymentsModule onNavigate={navigate} />
                 : activePage === 'vendors' ? <VendorsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                 : activePage === 'vendor-rfqs' ? <VendorRFQsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
-                  : activePage === 'reports' ? <ReportsModule onNavigate={navigate} />
+                  : activePage === 'reports' ? <ReportsModule onNavigate={navigate} isOwner={!!(profile && profile.is_owner)} />
                     : activePage === 'rfqs' ? <RFQsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                       : activePage === 'clients' ? <ClientsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />
                         : activePage === 'quotations' ? <QuotationsModule nav={current.opts || null} onNavigate={navigate} onBack={goBack} />

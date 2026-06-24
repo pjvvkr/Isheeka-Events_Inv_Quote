@@ -10,7 +10,7 @@ import { EventQuickView } from '../components/EventQuickView.jsx';
 import { ReceivablesReport, PayablesReport, OwnerSettlementReport } from './ReportViews.jsx';
 import { downloadBrandedWorkbook } from '../lib/brandedXlsx.js';
 
-export function ReportsModule({ onNavigate }) {
+export function ReportsModule({ onNavigate, isOwner = false }) {
   const [loading, setLoading] = React.useState(true);
   const [range, setRange] = React.useState('year'); // month | quarter | year | all
   const [invoices, setInvoices] = React.useState([]);
@@ -206,11 +206,11 @@ export function ReportsModule({ onNavigate }) {
       </div>
 
       <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--grey-100)', flexWrap: 'wrap' }}>
-        {[['overview', 'Overview'], ['receivables', 'Receivables'], ['payables', 'Payables'], ['settlement', 'Owner settlement']].map(([k, l]) => (
+        {[['overview', 'Overview'], ['receivables', 'Receivables'], ['payables', 'Payables'], ...(isOwner ? [['settlement', 'Owner settlement']] : [])].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 13, padding: '8px 12px', color: tab === k ? 'var(--pink)' : 'var(--grey-500)', fontWeight: tab === k ? 600 : 400, borderBottom: tab === k ? '2px solid var(--pink)' : '2px solid transparent', marginBottom: -1 }}>{l}</button>
         ))}
       </div>
-      {tab === 'receivables' ? <ReceivablesReport /> : tab === 'payables' ? <PayablesReport /> : tab === 'settlement' ? <OwnerSettlementReport /> : (<>
+      {tab === 'receivables' ? <ReceivablesReport /> : tab === 'payables' ? <PayablesReport /> : (tab === 'settlement' && isOwner) ? <OwnerSettlementReport /> : (<>
       {/* KPI cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 16 }}>
         {[['Billed (fee)', billed, 'var(--blue)', '📄'], ['Collected', collected, 'var(--green)', '💰'], ['Outstanding', outstanding, 'var(--red)', '⏳'], ['Expenses + vendors', totExp + totVend, 'var(--orange)', '🧾'], ['Net profit', periodProfit, periodProfit >= 0 ? 'var(--green)' : 'var(--red)', '📈']].map(([l, v, c, ic]) => (
