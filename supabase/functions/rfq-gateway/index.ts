@@ -363,6 +363,22 @@ Deno.serve(async (req) => {
             for (const to of recips) { try { await sendEmail({ to: String(to), subject, html, text }); } catch (e) { /* per-recipient */ } }
           }
         } catch (e) { console.error("[submit_rfq] notify", e); }
+        // In-app notifications → owners/admins (Phase 1 notification center).
+        try {
+          const { data: us } = await db.from("users").select("user_id,role,is_owner").eq("is_deleted", false);
+          const recips = (us || []).filter((u: any) => u.is_owner || u.role === "admin").map((u: any) => u.user_id);
+          if (recips.length) {
+            const isVendor = r.party_type === "vendor";
+            const docId = r.ref_number || s.rfq_id;
+            const title = isVendor ? "Vendor bid received" : "Client RFQ submitted";
+            const body = isVendor
+              ? "A vendor submitted their pricing."
+              : ((r.contact_name || "A client") + (r.event_type ? (" · " + r.event_type) : "") + (revNo > 1 ? (" · rev " + revNo) : ""));
+            const link_opts = { rfqId: isVendor ? (r.parent_rfq_id || s.rfq_id) : s.rfq_id };
+            const rows = recips.map((uid: string) => ({ recipient_user_id: uid, type: isVendor ? "vendor_bid" : "rfq_submitted", title, body, doc_ref: docId, link_page: "rfqs", link_opts }));
+            await db.from("notifications").insert(rows);
+          }
+        } catch (e) { console.error("[submit_rfq] notify-inapp", e); }
         return json({ ok: true, revision_number: revNo });
       }
 

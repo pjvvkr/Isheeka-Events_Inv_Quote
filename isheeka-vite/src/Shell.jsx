@@ -25,6 +25,7 @@ import { EventsModule } from './modules/EventsModule.jsx';
 import { UsersModule } from './modules/UsersModule.jsx';
 import { OwnerAccountModule } from './modules/OwnerAccountModule.jsx';
 import { effectiveModules } from './lib/access.js';
+import { NotificationBell } from './components/NotificationBell.jsx';
 
 const pageTitles = { dashboard: 'Dashboard', leads: 'Leads', clients: 'Clients', events: 'Events', quotations: 'Quotations', invoices: 'Invoices', vendors: 'Vendors', 'vendor-rfqs': 'Vendor RFQ', 'vendor-payments': 'Vendor Payments', expenses: 'Expenses', reports: 'Reports', users: 'Users', settings: 'Settings', 'owner-account': 'Owner Account' };
 
@@ -164,6 +165,7 @@ export default function Shell() {
             <div className="page-subtitle">Isheeka Events ERP</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <NotificationBell userId={profile && profile.user_id} onNavigate={navigate} />
             <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)' }} title="Connected"></div>
           </div>

@@ -10,6 +10,7 @@ import { getNextExpenseRef } from '../lib/refs.js';
 import { loadOwners } from '../lib/ownerAccount.js';
 import { filesToPayloads, extractExpense, notifyOwnerExpense, extractErrMsg } from '../lib/staffExtract.js';
 import { openStoredFile } from '../lib/storage.js';
+import { ownerAdminIds, createNotifications } from '../lib/notifications.js';
 
 export function ExpensesModule({ onNavigate }) {
   const [rows, setRows] = React.useState([]);
@@ -97,6 +98,7 @@ export function ExpensesModule({ onNavigate }) {
       const summary = { amount: amt, description: form.description.trim(), category: EXPENSE_CAT_LABEL(form.category), date: form.date, paid_by_name: payer.name };
       if (form.notify_email) { const emails = owners.map((o) => o.email).filter(Boolean); notifyOwnerExpense(emails, summary).then((r) => { if (r && r.ok && r.sent) notify('Owners emailed about this expense.', 'success'); }).catch(() => {}); }
       if (form.notify_wa) { const other = owners.find((o) => o.user_id !== form.paid_by) || payer; const msg = payer.name + ' paid ' + inr(amt) + ' for ' + summary.description + ' (' + summary.category + ') on ' + fmtDate(form.date, { day: 'numeric', month: 'short', year: 'numeric' }) + '. Reimbursement requested.'; try { window.open(waLink(other.phone, msg), '_blank'); } catch (e) { /* noop */ } }
+      ownerAdminIds().then((ids) => createNotifications(ids, { type: 'owner_expense', title: 'Expense recorded', body: payer.name + ' paid ' + inr(amt) + ' for ' + summary.description, doc_ref: payload.expense_no || '', link_page: 'owner-account' })).catch(() => {});
     }
     notify(editRow ? 'Expense updated.' : 'Expense recorded.', 'success'); setShowForm(false); load();
   };
