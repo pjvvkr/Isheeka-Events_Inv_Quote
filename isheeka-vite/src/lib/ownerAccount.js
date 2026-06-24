@@ -11,6 +11,7 @@ import { supabase } from './supabase';
 import { runDb } from './toast.jsx';
 import { _currentUid } from './session.js';
 import { getNextOwnerRef } from './refs.js';
+import { uploadToQuotations } from './storage.js';
 
 const ownerName = (u) => (((u.first_name || '') + ' ' + (u.last_name || '')).trim()) || u.email || 'Owner';
 
@@ -116,17 +117,10 @@ export async function deleteLedgerEntry(id) {
   return await runDb(supabase.from('owner_ledger').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('ledger_id', id), 'delete entry');
 }
 
-// Upload a proof image/file to storage; returns the public URL (or null on failure).
+// Upload a proof image/file; returns the in-bucket PATH (private bucket → view via
+// openStoredFile / signed URL). null on failure.
 export async function uploadOwnerProof(file) {
-  if (!file) return null;
-  try {
-    const ext = ((file.name || 'img').split('.').pop() || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'png';
-    const path = 'receipts/owner/ol_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext;
-    const { error } = await supabase.storage.from('quotations').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true });
-    if (error) return null;
-    const { data } = supabase.storage.from('quotations').getPublicUrl(path);
-    return (data && data.publicUrl) || null;
-  } catch (e) { return null; }
+  return await uploadToQuotations(file, 'receipts/owner');
 }
 
 // CSV statement: every owner-funded expense + every ledger entry, chronological.

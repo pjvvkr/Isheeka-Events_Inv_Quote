@@ -9,6 +9,7 @@ import { waLink } from '../lib/share.js';
 import { getNextExpenseRef } from '../lib/refs.js';
 import { loadOwners } from '../lib/ownerAccount.js';
 import { filesToPayloads, extractExpense, notifyOwnerExpense, extractErrMsg } from '../lib/staffExtract.js';
+import { openStoredFile } from '../lib/storage.js';
 
 export function ExpensesModule({ onNavigate }) {
   const [rows, setRows] = React.useState([]);
@@ -60,7 +61,9 @@ export function ExpensesModule({ onNavigate }) {
   });
 
   const openNew = () => { setEditRow(null); setForm({ ...emptyForm }); setFile(null); setShowForm(true); };
-  const openEdit = (r) => { setEditRow(r); setForm({ description: r.description || '', amount: r.amount || '', date: r.date || emptyForm.date, category: r.category || 'miscellaneous', sub_category: r.sub_category || '', event_id: r.event_id || '', payment_mode: r.payment_mode || 'upi', reference_number: r.reference_number || '', is_recurring: !!r.is_recurring, recurring_frequency: r.recurring_frequency || 'monthly', notes: r.notes || '', paid_by: r.paid_by || '', notify_wa: false, notify_email: false }); setFile(null); setCap({ busy: false, paste: false, text: '' }); setShowForm(true); };
+  const openEdit = (r) => {
+    if (r.paid_by) { const amtT = parseFloat(r.amount) || 0; const got = reimbMap[r.expense_id] || 0; if (amtT > 0 && got >= amtT && !window.confirm((r.expense_no || 'This expense') + ' is fully reimbursed (settled). Editing it can change the owner reconciliation. Edit anyway?')) return; }
+    setEditRow(r); setForm({ description: r.description || '', amount: r.amount || '', date: r.date || emptyForm.date, category: r.category || 'miscellaneous', sub_category: r.sub_category || '', event_id: r.event_id || '', payment_mode: r.payment_mode || 'upi', reference_number: r.reference_number || '', is_recurring: !!r.is_recurring, recurring_frequency: r.recurring_frequency || 'monthly', notes: r.notes || '', paid_by: r.paid_by || '', notify_wa: false, notify_email: false }); setFile(null); setCap({ busy: false, paste: false, text: '' }); setShowForm(true); };
 
   // Smart capture: receipt photo / file / pasted note → AI fills the form.
   const runCapture = async (input) => {
@@ -82,7 +85,7 @@ export function ExpensesModule({ onNavigate }) {
     if (!form.date) { notify('Date is required.', 'error'); return; }
     setSaving(true);
     let receiptUrl = editRow ? editRow.receipt_url : null;
-    if (file) { try { const ext = ((file.name || '').split('.').pop() || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'png'; const path = 'receipts/expenses/exp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext; const { error: ue } = await supabase.storage.from('quotations').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true }); if (!ue) { const { data: pu } = supabase.storage.from('quotations').getPublicUrl(path); receiptUrl = (pu && pu.publicUrl) || receiptUrl; } else notify("Couldn't upload the receipt — saving without it.", 'error'); } catch (e) { notify('Receipt upload failed — saving without it.', 'error'); } }
+    if (file) { try { const ext = ((file.name || '').split('.').pop() || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'png'; const path = 'receipts/expenses/exp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6) + '.' + ext; const { error: ue } = await supabase.storage.from('quotations').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: true }); if (!ue) { receiptUrl = path; } else notify("Couldn't upload the receipt — saving without it.", 'error'); } catch (e) { notify('Receipt upload failed — saving without it.', 'error'); } }
     const payload = { description: form.description.trim(), amount: amt, date: form.date, category: form.category, sub_category: form.sub_category || null, event_id: form.event_id || null, payment_mode: form.payment_mode || null, reference_number: form.reference_number || null, is_recurring: !!form.is_recurring, recurring_frequency: form.is_recurring ? form.recurring_frequency : null, notes: form.notes || null, paid_by: form.paid_by || null, receipt_url: receiptUrl, updated_at: new Date().toISOString() };
     let err;
     if (editRow) { const { error } = await runDb(supabase.from('expenses').update(payload).eq('expense_id', editRow.expense_id), 'update expense'); err = error; }
@@ -137,7 +140,7 @@ export function ExpensesModule({ onNavigate }) {
             {filtered.map((r) => { const ev = r.event_id ? evMap[r.event_id] : null; return (
               <div key={r.expense_id} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 150px 130px 96px 64px', gap: 10, padding: '11px 16px', borderTop: '1px solid var(--grey-100)', alignItems: 'center', fontSize: 13 }}>
                 <div style={{ color: 'var(--grey-500)' }}>{fmtDate(r.date, { day: 'numeric', month: 'short' })}</div>
-                <div style={{ color: 'var(--grey-800)' }}>{r.expense_no && <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: 'var(--grey-400)', marginRight: 6 }}>{r.expense_no}</span>}{r.description}{r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--pink)', marginLeft: 6 }}>📎</a>}{r.paid_by && ownerMap[r.paid_by] && <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: 'var(--pink-light)', color: 'var(--pink-dark)' }}>by {ownerMap[r.paid_by].name}</span>}{(() => { const s = reimbStatus(r); return s ? <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: s.bg, color: s.c }}>{s.l}</span> : null; })()}</div>
+                <div style={{ color: 'var(--grey-800)' }}>{r.expense_no && <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: 'var(--grey-400)', marginRight: 6 }}>{r.expense_no}</span>}{r.description}{r.receipt_url && <a href="#" onClick={(e) => { e.preventDefault(); openStoredFile(r.receipt_url); }} style={{ color: 'var(--pink)', marginLeft: 6 }}>📎</a>}{r.paid_by && ownerMap[r.paid_by] && <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: 'var(--pink-light)', color: 'var(--pink-dark)' }}>by {ownerMap[r.paid_by].name}</span>}{(() => { const s = reimbStatus(r); return s ? <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: s.bg, color: s.c }}>{s.l}</span> : null; })()}</div>
                 <div>{ev ? <a onClick={() => onNavigate && onNavigate('events', { eventId: ev.event_id, label: ev.name || ev.ref_number || 'Event' })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>{ev.ref_number}</a> : <span style={{ color: 'var(--grey-400)' }}>General</span>}</div>
                 <div><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: 'var(--blue-light)', color: 'var(--blue)' }}>{EXPENSE_CAT_LABEL(r.category)}</span></div>
                 <div style={{ textAlign: 'right', fontWeight: 500 }}>{inr(r.amount)}</div>

@@ -6,6 +6,7 @@ import React from 'react';
 import { notify } from '../lib/toast.jsx';
 import { fmtDate, todayLocalStr, EXPENSE_CAT_LABEL } from '../lib/format.js';
 import { waLink } from '../lib/share.js';
+import { openStoredFile } from '../lib/storage.js';
 import { loadOwnerData, reconcile, expenseReimbursements, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, uploadOwnerProof, buildStatementCsv } from '../lib/ownerAccount.js';
 
 const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
@@ -162,7 +163,7 @@ export function OwnerAccountModule({ onNavigate }) {
               <span style={{ fontSize: 12, color: 'var(--grey-400)', width: 56, flexShrink: 0 }}>{fmtDate(f.date, { day: 'numeric', month: 'short' })}</span>
               <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: m.bg, color: m.c, flexShrink: 0 }}>{m.l}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.refNo && <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--grey-400)', marginRight: 6 }}>{f.refNo}</span>}{f.label}{f.entry && f.entry.attachment_url && <a href={f.entry.attachment_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ marginLeft: 6, color: 'var(--pink)' }}>📎</a>}</div>
+                <div style={{ fontSize: 13, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.refNo && <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--grey-400)', marginRight: 6 }}>{f.refNo}</span>}{f.label}{f.entry && f.entry.attachment_url && <a href="#" onClick={(e) => { e.preventDefault(); e.stopPropagation(); openStoredFile(f.entry.attachment_url); }} style={{ marginLeft: 6, color: 'var(--pink)' }}>📎</a>}</div>
                 {f.sub && <div style={{ fontSize: 11.5, color: 'var(--grey-400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.sub}</div>}
               </div>
               <span style={{ fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{inr(f.amount)}</span>
