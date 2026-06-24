@@ -4,7 +4,7 @@
 import React from 'react';
 import { fetchSuggestions } from './fields.jsx';
 import { notify } from '../lib/toast.jsx';
-import * as XLSX from 'xlsx';
+import { readAoa } from '../lib/xlsxIO.js';
 
 const FastItemDesc = React.forwardRef(({value, onChange, onTab, onEnter, onPaste}, ref) => {
   const [suggestions, setSuggestions] = React.useState([]);
@@ -341,11 +341,9 @@ export function SubEventTplBtn({templates, onPick, onImport}) {
     const file=e.target.files&&e.target.files[0]; if(e.target) e.target.value='';
     if(!file||!onImport) return;
     const reader=new FileReader();
-    reader.onload=(ev)=>{
+    reader.onload=async (ev)=>{
       try{
-        const wb=XLSX.read(ev.target.result,{type:'array'});
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        let rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        let rows=await readAoa(ev.target.result);
         if(rows.length&&String((rows[0]||[])[0]||'').trim().toLowerCase().startsWith('desc')) rows=rows.slice(1);
         const items=rows.filter(r=>String(r[0]).trim()).map(r=>({id:'i-'+Date.now()+Math.random(),description:String(r[0]).trim(),quantity:parseFloat(String(r[1]).replace(/[^0-9.]/g,''))||1,unit_price:parseFloat(String(r[2]).replace(/[^0-9.]/g,''))||0}));
         if(items.length){ onImport(items); notify(items.length+' row'+(items.length>1?'s':'')+' imported into this section.','success'); } else notify('No rows found in the file.','error');
@@ -371,7 +369,7 @@ export function SubEventTplBtn({templates, onPick, onImport}) {
         )}
       </div>
       {onImport&&<><button className="btn sm" style={{fontSize:11,padding:'3px 8px'}} onClick={()=>fileRef.current&&fileRef.current.click()} title="Import line items from an Excel file into this section">⬆️ Excel</button>
-      <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={parseExcel}/></>}
+      <input ref={fileRef} type="file" accept=".xlsx" style={{display:'none'}} onChange={parseExcel}/></>}
     </div>
   );
 }

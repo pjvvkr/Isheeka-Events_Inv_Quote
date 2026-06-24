@@ -1,7 +1,7 @@
 // Clients module — list, 360 detail (events/quotes/invoices rollup), client form,
 // alternative contacts, and Excel bulk upload. Ported verbatim from isheeka-erp-v22.html.
 import React, { useState, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import { readAoa, downloadAoa } from '../lib/xlsxIO.js';
 import { supabase } from '../lib/supabase';
 import { notify, runDb } from '../lib/toast.jsx';
 import { getNextClientRef } from '../lib/refs.js';
@@ -525,26 +525,20 @@ function MassClientUpload({ onClose, onSuccess }) {
   const VALID_CONTACT = ['whatsapp', 'phone', 'email', ''];
 
   const downloadTemplate = () => {
-    const ws = XLSX.utils.aoa_to_sheet([
+    downloadAoa('Isheeka_Clients_Upload_Template.xlsx', 'Clients', [
       COLUMNS,
       ['Priya', 'Sharma', '+91 98765 43210', '', '', 'priya@email.com', '', '', 'referral', 'active', 'whatsapp', 'Banjara Hills', 'Hyderabad', 'Telangana', '500034', '', 'VIP client'],
       ['Ravi', 'Menon', '+91 87654 32109', '', '', 'ravi@email.com', '', '', 'website', 'active', 'email', 'Jubilee Hills', 'Hyderabad', 'Telangana', '500033', '', ''],
-    ]);
-    ws['!cols'] = COLUMNS.map(() => ({ wch: 18 }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Clients');
-    XLSX.writeFile(wb, 'Isheeka_Clients_Upload_Template.xlsx');
+    ], COLUMNS.map(() => 18));
   };
 
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
-        const wb = XLSX.read(evt.target.result, { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const data = await readAoa(evt.target.result);
         if (data.length < 2) { notify('File appears empty. Please add at least one client row.', 'error'); return; }
 
         const header = data[0].map((h) => String(h).trim().toLowerCase().replace(/ /g, '_'));
@@ -653,9 +647,9 @@ function MassClientUpload({ onClose, onSuccess }) {
                 onClick={() => fileRef.current?.click()}>
                 <div style={{ fontSize: 36, marginBottom: 8 }}>📂</div>
                 <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--grey-800)', marginBottom: 4 }}>Step 2 — Upload your filled template</div>
-                <div style={{ fontSize: 13, color: 'var(--grey-400)', marginBottom: 12 }}>Click here or drag and drop your Excel file (.xlsx or .xls)</div>
+                <div style={{ fontSize: 13, color: 'var(--grey-400)', marginBottom: 12 }}>Click here or drag and drop your Excel file (.xlsx)</div>
                 <button className="btn sm primary">Choose file</button>
-                <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFile} />
+                <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={handleFile} />
               </div>
             </>
           )}

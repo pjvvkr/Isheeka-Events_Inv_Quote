@@ -17,7 +17,7 @@ import { InputField, SelectField, AutocompleteInput, fetchSuggestions } from '..
 import { ClientLink, VendorLink } from '../components/links.jsx';
 import { FastEntryTable, SubEventTplBtn } from '../components/ItemEntry.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
-import * as XLSX from 'xlsx';
+import { readWorkbook } from '../lib/xlsxIO.js';
 import { ClientForm } from './ClientsModule.jsx';
 
 function SubEventNameInput({value, onChange}) {
@@ -1482,13 +1482,11 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
     const file = e.target.files[0];
     if(!file) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
-        const wb = XLSX.read(evt.target.result, {type:'array'});
+        const sheets = await readWorkbook(evt.target.result);
         const newSubEvents = [];
-        wb.SheetNames.forEach(sheetName=>{
-          const ws = wb.Sheets[sheetName];
-          const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+        sheets.forEach(({ name: sheetName, aoa: data })=>{
           if(data.length<2) return;
           const items = data.slice(1).filter(r=>String(r[0]).trim()).map(r=>({
             id:'i-'+Date.now()+Math.random(),
@@ -1500,7 +1498,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
           else { newSubEvents.push({id:'se-'+Date.now()+Math.random(),name:sheetName,date:'',location:'',items}); }
         });
         if(newSubEvents.length>0) setSubEvents(s=>[...s,...newSubEvents]);
-        notify(`Imported ${wb.SheetNames.length} sheet(s) successfully!`,'success');
+        notify(`Imported ${sheets.length} sheet(s) successfully!`,'success');
       } catch(err){ notify('Could not read file. Please use the provided template.','error'); }
     };
     reader.readAsArrayBuffer(file);

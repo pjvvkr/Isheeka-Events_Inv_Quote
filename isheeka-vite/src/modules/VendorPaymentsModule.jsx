@@ -1,7 +1,7 @@
 // Vendor Payments module — payments ledger, dues-by-vendor rollup (Excel export),
 // voided-payment audit trail, and a record-payment modal. Ported verbatim.
 import React from 'react';
-import * as XLSX from 'xlsx';
+import { downloadAoa } from '../lib/xlsxIO.js';
 import { supabase } from '../lib/supabase';
 import { notify } from '../lib/toast.jsx';
 import { todayLocalStr, fmtDate } from '../lib/format.js';
@@ -54,14 +54,14 @@ export function VendorPaymentsModule({ onNavigate }) {
   const voidedCount = pays.filter((p) => p.is_voided).length;
   // Cross-event dues rollup: what's still owed to each vendor, summed across all their engagements.
   const duesByVendor = (() => { const m = {}; evs.forEach((x) => { const out = parseFloat(x.outstanding) || 0; const vid = x.vendor_id ? ('id:' + x.vendor_id) : ('nm:' + (x.vendor_name || '?')); const name = vMap[x.vendor_id] || x.vendor_name || 'Unknown vendor'; if (!m[vid]) m[vid] = { key: vid, vid: x.vendor_id || null, name, agreed: 0, paid: 0, outstanding: 0, events: [] }; m[vid].agreed += parseFloat(x.agreed_amount) || 0; m[vid].paid += parseFloat(x.total_paid) || 0; m[vid].outstanding += out; if (out > 0.5) { m[vid].events.push({ eid: x.event_id, ev: eMap[x.event_id], outstanding: out, service: x.service_description }); } }); return Object.values(m).filter((r) => r.outstanding > 0.5).sort((a, b) => b.outstanding - a.outstanding); })();
-  const exportDues = () => {
+  const exportDues = async () => {
     if (!duesByVendor.length) { notify('No outstanding vendor dues to export.', 'info'); return; }
-    const rows = [];
+    const aoa = [['Vendor', 'Event', 'Agreed', 'Paid', 'Outstanding']];
     duesByVendor.forEach((r) => {
-      rows.push({ Vendor: r.name, Event: '— Total —', Agreed: Math.round(r.agreed), Paid: Math.round(r.paid), Outstanding: Math.round(r.outstanding) });
-      r.events.forEach((e) => { rows.push({ Vendor: '', Event: (e.ev ? (e.ev.ref_number + ' · ' + e.ev.name) : '(event)') + (e.service ? (' · ' + e.service) : ''), Agreed: '', Paid: '', Outstanding: Math.round(e.outstanding) }); });
+      aoa.push([r.name, '— Total —', Math.round(r.agreed), Math.round(r.paid), Math.round(r.outstanding)]);
+      r.events.forEach((e) => { aoa.push(['', (e.ev ? (e.ev.ref_number + ' · ' + e.ev.name) : '(event)') + (e.service ? (' · ' + e.service) : ''), '', '', Math.round(e.outstanding)]); });
     });
-    try { const ws = XLSX.utils.json_to_sheet(rows, { header: ['Vendor', 'Event', 'Agreed', 'Paid', 'Outstanding'] }); ws['!cols'] = [{ wch: 26 }, { wch: 42 }, { wch: 12 }, { wch: 12 }, { wch: 13 }]; const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Vendor dues'); XLSX.writeFile(wb, 'isheeka-vendor-dues-' + todayLocalStr() + '.xlsx'); notify('Vendor dues exported.', 'success'); }
+    try { await downloadAoa('isheeka-vendor-dues-' + todayLocalStr() + '.xlsx', 'Vendor dues', aoa, [26, 42, 12, 12, 13]); notify('Vendor dues exported.', 'success'); }
     catch (err) { console.error('[Isheeka ERP] dues export failed:', err); notify('Could not export the dues.', 'error'); }
   };
   const filtered = pays.filter((p) => {
