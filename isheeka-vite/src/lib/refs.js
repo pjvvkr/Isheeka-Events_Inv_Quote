@@ -44,3 +44,19 @@ export async function getNextRfqRef() {
   if (error || data == null) { notify("Couldn't generate an RFQ number. Please try again.", 'error'); throw error || new Error('counter failed'); }
   return 'RFQ-' + year + '-' + data;
 }
+
+export async function getNextExpenseRef() {
+  const year = new Date().getFullYear().toString().slice(-2);
+  const { data, error } = await supabase.rpc('next_counter', { p_type: 'expense', p_year: year, p_seed: 1111 });
+  if (error || data == null) { notify("Couldn't generate an expense number. Please try again.", 'error'); throw error || new Error('counter failed'); }
+  return 'Ex-' + year + '-' + data;
+}
+
+// Owner-ledger refs: funding → Fn, reimbursement → Rb, settlement → St.
+const OWNER_PREFIX = { funding: 'Fn', reimbursement: 'Rb', settlement: 'St' };
+export async function getNextOwnerRef(entryType) {
+  const year = new Date().getFullYear().toString().slice(-2);
+  const { data, error } = await supabase.rpc('next_counter', { p_type: 'owner_' + entryType, p_year: year, p_seed: 1111 });
+  if (error || data == null) { notify("Couldn't generate a reference number. Please try again.", 'error'); throw error || new Error('counter failed'); }
+  return (OWNER_PREFIX[entryType] || 'Ol') + '-' + year + '-' + data;
+}

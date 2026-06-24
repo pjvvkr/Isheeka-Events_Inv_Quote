@@ -5,7 +5,7 @@
 import React from 'react';
 import { notify } from '../lib/toast.jsx';
 import { fmtDate, todayLocalStr, EXPENSE_CAT_LABEL } from '../lib/format.js';
-import { loadOwnerData, reconcile, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, buildStatementCsv } from '../lib/ownerAccount.js';
+import { loadOwnerData, reconcile, expenseReimbursements, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, buildStatementCsv } from '../lib/ownerAccount.js';
 
 const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
 const MODES = [['', '—'], ['upi', 'UPI'], ['neft', 'Bank / NEFT'], ['cash', 'Cash'], ['cheque', 'Cheque'], ['card', 'Card'], ['other', 'Other']];
@@ -38,14 +38,20 @@ export function OwnerAccountModule({ onNavigate }) {
     if (l.entry_type === 'reimbursement' && l.to_user && breakdown[l.to_user]) breakdown[l.to_user].reimb += parseFloat(l.amount) || 0;
   });
 
+  // per-expense reimbursement status + a ref-number lookup
+  const reimb = expenseReimbursements(expenses, ledger);
+  const expNoMap = {}; expenses.forEach((e) => { expNoMap[e.expense_id] = e.expense_no; });
+
   // combined chronological feed: owner-funded expenses + ledger entries
   const feed = [
-    ...expenses.filter((e) => e.paid_by).map((e) => ({ kind: 'expense', id: 'e' + e.expense_id, date: e.date, amount: parseFloat(e.amount) || 0, label: e.description || '—', sub: EXPENSE_CAT_LABEL(e.category) + ' · by ' + nameOf(e.paid_by), entry: e })),
-    ...ledger.map((l) => ({ kind: l.entry_type, id: 'l' + l.ledger_id, date: l.entry_date, amount: parseFloat(l.amount) || 0, label: feedLabel(l, nameOf), sub: l.notes || '', entry: l })),
+    ...expenses.filter((e) => e.paid_by).map((e) => ({ kind: 'expense', id: 'e' + e.expense_id, refNo: e.expense_no, date: e.date, amount: parseFloat(e.amount) || 0, label: e.description || '—', sub: EXPENSE_CAT_LABEL(e.category) + ' · by ' + nameOf(e.paid_by), exp: e, st: reimb[e.expense_id] })),
+    ...ledger.map((l) => ({ kind: l.entry_type, id: 'l' + l.ledger_id, refNo: l.entry_no, date: l.entry_date, amount: parseFloat(l.amount) || 0, label: feedLabel(l, nameOf, expNoMap), sub: l.notes || '', entry: l })),
   ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
-  const openType = (type, preset) => setForm({ entry_type: type, entry_date: todayLocalStr(), amount: '', from_user: '', to_user: '', payment_mode: '', reference_number: '', notes: '', ...(preset || {}) });
-  const openEdit = (l) => setForm({ ledger_id: l.ledger_id, entry_type: l.entry_type, entry_date: l.entry_date, amount: String(l.amount || ''), from_user: l.from_user || '', to_user: l.to_user || '', payment_mode: l.payment_mode || '', reference_number: l.reference_number || '', notes: l.notes || '' });
+  const reimburseExpense = (e, st) => openType('reimbursement', { to_user: e.paid_by, amount: String(Math.round((st && st.remaining) || (parseFloat(e.amount) || 0))), expense_id: e.expense_id, _forExpenseNo: e.expense_no, notes: 'Reimbursement for ' + (e.expense_no || 'expense') });
+
+  const openType = (type, preset) => setForm({ entry_type: type, entry_date: todayLocalStr(), amount: '', from_user: '', to_user: '', expense_id: '', payment_mode: '', reference_number: '', notes: '', ...(preset || {}) });
+  const openEdit = (l) => setForm({ ledger_id: l.ledger_id, entry_type: l.entry_type, entry_date: l.entry_date, amount: String(l.amount || ''), from_user: l.from_user || '', to_user: l.to_user || '', expense_id: l.expense_id || '', payment_mode: l.payment_mode || '', reference_number: l.reference_number || '', notes: l.notes || '' });
   const setFf = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const saveEntry = async () => {
@@ -128,11 +134,14 @@ export function OwnerAccountModule({ onNavigate }) {
               <span style={{ fontSize: 12, color: 'var(--grey-400)', width: 56, flexShrink: 0 }}>{fmtDate(f.date, { day: 'numeric', month: 'short' })}</span>
               <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: m.bg, color: m.c, flexShrink: 0 }}>{m.l}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.label}</div>
+                <div style={{ fontSize: 13, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.refNo && <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--grey-400)', marginRight: 6 }}>{f.refNo}</span>}{f.label}</div>
                 {f.sub && <div style={{ fontSize: 11.5, color: 'var(--grey-400)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.sub}</div>}
               </div>
               <span style={{ fontSize: 13, fontWeight: 500, flexShrink: 0 }}>{inr(f.amount)}</span>
-              <div style={{ width: 72, textAlign: 'right', flexShrink: 0 }}>
+              {f.kind === 'expense' && f.st && f.st.applicable && (f.st.status === 'reimbursed'
+                ? <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: 'var(--green-light)', color: 'var(--green)', flexShrink: 0 }}>✓ Reimbursed</span>
+                : <button className="btn sm" style={{ fontSize: 11, padding: '2px 8px', flexShrink: 0 }} onClick={() => reimburseExpense(f.exp, f.st)}>{f.st.status === 'partial' ? 'Reimburse rest' : 'Reimburse'}</button>)}
+              <div style={{ width: 56, textAlign: 'right', flexShrink: 0 }}>
                 {f.kind === 'expense'
                   ? <button className="btn sm" style={{ fontSize: 11, padding: '2px 6px' }} title="Open in Expenses" onClick={() => onNavigate && onNavigate('expenses')}>↗</button>
                   : <><button className="btn sm" style={{ fontSize: 11, padding: '2px 6px' }} onClick={() => openEdit(f.entry)}>✏️</button> <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--grey-300)' }} onClick={() => removeEntry(f.entry)}>🗑</button></>}
@@ -148,9 +157,9 @@ export function OwnerAccountModule({ onNavigate }) {
   );
 }
 
-function feedLabel(l, nameOf) {
+function feedLabel(l, nameOf, expNoMap) {
   if (l.entry_type === 'funding') return nameOf(l.from_user) + ' funded ' + (l.to_user ? nameOf(l.to_user) : 'the business');
-  if (l.entry_type === 'reimbursement') return (l.from_user ? nameOf(l.from_user) : 'Business') + ' reimbursed ' + nameOf(l.to_user);
+  if (l.entry_type === 'reimbursement') { const ref = (l.expense_id && expNoMap && expNoMap[l.expense_id]) ? (' for ' + expNoMap[l.expense_id]) : ''; return (l.from_user ? nameOf(l.from_user) : 'Business') + ' reimbursed ' + nameOf(l.to_user) + ref; }
   if (l.entry_type === 'settlement') return nameOf(l.from_user) + ' → ' + nameOf(l.to_user);
   return '—';
 }
@@ -166,11 +175,12 @@ function EntryModal({ form, owners, setFf, saving, onSave, onClose }) {
           <button className="btn sm" onClick={onClose}>✕</button>
         </div>
         <div style={{ padding: 22 }}>
-          {!form.ledger_id && <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+          {!form.ledger_id && !form.expense_id && <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
             {['funding', 'reimbursement', 'settlement'].map((k) => (
               <button key={k} className={'btn sm' + (t === k ? ' primary' : '')} onClick={() => setFf('entry_type', k)}>{TYPE_META[k].l}</button>
             ))}
           </div>}
+          {form.expense_id && form._forExpenseNo && <div style={{ marginBottom: 14, fontSize: 12.5, color: 'var(--green)', background: 'var(--green-light)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>↩ Reimbursing <b>{form._forExpenseNo}</b> — saving marks that expense reimbursed.</div>}
           <div style={{ fontSize: 12, color: 'var(--grey-500)', marginBottom: 14, background: 'var(--grey-50)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>
             {t === 'funding' && 'An owner puts personal money into the business (or hands it to the other owner for business use). The funder is owed it back.'}
             {t === 'reimbursement' && 'The business pays an owner back — reduces what the business owes them. Not a business expense.'}

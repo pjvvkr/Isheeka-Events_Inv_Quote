@@ -6,6 +6,7 @@ import { _currentUid } from '../lib/session.js';
 import { todayLocalStr, fmtDate, EXPENSE_CAT_LABEL } from '../lib/format.js';
 import { EXPENSE_CATS } from '../lib/constants.js';
 import { waLink } from '../lib/share.js';
+import { getNextExpenseRef } from '../lib/refs.js';
 import { loadOwners } from '../lib/ownerAccount.js';
 import { filesToPayloads, extractExpense, notifyOwnerExpense, extractErrMsg } from '../lib/staffExtract.js';
 
@@ -22,6 +23,7 @@ export function ExpensesModule({ onNavigate }) {
   const [saving, setSaving] = React.useState(false);
   const [file, setFile] = React.useState(null);
   const [owners, setOwners] = React.useState([]);
+  const [reimbMap, setReimbMap] = React.useState({});   // expense_id → total reimbursed
   const [cap, setCap] = React.useState({ busy: false, paste: false, text: '' });
   const emptyForm = { description: '', amount: '', date: todayLocalStr(), category: 'miscellaneous', sub_category: '', event_id: '', payment_mode: 'upi', reference_number: '', is_recurring: false, recurring_frequency: 'monthly', notes: '', paid_by: '', notify_wa: true, notify_email: true };
   const [form, setForm] = React.useState(emptyForm);
@@ -31,11 +33,13 @@ export function ExpensesModule({ onNavigate }) {
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    const [{ data: ex }, { data: ev }] = await Promise.all([
+    const [{ data: ex }, { data: ev }, { data: rb }] = await Promise.all([
       supabase.from('expenses').select('*').eq('is_deleted', false).order('date', { ascending: false }),
       supabase.from('events').select('event_id,ref_number,name,main_date,client_name').eq('is_deleted', false).order('main_date', { ascending: false }),
+      supabase.from('owner_ledger').select('expense_id,amount').eq('entry_type', 'reimbursement').eq('is_deleted', false),
     ]);
-    setRows(ex || []); setEvents(ev || []); setLoading(false);
+    const rm = {}; (rb || []).forEach((x) => { if (x.expense_id) rm[x.expense_id] = (rm[x.expense_id] || 0) + (parseFloat(x.amount) || 0); });
+    setReimbMap(rm); setRows(ex || []); setEvents(ev || []); setLoading(false);
   }, []);
   React.useEffect(() => { load(); }, [load]);
 
@@ -82,7 +86,7 @@ export function ExpensesModule({ onNavigate }) {
     const payload = { description: form.description.trim(), amount: amt, date: form.date, category: form.category, sub_category: form.sub_category || null, event_id: form.event_id || null, payment_mode: form.payment_mode || null, reference_number: form.reference_number || null, is_recurring: !!form.is_recurring, recurring_frequency: form.is_recurring ? form.recurring_frequency : null, notes: form.notes || null, paid_by: form.paid_by || null, receipt_url: receiptUrl, updated_at: new Date().toISOString() };
     let err;
     if (editRow) { const { error } = await runDb(supabase.from('expenses').update(payload).eq('expense_id', editRow.expense_id), 'update expense'); err = error; }
-    else { payload.created_at = new Date().toISOString(); payload.is_deleted = false; payload.created_by = await _currentUid(); const { error } = await runDb(supabase.from('expenses').insert(payload), 'record expense'); err = error; }
+    else { payload.created_at = new Date().toISOString(); payload.is_deleted = false; payload.created_by = await _currentUid(); try { payload.expense_no = await getNextExpenseRef(); } catch (e) { /* non-fatal */ } const { error } = await runDb(supabase.from('expenses').insert(payload), 'record expense'); err = error; }
     setSaving(false); if (err) return;
     // Owner-funded expense → alert the owners (new entries only).
     if (!editRow && form.paid_by && ownerMap[form.paid_by]) {
@@ -96,6 +100,13 @@ export function ExpensesModule({ onNavigate }) {
   const del = async (r) => { if (!window.confirm('Delete this expense?')) return; const { error } = await runDb(supabase.from('expenses').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('expense_id', r.expense_id), 'delete expense'); if (!error) { notify('Expense deleted.', 'success'); load(); } };
 
   const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
+  const reimbStatus = (r) => {
+    if (!r.paid_by) return null;
+    const amt = parseFloat(r.amount) || 0; const got = reimbMap[r.expense_id] || 0;
+    if (amt > 0 && got >= amt) return { l: 'Reimbursed', bg: 'var(--green-light)', c: 'var(--green)' };
+    if (got > 0) return { l: 'Partly', bg: 'var(--blue-light)', c: 'var(--blue)' };
+    return { l: 'Pending', bg: 'var(--orange-light)', c: '#854F0B' };
+  };
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -126,7 +137,7 @@ export function ExpensesModule({ onNavigate }) {
             {filtered.map((r) => { const ev = r.event_id ? evMap[r.event_id] : null; return (
               <div key={r.expense_id} style={{ display: 'grid', gridTemplateColumns: '80px 1fr 150px 130px 96px 64px', gap: 10, padding: '11px 16px', borderTop: '1px solid var(--grey-100)', alignItems: 'center', fontSize: 13 }}>
                 <div style={{ color: 'var(--grey-500)' }}>{fmtDate(r.date, { day: 'numeric', month: 'short' })}</div>
-                <div style={{ color: 'var(--grey-800)' }}>{r.description}{r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--pink)', marginLeft: 6 }}>📎</a>}{r.paid_by && ownerMap[r.paid_by] && <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: 'var(--pink-light)', color: 'var(--pink-dark)' }}>by {ownerMap[r.paid_by].name}</span>}</div>
+                <div style={{ color: 'var(--grey-800)' }}>{r.expense_no && <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: 'var(--grey-400)', marginRight: 6 }}>{r.expense_no}</span>}{r.description}{r.receipt_url && <a href={r.receipt_url} target="_blank" rel="noreferrer" style={{ color: 'var(--pink)', marginLeft: 6 }}>📎</a>}{r.paid_by && ownerMap[r.paid_by] && <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: 'var(--pink-light)', color: 'var(--pink-dark)' }}>by {ownerMap[r.paid_by].name}</span>}{(() => { const s = reimbStatus(r); return s ? <span style={{ marginLeft: 6, fontSize: 10.5, padding: '1px 6px', borderRadius: 10, background: s.bg, color: s.c }}>{s.l}</span> : null; })()}</div>
                 <div>{ev ? <a onClick={() => onNavigate && onNavigate('events', { eventId: ev.event_id, label: ev.name || ev.ref_number || 'Event' })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>{ev.ref_number}</a> : <span style={{ color: 'var(--grey-400)' }}>General</span>}</div>
                 <div><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: 'var(--blue-light)', color: 'var(--blue)' }}>{EXPENSE_CAT_LABEL(r.category)}</span></div>
                 <div style={{ textAlign: 'right', fontWeight: 500 }}>{inr(r.amount)}</div>

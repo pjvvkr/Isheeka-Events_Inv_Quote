@@ -10,6 +10,7 @@
 import { supabase } from './supabase';
 import { runDb } from './toast.jsx';
 import { _currentUid } from './session.js';
+import { getNextOwnerRef } from './refs.js';
 
 const ownerName = (u) => (((u.first_name || '') + ' ' + (u.last_name || '')).trim()) || u.email || 'Owner';
 
@@ -64,12 +65,16 @@ export function reconcile(owners, expenses, ledger) {
 
 export async function addLedgerEntry(entry) {
   const uid = await _currentUid();
+  let entry_no = null;
+  try { entry_no = await getNextOwnerRef(entry.entry_type); } catch (e) { /* non-fatal — leave blank */ }
   const row = {
+    entry_no,
     entry_type: entry.entry_type,
     entry_date: entry.entry_date,
     amount: Math.max(0, Math.round(parseFloat(entry.amount) || 0)),
     from_user: entry.from_user || null,
     to_user: entry.to_user || null,
+    expense_id: entry.expense_id || null,
     payment_mode: entry.payment_mode || null,
     reference_number: entry.reference_number || null,
     notes: entry.notes || null,
@@ -84,10 +89,25 @@ export async function updateLedgerEntry(id, entry) {
     entry_type: entry.entry_type, entry_date: entry.entry_date,
     amount: Math.max(0, Math.round(parseFloat(entry.amount) || 0)),
     from_user: entry.from_user || null, to_user: entry.to_user || null,
+    expense_id: entry.expense_id || null,
     payment_mode: entry.payment_mode || null, reference_number: entry.reference_number || null,
     notes: entry.notes || null, updated_at: new Date().toISOString(),
   };
   return await runDb(supabase.from('owner_ledger').update(row).eq('ledger_id', id), 'update entry');
+}
+
+// Per-expense reimbursement status. For each owner-funded expense, sum reimbursements
+// linked to it → { applicable, reimbursed, remaining, status: pending|partial|reimbursed }.
+export function expenseReimbursements(expenses, ledger) {
+  const byExp = {};
+  (ledger || []).forEach((l) => { if (l.entry_type === 'reimbursement' && l.expense_id && !l.is_deleted) byExp[l.expense_id] = (byExp[l.expense_id] || 0) + (parseFloat(l.amount) || 0); });
+  const out = {};
+  (expenses || []).forEach((e) => {
+    if (!e.paid_by) { out[e.expense_id] = { applicable: false }; return; }
+    const amt = parseFloat(e.amount) || 0; const r = byExp[e.expense_id] || 0;
+    out[e.expense_id] = { applicable: true, reimbursed: r, remaining: Math.max(0, amt - r), status: (amt > 0 && r >= amt) ? 'reimbursed' : (r > 0 ? 'partial' : 'pending') };
+  });
+  return out;
 }
 
 export async function deleteLedgerEntry(id) {
@@ -97,13 +117,15 @@ export async function deleteLedgerEntry(id) {
 // CSV statement: every owner-funded expense + every ledger entry, chronological.
 export function buildStatementCsv(owners, expenses, ledger) {
   const nm = {}; (owners || []).forEach((o) => { nm[o.user_id] = o.name; });
+  const expNo = {}; (expenses || []).forEach((e) => { expNo[e.expense_id] = e.expense_no || ''; });
   const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  const rows = [['Date', 'Type', 'From', 'To / Paid by', 'Category', 'Description', 'Amount']];
+  const rows = [['ID', 'Date', 'Type', 'From', 'To / Paid by', 'Category', 'Description', 'Amount']];
   (expenses || []).filter((e) => e.paid_by).forEach((e) => {
-    rows.push([e.date, 'Expense', nm[e.paid_by] || '—', 'Business', e.category || '', e.description || '', Math.round(parseFloat(e.amount) || 0)]);
+    rows.push([e.expense_no || '', e.date, 'Expense', nm[e.paid_by] || '—', 'Business', e.category || '', e.description || '', Math.round(parseFloat(e.amount) || 0)]);
   });
   (ledger || []).forEach((l) => {
-    rows.push([l.entry_date, l.entry_type.charAt(0).toUpperCase() + l.entry_type.slice(1), nm[l.from_user] || (l.entry_type === 'reimbursement' ? 'Business' : '—'), nm[l.to_user] || '—', '', l.notes || '', Math.round(parseFloat(l.amount) || 0)]);
+    const forRef = (l.entry_type === 'reimbursement' && l.expense_id && expNo[l.expense_id]) ? ('for ' + expNo[l.expense_id] + (l.notes ? (' · ' + l.notes) : '')) : (l.notes || '');
+    rows.push([l.entry_no || '', l.entry_date, l.entry_type.charAt(0).toUpperCase() + l.entry_type.slice(1), nm[l.from_user] || (l.entry_type === 'reimbursement' ? 'Business' : '—'), nm[l.to_user] || '—', '', forRef, Math.round(parseFloat(l.amount) || 0)]);
   });
   return rows.map((r) => r.map(esc).join(',')).join('\n');
 }
