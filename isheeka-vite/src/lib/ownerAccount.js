@@ -82,7 +82,8 @@ export async function addLedgerEntry(entry) {
     created_by: uid || null,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(), is_deleted: false,
   };
-  return await runDb(supabase.from('owner_ledger').insert(row), 'record entry');
+  const res = await runDb(supabase.from('owner_ledger').insert(row), 'record entry');
+  return { ...res, entry_no };
 }
 
 export async function updateLedgerEntry(id, entry) {

@@ -49,10 +49,10 @@ export function OwnerAccountModule({ onNavigate }) {
     ...ledger.map((l) => ({ kind: l.entry_type, id: 'l' + l.ledger_id, refNo: l.entry_no, date: l.entry_date, amount: parseFloat(l.amount) || 0, label: feedLabel(l, nameOf, expNoMap), sub: l.notes || '', entry: l })),
   ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
-  const reimburseExpense = (e, st) => openType('reimbursement', { to_user: e.paid_by, amount: String(Math.round((st && st.remaining) || (parseFloat(e.amount) || 0))), expense_id: e.expense_id, _forExpenseNo: e.expense_no, notes: 'Reimbursement for ' + (e.expense_no || 'expense') });
+  const reimburseExpense = (e, st) => openType('reimbursement', { to_user: e.paid_by, amount: String(Math.round((st && st.remaining) || (parseFloat(e.amount) || 0))), expense_id: e.expense_id, _forExpenseNo: e.expense_no, _forExpenseDesc: e.description, _forRemaining: (st && st.remaining != null) ? st.remaining : (parseFloat(e.amount) || 0), notes: 'Reimbursement for ' + (e.expense_no || 'expense') });
 
   const openType = (type, preset) => setForm({ entry_type: type, entry_date: todayLocalStr(), amount: '', from_user: '', to_user: '', expense_id: '', attachment_url: '', _proofFile: null, _proofName: '', notify_wa: true, payment_mode: '', reference_number: '', notes: '', ...(preset || {}) });
-  const openEdit = (l) => setForm({ ledger_id: l.ledger_id, entry_type: l.entry_type, entry_date: l.entry_date, amount: String(l.amount || ''), from_user: l.from_user || '', to_user: l.to_user || '', expense_id: l.expense_id || '', attachment_url: l.attachment_url || '', _proofFile: null, _proofName: '', notify_wa: false, payment_mode: l.payment_mode || '', reference_number: l.reference_number || '', notes: l.notes || '' });
+  const openEdit = (l) => setForm({ ledger_id: l.ledger_id, entry_no: l.entry_no || '', entry_type: l.entry_type, entry_date: l.entry_date, amount: String(l.amount || ''), from_user: l.from_user || '', to_user: l.to_user || '', expense_id: l.expense_id || '', attachment_url: l.attachment_url || '', _proofFile: null, _proofName: '', notify_wa: false, payment_mode: l.payment_mode || '', reference_number: l.reference_number || '', notes: l.notes || '' });
   const setFf = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const saveEntry = async () => {
@@ -65,16 +65,30 @@ export function OwnerAccountModule({ onNavigate }) {
     setSaving(true);
     let entry = form;
     if (form._proofFile) { const url = await uploadOwnerProof(form._proofFile); if (url) entry = { ...form, attachment_url: url }; else notify("Couldn't upload the proof — saving without it.", 'error'); }
-    const { error } = form.ledger_id ? await updateLedgerEntry(form.ledger_id, entry) : await addLedgerEntry(entry);
-    setSaving(false); if (error) return;
+    const res = form.ledger_id ? await updateLedgerEntry(form.ledger_id, entry) : await addLedgerEntry(entry);
+    setSaving(false); if (res && res.error) return;
+    const entryNo = (res && res.entry_no) || form.entry_no || '';
     if (form.notify_wa) {
       let recip = owners.find((o) => o.user_id === form.to_user);
       if (!recip && form.entry_type === 'funding') recip = owners.find((o) => o.user_id !== form.from_user);
       if (recip) {
         const amtStr = inr(amt);
-        const msg = form.entry_type === 'reimbursement' ? ('Reimbursed you ' + amtStr + (form._forExpenseNo ? (' for ' + form._forExpenseNo) : '') + '.')
-          : form.entry_type === 'funding' ? (nameOf(form.from_user) + ' added ' + amtStr + ' funding to the business.')
-            : ('Paid you ' + amtStr + '.');
+        let msg;
+        if (form.entry_type === 'reimbursement') {
+          const who = nameOf(form.to_user);
+          if (form.expense_id && form._forExpenseNo) {
+            const rem = parseFloat(form._forRemaining) || 0;
+            const full = amt >= rem - 0.5;
+            const afterRem = Math.max(0, Math.round(rem - amt));
+            msg = who + ' has been reimbursed ' + amtStr + ' (' + (full ? 'full' : 'partial') + ') for "' + (form._forExpenseDesc || 'expense') + '" — ' + form._forExpenseNo + '.' + (full ? '' : ' ' + inr(afterRem) + ' still pending.');
+          } else {
+            msg = who + ' has been reimbursed ' + amtStr + ' by the business' + (entryNo ? ' — ' + entryNo : '') + '.';
+          }
+        } else if (form.entry_type === 'funding') {
+          msg = nameOf(form.from_user) + ' added ' + amtStr + ' funding to the business' + (entryNo ? ' — ' + entryNo : '') + '.' + (form.notes ? ' (For: ' + form.notes + ')' : '');
+        } else {
+          msg = nameOf(form.from_user) + ' paid ' + nameOf(form.to_user) + ' ' + amtStr + (entryNo ? ' — ' + entryNo : '') + '.' + (form.notes ? ' (For: ' + form.notes + ')' : '');
+        }
         try { window.open(waLink(recip.phone, msg), '_blank'); } catch (e) { /* noop */ }
       }
     }
