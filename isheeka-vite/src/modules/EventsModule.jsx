@@ -372,7 +372,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [errors, setErrors] = React.useState({});
   const [mainItemsView, setMainItemsView] = React.useState([]);
   const [evTemplates, setEvTemplates] = React.useState([]);
-  React.useEffect(()=>{ supabase.from('event_templates').select('*').eq('is_deleted',false).eq('is_active',true).order('sort_order').then(({data})=>{ if(data) setEvTemplates(data); }); },[]);
+  React.useEffect(()=>{ supabase.from('event_templates').select('*').eq('is_deleted',false).eq('is_active',true).order('name').then(({data})=>{ if(data) setEvTemplates(data); }); },[]);
   // Load a template's items into one editable sub-event (matched by name, else all), or the main block.
   const loadTplItems = async (tpl, want) => {
     const {data} = await supabase.from('event_template_items').select('*').eq('template_id',tpl.template_id).order('sort_order');
@@ -436,7 +436,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         }
       }catch(e){}
       if(evt.client_id){
-        const {data:ac} = await supabase.from('alternative_contacts').select('*').eq('client_id',evt.client_id).eq('is_deleted',false);
+        const {data:ac} = await supabase.from('alternative_contacts').select('*').eq('client_id',evt.client_id).eq('is_deleted',false).order('first_name');
         if(ac) setAltContacts(ac);
       }
       if(evt.lead_id){
@@ -749,7 +749,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const vendorOutstandingTotal = eventVendors.reduce((s,v)=>s+(parseFloat(v.outstanding)||0),0);
   const hasApprovedQuote = quotations.some(q=>['approved','converted','invoiced'].includes((q.status||'').toLowerCase()));
   const funnel = eventFunnel({invoices, installments:invInstallments, vendorOutstanding:vendorOutstandingTotal, hasApprovedQuote});
-  const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name}));
+  const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name})).sort((a,b)=>a.label.localeCompare(b.label));
   const typeOpts = eventTypes.map(t=>({value:t.value,label:t.label}));
   const statusOpts = EVENT_STATUS_ORDER.map(s=>({value:s,label:EVENT_STATUS_LABELS[s]}));
   const contactOpts = [{value:'',label:'Client themselves'},...altContacts.map(ac=>({value:ac.contact_id,label:ac.first_name+' '+ac.last_name+' ('+ac.relationship+')'}))];
@@ -1352,7 +1352,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
   useEffect(()=>{
     supabase.from('clients').select('client_id,first_name,last_name,phone_1,status').eq('is_deleted',false).neq('status','inactive').order('first_name').then(({data})=>{ if(data) setClients(data); });
     supabase.from('users').select('user_id,first_name,last_name,role').eq('status','active').then(({data})=>{ if(data) setStaffList(data); });
-    supabase.from('event_templates').select('*').eq('is_deleted',false).eq('is_active',true).order('sort_order').then(({data})=>{ if(data) setTemplates(data); });
+    supabase.from('event_templates').select('*').eq('is_deleted',false).eq('is_active',true).order('name').then(({data})=>{ if(data) setTemplates(data); });
     // Pre-fill from reference event if provided
     if(referenceEvent){
       setForm(f=>({...f,

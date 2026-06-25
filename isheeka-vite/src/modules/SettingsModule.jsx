@@ -312,7 +312,7 @@ function TemplatesTab() {
 
   const loadTemplates = async () => {
     setLoading(true);
-    const { data } = await supabase.from('event_templates').select('*').eq('is_deleted', false).order('sort_order').order('name');
+    const { data } = await supabase.from('event_templates').select('*').eq('is_deleted', false).order('name');
     if (data) setTemplates(data);
     setLoading(false);
   };
@@ -521,7 +521,7 @@ function LeadSourcesTab() {
 
   const loadSources = async () => {
     setLoading(true);
-    const { data } = await supabase.from('lead_sources').select('*').order('sort_order').order('label');
+    const { data } = await supabase.from('lead_sources').select('*').order('label');
     if (data) setSources(data);
     clearLeadSourcesCache(); // so LeadForm reloads
     setLoading(false);
@@ -608,7 +608,7 @@ function SubEventEditor({ eventTypeId }) {
   const [subs, setSubs] = React.useState([]);
   const [val, setVal] = React.useState('');
   const [loading, setLoading] = React.useState(true);
-  const load = async () => { setLoading(true); const { data } = await supabase.from('event_type_subevents').select('*').eq('event_type_id', eventTypeId).order('sort_order'); setSubs(data || []); setLoading(false); };
+  const load = async () => { setLoading(true); const { data } = await supabase.from('event_type_subevents').select('*').eq('event_type_id', eventTypeId).order('name'); setSubs(data || []); setLoading(false); };
   React.useEffect(() => { load(); }, [eventTypeId]);
   const add = async () => { const n = val.trim(); if (!n) return; if (subs.some((s) => (s.name || '').toLowerCase() === n.toLowerCase())) { notify('That function already exists.', 'error'); return; } const { error } = await runDb(supabase.from('event_type_subevents').insert({ event_type_id: eventTypeId, name: n, sort_order: subs.length, is_active: true }), 'add function'); if (error) return; setVal(''); load(); };
   const remove = async (s) => { if (!window.confirm('Remove "' + s.name + '"?')) return; const { error } = await runDb(supabase.from('event_type_subevents').delete().eq('subevent_id', s.subevent_id), 'remove function'); if (error) return; load(); };

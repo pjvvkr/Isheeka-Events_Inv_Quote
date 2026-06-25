@@ -167,7 +167,7 @@ function LeadForm({initial={}, onSave, onCancel, title='New lead', referenceData
   };
 
   const typeOpts = eventTypes.map(t=>({value:t.value,label:t.label}));
-  const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name}));
+  const staffOpts = staffList.map(s=>({value:s.user_id,label:s.first_name+' '+s.last_name})).sort((a,b)=>a.label.localeCompare(b.label));
 
   return (
     <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',overflow:'hidden'}}>

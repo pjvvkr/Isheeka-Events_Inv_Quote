@@ -194,7 +194,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
         setQuotDetails(f=>({...f,additional_terms:data.default_terms||'',payment_terms:buildPaymentTermsText(f.payment_schedule)}));
       }
     });
-    supabase.from('event_templates').select('*').eq('is_active',true).eq('is_deleted',false).order('sort_order').then(({data:tmps})=>{
+    supabase.from('event_templates').select('*').eq('is_active',true).eq('is_deleted',false).order('name').then(({data:tmps})=>{
       if(tmps){
         setTemplates(tmps);
         supabase.from('event_template_items').select('*').order('sort_order').then(({data:items})=>{

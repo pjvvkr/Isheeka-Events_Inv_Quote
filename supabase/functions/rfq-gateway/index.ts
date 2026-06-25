@@ -273,7 +273,7 @@ Deno.serve(async (req) => {
           if (r.event_type) {
             const { data: et } = await db.from("event_types").select("event_type_id").ilike("label", String(r.event_type)).limit(1).maybeSingle();
             if (et) {
-              const { data: subs } = await db.from("event_type_subevents").select("name").eq("event_type_id", et.event_type_id).eq("is_active", true).order("sort_order");
+              const { data: subs } = await db.from("event_type_subevents").select("name").eq("event_type_id", et.event_type_id).eq("is_active", true).order("name");
               subevent_suggestions = (subs ?? []).map((x: any) => x.name);
             }
           }

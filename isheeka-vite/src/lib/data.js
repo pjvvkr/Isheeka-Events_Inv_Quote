@@ -14,7 +14,7 @@ export function clearLeadSourcesCache() { _leadSourcesCache = null; }
 export async function fetchLeadSources() {
   if (_leadSourcesCache) return _leadSourcesCache;
   try {
-    const { data } = await supabase.from('lead_sources').select('*').eq('is_active', true).order('sort_order');
+    const { data } = await supabase.from('lead_sources').select('*').eq('is_active', true).order('label');
     if (data && data.length > 0) {
       _leadSourcesCache = data.map((s) => ({ value: s.value, label: s.label }));
       return _leadSourcesCache;
