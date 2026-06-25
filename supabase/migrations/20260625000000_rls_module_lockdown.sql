@@ -4,38 +4,51 @@
 -- Rollback: supabase/rollback_rls_lockdown.sql (run via SQL editor / MCP if needed).
 
 -- ── Helper functions (SECURITY DEFINER: read the caller's profile past their own RLS) ──
+-- IMPORTANT: public.users.user_id is NOT the auth user id. The link is EMAIL
+-- (matches how the app loads the profile). So we resolve via auth.jwt()->>'email'.
+
+-- The caller's public.users.user_id (used by the per-user own-row policies).
+create or replace function public.app_uid() returns uuid
+  language sql stable security definer set search_path = public as $$
+  select u.user_id from public.users u
+  where lower(u.email) = lower(auth.jwt() ->> 'email') limit 1
+$$;
+
 create or replace function public.app_full() returns boolean
   language sql stable security definer set search_path = public as $$
   select coalesce(
-    (select (u.role = 'admin' or u.is_owner) from public.users u where u.user_id = auth.uid()),
+    (select (u.role = 'admin' or u.is_owner) from public.users u
+       where lower(u.email) = lower(auth.jwt() ->> 'email')),
     true)            -- no profile row → full access (never lock anyone out)
 $$;
 
 create or replace function public.app_is_owner() returns boolean
   language sql stable security definer set search_path = public as $$
-  select coalesce((select u.is_owner from public.users u where u.user_id = auth.uid()), false)
+  select coalesce((select u.is_owner from public.users u
+    where lower(u.email) = lower(auth.jwt() ->> 'email')), false)
 $$;
 
 create or replace function public.app_is_admin() returns boolean
   language sql stable security definer set search_path = public as $$
-  select coalesce((select (u.role = 'admin') from public.users u where u.user_id = auth.uid()), false)
+  select coalesce((select (u.role = 'admin') from public.users u
+    where lower(u.email) = lower(auth.jwt() ->> 'email')), false)
 $$;
 
 -- Module check. Fail-open while module_access is unset → gradual rollout: enforcement
 -- only bites users who have an explicit map assigned via Settings → Access control.
 create or replace function public.app_can(mod text) returns boolean
   language sql stable security definer set search_path = public as $$
-  select case when auth.uid() is null then false
+  select case when (auth.jwt() ->> 'email') is null then false
     else coalesce((
       select (u.role = 'admin' or u.is_owner
               or u.module_access is null
               or coalesce((u.module_access ->> mod)::boolean, false))
-      from public.users u where u.user_id = auth.uid()), true)
+      from public.users u where lower(u.email) = lower(auth.jwt() ->> 'email')), true)
   end
 $$;
 
-revoke all on function public.app_full(), public.app_is_owner(), public.app_is_admin(), public.app_can(text) from public;
-grant execute on function public.app_full(), public.app_is_owner(), public.app_is_admin(), public.app_can(text) to authenticated;
+revoke all on function public.app_uid(), public.app_full(), public.app_is_owner(), public.app_is_admin(), public.app_can(text) from public;
+grant execute on function public.app_uid(), public.app_full(), public.app_is_owner(), public.app_is_admin(), public.app_can(text) to authenticated;
 
 -- ── Drop the existing permissive policies on every table we redefine ──
 do $$
@@ -119,9 +132,9 @@ create policy users_write on public.users for all to authenticated
 
 -- ── Per-user tables: each user sees only their own rows ──
 create policy notifications_self on public.notifications for all to authenticated
-  using (recipient_user_id = auth.uid()) with check (recipient_user_id = auth.uid());
+  using (recipient_user_id = public.app_uid()) with check (recipient_user_id = public.app_uid());
 create policy push_subscriptions_self on public.push_subscriptions for all to authenticated
-  using (user_id = auth.uid()) with check (user_id = auth.uid());
+  using (user_id = public.app_uid()) with check (user_id = public.app_uid());
 
 -- Untouched (intentionally): counters, payment_notifications, rfq_otp, short_links
 -- (infra / portal tables; keep their existing policies).

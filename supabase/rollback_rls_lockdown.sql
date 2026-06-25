@@ -32,3 +32,4 @@ drop function if exists public.app_can(text);
 drop function if exists public.app_is_admin();
 drop function if exists public.app_is_owner();
 drop function if exists public.app_full();
+drop function if exists public.app_uid();
