@@ -36,9 +36,7 @@ export function LoginScreen({ onLogin }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-logo">
-          <div style={{ fontSize: 48, marginBottom: 8 }}>🌸</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#e8185a', letterSpacing: '.02em' }}>ISHEEKA EVENTS</div>
-          <div className="tagline">Making Every Event Memorable</div>
+          <img src="/isheeka-logo.png" alt="Isheeka Events — Making Every Event Memorable, Since 2017" style={{ width: '100%', maxWidth: 280, height: 'auto', display: 'block', margin: '0 auto' }} />
         </div>
         {mode === 'login' ? (
           <>

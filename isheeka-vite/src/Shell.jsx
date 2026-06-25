@@ -131,7 +131,7 @@ export default function Shell() {
       <aside className="sidebar">
         <div className="sidebar-brand">
           <div className="brand-logo">
-            <div style={{ fontSize: 28 }}>🌸</div>
+            <img src="/isheeka-mark.png" alt="Isheeka Events" style={{ height: 36, width: 'auto', display: 'block', flexShrink: 0 }} />
             <div className="brand-text">
               <div className="name">ISHEEKA EVENTS</div>
               <div className="tagline">Making Every Event Memorable</div>

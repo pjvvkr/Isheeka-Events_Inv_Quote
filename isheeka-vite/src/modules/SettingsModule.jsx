@@ -7,6 +7,7 @@ import { notify, runDb } from '../lib/toast.jsx';
 import { fetchSuggestions, InputField, SelectField } from '../components/fields.jsx';
 import { useEventTypes, clearLeadSourcesCache, clearEventTypesCache } from '../lib/data.js';
 import { eventTypeLabel } from '../lib/format.js';
+import { slugify, normalizeName, bestNameMatch, SIMILAR_THRESHOLD } from '../lib/fuzzy.js';
 import { MODULE_SECTIONS, GRANTABLE, defaultAccessForRole } from '../lib/access.js';
 import { NOTIF_EVENTS, NOTIF_CHANNELS, resolvedPrefs } from '../lib/notifyPrefs.js';
 
@@ -392,17 +393,129 @@ function TemplatesTab() {
   );
 }
 
-function LeadSourceInput({ value, onChange }) {
-  return <input className="field-input" value={value} onChange={(e) => onChange(e.target.value)} placeholder="e.g. Trade Show, Instagram..." />;
+// Shared add/import control for short names (event types, lead sources): single-add
+// with inline fuzzy-duplicate warning + a paste-list importer that previews each
+// entry as New / Similar (your choice) / Duplicate before bulk-adding.
+// existing: [{label, value, is_active}]. onAddMany(labels[]) inserts + reloads.
+function NameImporter({ existing, entityLabel, placeholder, onAddMany }) {
+  const [mode, setMode] = React.useState('single');
+  const [single, setSingle] = React.useState('');
+  const [singleMsg, setSingleMsg] = React.useState(null);
+  const [text, setText] = React.useState('');
+  const [rows, setRows] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  const [success, setSuccess] = React.useState('');
+  const flash = (m) => { setSuccess(m); setTimeout(() => setSuccess(''), 3000); };
+  const Cap = entityLabel.charAt(0).toUpperCase() + entityLabel.slice(1);
+
+  const tabBtn = (on) => ({ fontSize: 12, padding: '4px 10px', ...(on ? { background: 'var(--pink-light)', color: 'var(--pink)', borderColor: 'var(--pink)' } : {}) });
+  const badge = (bg, fg) => ({ fontSize: 11, padding: '3px 9px', borderRadius: 'var(--radius-sm)', background: bg, color: fg, whiteSpace: 'nowrap' });
+
+  const addSingle = async (force) => {
+    const label = single.trim();
+    if (!label) { setSingleMsg({ type: 'error', text: 'Label is required' }); return; }
+    if (!slugify(label)) { setSingleMsg({ type: 'error', text: 'Enter a valid label' }); return; }
+    if (!force) {
+      const { score, match } = bestNameMatch(label, existing);
+      if (score >= 1 && match) { setSingleMsg({ type: 'error', text: '“' + (match.label || label) + '” already exists' + (match.is_active ? '.' : ' but is inactive — reactivate it above instead.') }); return; }
+      if (score >= SIMILAR_THRESHOLD && match) { setSingleMsg({ type: 'warn', text: 'Looks similar to “' + match.label + '” (' + Math.round(score * 100) + '%). Add anyway?' }); return; }
+    }
+    setSaving(true); await onAddMany([label]); setSaving(false);
+    setSingle(''); setSingleMsg(null); flash('Added “' + label + '”.');
+  };
+
+  const buildPreview = () => {
+    const raw = text.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    const out = []; const seen = [];
+    raw.forEach((label) => {
+      const v = slugify(label); if (!v) return;
+      const nn = normalizeName(label);
+      if (seen.includes(nn)) { out.push({ label, status: 'dupinput', keep: false }); return; }
+      const { score, match } = bestNameMatch(label, existing);
+      if (score >= 1) { out.push({ label, status: 'exact', match, keep: false }); return; }
+      seen.push(nn);
+      if (score >= SIMILAR_THRESHOLD) { out.push({ label, status: 'similar', match, score, keep: false }); return; }
+      out.push({ label, status: 'new', keep: true });
+    });
+    setRows(out);
+  };
+  const toggleKeep = (i) => setRows((r) => r.map((x, j) => j === i ? { ...x, keep: !x.keep } : x));
+  const commit = async () => {
+    const labels = (rows || []).filter((r) => r.keep).map((r) => r.label);
+    if (!labels.length) { flash('Nothing selected to add.'); return; }
+    setSaving(true); await onAddMany(labels); setSaving(false);
+    setRows(null); setText(''); flash('Added ' + labels.length + ' ' + entityLabel + (labels.length === 1 ? '' : 's') + '.');
+  };
+  const keepCount = (rows || []).filter((r) => r.keep).length;
+
+  return (
+    <div style={{ background: 'var(--grey-50)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--grey-100)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--grey-800)' }}>Add {entityLabel}</div>
+        <div style={{ flex: 1 }} />
+        <button className="btn sm" style={tabBtn(mode === 'single')} onClick={() => { setMode('single'); setRows(null); }}>Single</button>
+        <button className="btn sm" style={tabBtn(mode === 'paste')} onClick={() => { setMode('paste'); setSingleMsg(null); }}>📋 Paste list</button>
+      </div>
+
+      {success && <div style={{ background: 'var(--green-light)', color: 'var(--green)', borderRadius: 'var(--radius-sm)', padding: '8px 14px', fontSize: 13, marginBottom: 10 }}>✅ {success}</div>}
+
+      {mode === 'single' ? (
+        <>
+          {singleMsg && <div style={{ fontSize: 12, color: singleMsg.type === 'error' ? 'var(--red)' : '#B8893A', marginBottom: 8 }}>⚠ {singleMsg.text}</div>}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label className="field-label">{Cap} label</label>
+              <input className="field-input" value={single} onChange={(e) => { setSingle(e.target.value); setSingleMsg(null); }} placeholder={placeholder} />
+            </div>
+            {singleMsg && singleMsg.type === 'warn' ? (
+              <>
+                <button className="btn" onClick={() => addSingle(true)} disabled={saving} style={{ flexShrink: 0 }}>Add anyway</button>
+                <button className="btn" onClick={() => { setSingle(''); setSingleMsg(null); }} style={{ flexShrink: 0 }}>Cancel</button>
+              </>
+            ) : (
+              <button className="btn primary" onClick={() => addSingle(false)} disabled={saving} style={{ flexShrink: 0 }}>{saving ? 'Adding...' : '+ Add'}</button>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--grey-400)', marginTop: 6 }}>Value auto-generated from the label. Near-duplicates are flagged before adding.</div>
+        </>
+      ) : (
+        <>
+          <textarea className="field-input" style={{ width: '100%', height: 88, resize: 'vertical' }} value={text} onChange={(e) => setText(e.target.value)} placeholder={'Paste one per line, or comma-separated…'} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+            <span style={{ fontSize: 11, color: 'var(--grey-400)' }}>Each entry is checked against existing {entityLabel}s.</span>
+            <button className="btn" onClick={buildPreview} disabled={!text.trim()}>🔍 Preview</button>
+          </div>
+          {rows && (
+            <div style={{ marginTop: 14, borderTop: '1px solid var(--grey-100)', paddingTop: 12 }}>
+              {rows.length === 0 && <div style={{ fontSize: 12, color: 'var(--grey-400)' }}>Nothing to import.</div>}
+              {rows.map((r, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--grey-100)', opacity: (r.status === 'exact' || r.status === 'dupinput') ? .6 : 1 }}>
+                  <span style={{ flex: 1, fontSize: 13, color: 'var(--grey-800)' }}>
+                    {r.label}
+                    {r.status === 'exact' && <span style={{ color: 'var(--grey-400)' }}> — already exists{r.match && !r.match.is_active ? ' (inactive)' : ''}</span>}
+                    {r.status === 'dupinput' && <span style={{ color: 'var(--grey-400)' }}> — repeated in your list</span>}
+                    {r.status === 'similar' && <span style={{ color: 'var(--grey-400)' }}> — {Math.round(r.score * 100)}% like “{r.match.label}”</span>}
+                  </span>
+                  {r.status === 'new' && <span style={badge('var(--green-light)', 'var(--green)')}>New</span>}
+                  {(r.status === 'exact' || r.status === 'dupinput') && <span style={badge('var(--grey-100)', 'var(--grey-400)')}>Skipped</span>}
+                  {r.status === 'similar' && <button className="btn sm" onClick={() => toggleKeep(i)} style={r.keep ? { color: 'var(--green)', borderColor: 'var(--green)' } : {}}>{r.keep ? '✓ Adding' : 'Add anyway'}</button>}
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                <span style={{ fontSize: 12, color: 'var(--grey-500)' }}>{keepCount} to add</span>
+                <button className="btn primary" onClick={commit} disabled={saving || keepCount === 0}>{saving ? 'Adding...' : 'Add ' + keepCount + ' ' + entityLabel + (keepCount === 1 ? '' : 's')}</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 function LeadSourcesTab() {
   const [sources, setSources] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  const [newLabel, setNewLabel] = React.useState('');
-  const [addError, setAddError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
-  const [successMsg, setSuccessMsg] = React.useState('');
 
   React.useEffect(() => { loadSources(); }, []);
 
@@ -414,21 +527,14 @@ function LeadSourcesTab() {
     setLoading(false);
   };
 
-  const handleAdd = async () => {
-    if (!newLabel.trim()) { setAddError('Label is required'); return; }
-    const val = newLabel.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    setSaving(true);
-    const { error: lsie } = await runDb(supabase.from('lead_sources').insert({
-      label: newLabel.trim(), value: val,
-      sort_order: sources.length + 1, is_active: true,
-      created_at: new Date().toISOString(),
-    }), 'add lead source');
-    if (lsie) { setSaving(false); return; }
-    setNewLabel(''); setAddError('');
+  const addMany = async (labels) => {
+    const existingVals = new Set(sources.map((s) => s.value));
+    const rows = labels.map((label, i) => ({ label: label.trim(), value: slugify(label), sort_order: sources.length + i + 1, is_active: true, created_at: new Date().toISOString() }))
+      .filter((r) => r.value && !existingVals.has(r.value));
+    if (!rows.length) return;
+    const { error } = await runDb(supabase.from('lead_sources').insert(rows), 'add lead sources');
+    if (error) return;
     await loadSources();
-    setSuccessMsg('Source added!');
-    setTimeout(() => setSuccessMsg(''), 3000);
-    setSaving(false);
   };
 
   const toggleActive = async (src) => {
@@ -462,7 +568,6 @@ function LeadSourcesTab() {
         Configure the sources that appear when creating a new lead. These values are shared across the app.
       </div>
 
-      {successMsg && <div style={{ background: 'var(--green-light)', color: 'var(--green)', borderRadius: 'var(--radius-sm)', padding: '8px 14px', fontSize: 13, marginBottom: 12 }}>✅ {successMsg}</div>}
 
       {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
         <>
@@ -487,22 +592,12 @@ function LeadSourcesTab() {
             {sources.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--grey-400)', fontSize: 13 }}>No sources yet</div>}
           </div>
 
-          <div style={{ background: 'var(--grey-50)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--grey-100)' }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--grey-800)', marginBottom: 10 }}>Add new source</div>
-            {addError && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>⚠ {addError}</div>}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <div style={{ flex: 1 }}>
-                <label className="field-label">Source label</label>
-                <LeadSourceInput value={newLabel} onChange={(v) => { setNewLabel(v); setAddError(''); }} />
-              </div>
-              <button className="btn primary" onClick={handleAdd} disabled={saving} style={{ flexShrink: 0 }}>
-                {saving ? 'Adding...' : '+ Add source'}
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--grey-400)', marginTop: 6 }}>
-              The value will be auto-generated from the label (e.g. "Trade Show" → trade_show)
-            </div>
-          </div>
+          <NameImporter
+            existing={sources.map((s) => ({ label: s.label, value: s.value, is_active: s.is_active }))}
+            entityLabel="lead source"
+            placeholder="e.g. Trade Show, Instagram..."
+            onAddMany={addMany}
+          />
         </>
       )}
     </div>
@@ -543,10 +638,6 @@ function SubEventEditor({ eventTypeId }) {
 function EventTypesTab() {
   const [types, setTypes] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  const [newLabel, setNewLabel] = React.useState('');
-  const [addError, setAddError] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
-  const [successMsg, setSuccessMsg] = React.useState('');
   const [expanded, setExpanded] = React.useState(null);
 
   React.useEffect(() => { loadTypes(); }, []);
@@ -559,24 +650,14 @@ function EventTypesTab() {
     setLoading(false);
   };
 
-  const handleAdd = async () => {
-    if (!newLabel.trim()) { setAddError('Label is required'); return; }
-    const val = newLabel.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    if (!val) { setAddError('Enter a valid label'); return; }
-    const dup = types.find((t) => t.value === val || (t.label || '').trim().toLowerCase() === newLabel.trim().toLowerCase());
-    if (dup) { setAddError('"' + (dup.label || val) + '" already exists' + (dup.is_active ? '.' : ' but is inactive — reactivate it below instead of re-adding.')); return; }
-    setSaving(true);
-    const { error: eie } = await runDb(supabase.from('event_types').insert({
-      label: newLabel.trim(), value: val,
-      sort_order: types.length + 1, is_active: true,
-      created_at: new Date().toISOString(),
-    }), 'add event type');
-    if (eie) { setSaving(false); return; }
-    setNewLabel(''); setAddError('');
+  const addMany = async (labels) => {
+    const existingVals = new Set(types.map((t) => t.value));
+    const rows = labels.map((label, i) => ({ label: label.trim(), value: slugify(label), sort_order: types.length + i + 1, is_active: true, created_at: new Date().toISOString() }))
+      .filter((r) => r.value && !existingVals.has(r.value));
+    if (!rows.length) return;
+    const { error } = await runDb(supabase.from('event_types').insert(rows), 'add event types');
+    if (error) return;
     await loadTypes();
-    setSuccessMsg('Event type added!');
-    setTimeout(() => setSuccessMsg(''), 3000);
-    setSaving(false);
   };
 
   const toggleActive = async (t) => {
@@ -612,7 +693,6 @@ function EventTypesTab() {
         Configure the event types that appear when creating a lead or event. Deactivating a type hides it from new records but leaves existing events unchanged.
       </div>
 
-      {successMsg && <div style={{ background: 'var(--green-light)', color: 'var(--green)', borderRadius: 'var(--radius-sm)', padding: '8px 14px', fontSize: 13, marginBottom: 12 }}>✅ {successMsg}</div>}
 
       {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
         <>
@@ -643,22 +723,12 @@ function EventTypesTab() {
             {types.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: 'var(--grey-400)', fontSize: 13 }}>No event types yet</div>}
           </div>
 
-          <div style={{ background: 'var(--grey-50)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--grey-100)' }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--grey-800)', marginBottom: 10 }}>Add new event type</div>
-            {addError && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>⚠ {addError}</div>}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <div style={{ flex: 1 }}>
-                <label className="field-label">Event type label</label>
-                <input className="field-input" value={newLabel} onChange={(e) => { setNewLabel(e.target.value); setAddError(''); }} placeholder="e.g. Baby Shower, Engagement..." />
-              </div>
-              <button className="btn primary" onClick={handleAdd} disabled={saving} style={{ flexShrink: 0 }}>
-                {saving ? 'Adding...' : '+ Add type'}
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--grey-400)', marginTop: 6 }}>
-              The value will be auto-generated from the label (e.g. "Baby Shower" → baby_shower)
-            </div>
-          </div>
+          <NameImporter
+            existing={types.map((t) => ({ label: t.label, value: t.value, is_active: t.is_active }))}
+            entityLabel="event type"
+            placeholder="e.g. Baby Shower, Engagement..."
+            onAddMany={addMany}
+          />
         </>
       )}
     </div>
