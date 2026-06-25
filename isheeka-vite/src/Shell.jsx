@@ -133,8 +133,8 @@ export default function Shell() {
           <div className="brand-logo">
             <img src="/isheeka-mark.png" alt="Isheeka Events" style={{ height: 36, width: 'auto', display: 'block', flexShrink: 0 }} />
             <div className="brand-text">
-              <div className="name">ISHEEKA EVENTS</div>
-              <div className="tagline">Making Every Event Memorable</div>
+              <img src="/isheeka-wordmark.png" alt="Isheeka Events" style={{ height: 18, width: 'auto', display: 'block' }} />
+              <div className="tagline" style={{ marginTop: 3 }}>Making Every Event Memorable</div>
             </div>
           </div>
         </div>
