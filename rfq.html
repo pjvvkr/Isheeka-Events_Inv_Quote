@@ -284,7 +284,10 @@ function renderStep1(){
     + '<div><label>Phone</label><input id="f_sphone" value="'+esc(data.secondary_contact_phone)+'"></div></div>'
     + '<div class="nav"><button class="btn primary" id="next1">Next →</button></div>'
     + '<div class="save-hint">✓ Saved automatically — you can close and resume from your link</div>';
-  $('next1').onclick=async()=>{ await save(true); step=2; renderForm(); };
+  $('next1').onclick=async()=>{ collect();
+    if(!data.contact_first_name){ toast('Please enter your first name'); return; }
+    if(!data.contact_phone && !data.contact_email){ toast('Add a phone or email so we can reach you'); return; }
+    await save(true); step=2; renderForm(); };
 }
 
 function suggFor(type){ const t=(type||'').toLowerCase(); if(subSuggest.length && t===subSuggestType) return subSuggest; return SUBEVENT_SUGGEST[t]||SUBEVENT_SUGGEST.default; }
@@ -307,7 +310,11 @@ function renderStep2(){
   renderChips(sugg);
   $('f_type').onchange=()=>{ renderChips(suggFor($('f_type').value)); };
   $('back2').onclick=async()=>{ await save(true); step=1; renderForm(); };
-  $('next2').onclick=async()=>{ collect(); if(!subEvents.length){ toast('Pick at least one function'); return; } await save(true); step=3; renderForm(); };
+  $('next2').onclick=async()=>{ collect();
+    if(!data.event_type){ toast('Pick the main event type'); return; }
+    if(!data.event_date){ toast('Pick the main event date'); return; }
+    if(!subEvents.length){ toast('Pick at least one function'); return; }
+    await save(true); step=3; renderForm(); };
 }
 
 function renderChips(sugg){
@@ -474,7 +481,11 @@ function renderStep3(){
   html+='<div class="nav"><button class="btn ghost" id="back3">← Back</button><button class="btn primary" id="next3">Review →</button></div><div class="save-hint">✓ Saved automatically</div>';
   $('stepbody').innerHTML=html;
   $('back3').onclick=async()=>{ await save(true,true); step=2; renderForm(); };
-  $('next3').onclick=async()=>{ await save(true,true); step=4; renderForm(); };
+  $('next3').onclick=async()=>{
+    if(!items.length){ toast('Add at least one item before continuing'); return; }
+    const empties=subEvents.filter(se=>!items.some(it=>it.sub_event_name===se.name)).map(s=>s.name);
+    if(empties.length && !confirm('No items selected for: '+empties.join(', ')+'.\nContinue without them?')) return;
+    await save(true,true); step=4; renderForm(); };
   if($('attachFile')) $('attachFile').onclick=()=>pickAndExtract(false);
   if($('attachCam')) $('attachCam').onclick=()=>pickAndExtract(true);
   if($('attachPaste')) $('attachPaste').onclick=()=>{ showPaste=true; extractMsg=''; renderStep3(); if($('pasteBox')) $('pasteBox').focus(); };

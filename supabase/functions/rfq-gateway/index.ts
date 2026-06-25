@@ -52,6 +52,22 @@ function prefOn(prefs: any, ev: string, ch: string): boolean {
   return true;
 }
 
+// Fuzzy name match (for mapping a function/sub-event to a matching template).
+function normName(s: string): string {
+  return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+function nameScore(a: string, b: string): number {
+  const na = normName(a), nb = normName(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.9;
+  const bg = (s: string) => { const t = s.replace(/\s/g, ""); const o: string[] = []; for (let i = 0; i < t.length - 1; i++) o.push(t.slice(i, i + 2)); return o; };
+  const ba = bg(na), bb = bg(nb); if (!ba.length || !bb.length) return 0;
+  const m = new Map<string, number>(); ba.forEach((g) => m.set(g, (m.get(g) || 0) + 1));
+  let inter = 0; bb.forEach((g) => { const c = m.get(g) || 0; if (c > 0) { inter++; m.set(g, c - 1); } });
+  return (2 * inter) / (ba.length + bb.length);
+}
+
 // extract_* helpers: build a Claude content block per file, and validate an uploaded set.
 function fileBlock(f: any) {
   return f.media_type === "application/pdf"
@@ -259,6 +275,32 @@ Deno.serve(async (req) => {
             if (et) {
               const { data: subs } = await db.from("event_type_subevents").select("name").eq("event_type_id", et.event_type_id).eq("is_active", true).order("sort_order");
               subevent_suggestions = (subs ?? []).map((x: any) => x.name);
+            }
+          }
+        } catch { /* optional */ }
+        // Smart catalog: any configured function with no preset items of its own
+        // borrows them from the best-matching template (by name), re-tagged to the
+        // function. e.g. a wedding's "Haldi"/"Reception" reuse the Haldi / Wedding
+        // Reception templates so the client sees a real checklist, not "no presets".
+        try {
+          const covered = new Set((catalog as any[]).map((c) => normName(String(c.sub_event_name || ""))));
+          const wanted = (subevent_suggestions || []).filter((fn) => fn && !covered.has(normName(fn)));
+          if (wanted.length) {
+            const { data: allT } = await db.from("event_templates").select("template_id,name").eq("is_deleted", false).eq("is_active", true);
+            const picks: { fn: string; tid: any }[] = [];
+            for (const fn of wanted) {
+              let best: any = null, bestScore = 0;
+              for (const t of (allT ?? [])) { const sc = nameScore(fn, String(t.name || "")); if (sc > bestScore) { bestScore = sc; best = t; } }
+              if (best && bestScore >= 0.6) picks.push({ fn, tid: best.template_id });
+            }
+            if (picks.length) {
+              const tids = [...new Set(picks.map((p) => p.tid))];
+              const { data: extra } = await db.from("event_template_items").select("template_id,description,default_quantity,sort_order").in("template_id", tids).order("sort_order");
+              for (const p of picks) {
+                for (const it of (extra ?? []).filter((x: any) => x.template_id === p.tid)) {
+                  (catalog as any[]).push({ sub_event_name: p.fn, description: it.description, default_quantity: it.default_quantity });
+                }
+              }
             }
           }
         } catch { /* optional */ }
