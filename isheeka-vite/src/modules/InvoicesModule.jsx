@@ -135,6 +135,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
   const [srcRfq, setSrcRfq] = React.useState(null);
   const [srcLead, setSrcLead] = React.useState(null);
   const [srcEvent, setSrcEvent] = React.useState(null);
+  const [schedule, setSchedule] = React.useState([]);
   const [pdfDisplay, setPdfDisplay] = React.useState({ prices: true, qty: true, schedule: true, discount: true, coverPage: false, bankDetails: true });
   const [includeRevHistory, setIncludeRevHistory] = React.useState(true);
   const [evtName, setEvtName] = React.useState('');
@@ -208,6 +209,8 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     const evtId = (i && i.event_id) || (sq && sq.event_id) || null;
     if (evtId) { const { data: ev } = await supabase.from('events').select('event_id,ref_number,name,status,main_date').eq('event_id', evtId).maybeSingle(); setSrcEvent(ev || null); }
     else setSrcEvent(null);
+    if (evtId) { try { const { data: subs } = await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id', evtId).eq('is_deleted', false).order('sort_order'); setSchedule((subs || []).filter((s) => s.name || s.date).map((s) => ({ name: s.name || '', date: s.date || null, venue: s.location || '' }))); } catch (e) { setSchedule([]); } }
+    else setSchedule([]);
     setLoading(false);
   }, [invoiceId]);
   React.useEffect(() => { loadAll(); }, [loadAll]);
@@ -270,6 +273,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
   // Shape the invoice as a quote-like object for the shared PDF engine (docType='invoice').
   const invForPdf = () => ({
     ...inv,
+    event_schedule: schedule.length ? schedule : null,
     event_date: (srcEvent && srcEvent.main_date) || inv.event_date || null,
     client_phone: clientInfo.phone_1 || '', client_email: clientInfo.email_1 || '', client_city: clientInfo.city || '',
     additional_terms: inv.additional_notes || '',
@@ -505,6 +509,20 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
 
       {inv.status === 'cancelled' && <div style={{ padding: '8px 12px', marginBottom: 16, background: 'var(--grey-50)', color: 'var(--grey-600)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>This invoice is cancelled. To raise a new one, open the event {inv.event_id && <a onClick={() => onNavigate && onNavigate('events', { eventId: inv.event_id })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>(go to event →)</a>} and click <b>+ Generate invoice</b>.</div>}
       {inv.status === 'paid' && <div style={{ padding: '8px 12px', marginBottom: 16, background: 'var(--green-light)', color: 'var(--green)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>✅ This invoice is fully paid and locked for edits. Sharing and printing remain available.</div>}
+      {/* Event schedule (functions · dates · venues) */}
+      {schedule.length > 0 && (
+        <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '14px 18px', marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)', marginBottom: 8 }}>📅 EVENT SCHEDULE</div>
+          {schedule.map((s, i) => (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.4fr', gap: 8, fontSize: 13, padding: '5px 0', borderTop: i ? '1px solid var(--grey-50)' : 'none' }}>
+              <span style={{ fontWeight: 500, color: 'var(--grey-800)' }}>{s.name}</span>
+              <span style={{ color: 'var(--grey-500)' }}>{s.date ? fmtDate(s.date, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
+              <span style={{ color: s.venue ? 'var(--grey-700)' : 'var(--grey-400)' }}>{s.venue ? ('📍 ' + s.venue) : 'TBD'}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: 'var(--grey-400)', marginTop: 6 }}>Dates &amp; venues are set on the event; this prints on the invoice PDF.</div>
+        </div>
+      )}
       {/* Event name */}
       {!locked && <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '12px 16px', border: '1px solid var(--grey-100)', marginBottom: 16, display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 220 }}>

@@ -198,10 +198,10 @@ function TemplateEditor({ template, onSave, onCancel }) {
     try {
       let tplId = template?.template_id;
       if (tplId) {
-        const { error: tue } = await supabase.from('event_templates').update({ name, event_type: eventType || null, updated_at: new Date().toISOString() }).eq('template_id', tplId); if (tue) throw tue;
+        const { error: tue } = await supabase.from('event_templates').update({ name: name.trim(), event_type: eventType || null, updated_at: new Date().toISOString() }).eq('template_id', tplId); if (tue) throw tue;
         const { error: tdie } = await supabase.from('event_template_items').delete().eq('template_id', tplId); if (tdie) throw tdie;
       } else {
-        const { data, error: tie } = await supabase.from('event_templates').insert({ name, event_type: eventType || null, is_active: true, sort_order: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), is_deleted: false }).select().single();
+        const { data, error: tie } = await supabase.from('event_templates').insert({ name: name.trim(), event_type: eventType || null, is_active: true, sort_order: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), is_deleted: false }).select().single();
         if (tie) throw tie;
         tplId = data.template_id;
       }
@@ -644,7 +644,7 @@ function EventTypesTab() {
 
   const loadTypes = async () => {
     setLoading(true);
-    const { data } = await supabase.from('event_types').select('*').order('sort_order').order('label');
+    const { data } = await supabase.from('event_types').select('*').order('label');
     if (data) setTypes(data);
     clearEventTypesCache(); // clear so forms reload
     setLoading(false);

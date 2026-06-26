@@ -3,6 +3,62 @@ import React from 'react';
 import { supabase } from '../lib/supabase';
 import { fmtDate } from '../lib/format.js';
 
+const CAL_COLORS = [
+  { bg: '#FBEAF0', fg: '#72243E' }, { bg: '#E1F5EE', fg: '#085041' }, { bg: '#FAEEDA', fg: '#633806' },
+  { bg: '#E6F1FB', fg: '#0C447C' }, { bg: '#EEEDFE', fg: '#3C3489' }, { bg: '#FAECE7', fg: '#712B13' },
+  { bg: '#EAF3DE', fg: '#27500A' }, { bg: '#F1EFE8', fg: '#444441' },
+];
+
+// Month calendar of confirmed events. One colour per event (its functions share it),
+// busy days stack; clicking a chip opens that event's detail.
+function EventCalendar({ events, onNavigate }) {
+  const [cursor, setCursor] = React.useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const pad = (n) => String(n).padStart(2, '0');
+  const colorByEvent = React.useMemo(() => { const m = {}; (events || []).forEach((e, i) => { m[e.event_id] = CAL_COLORS[i % CAL_COLORS.length]; }); return m; }, [events]);
+  const byDate = React.useMemo(() => {
+    const m = {};
+    (events || []).forEach((e) => {
+      const push = (date, label) => { if (!date) return; (m[date] = m[date] || []).push({ event_id: e.event_id, label, color: colorByEvent[e.event_id] || CAL_COLORS[0], ref: e.ref_number, client: e.client_name }); };
+      push(e.main_date, e.name || 'Event');
+      (e.subs || []).forEach((s) => push(s.date, s.name));
+    });
+    return m;
+  }, [events, colorByEvent]);
+  const y = cursor.getFullYear(), mo = cursor.getMonth();
+  const startDow = new Date(y, mo, 1).getDay(), daysInMonth = new Date(y, mo + 1, 0).getDate();
+  const cells = []; for (let i = 0; i < startDow; i++) cells.push(null); for (let d = 1; d <= daysInMonth; d++) cells.push(d); while (cells.length % 7 !== 0) cells.push(null);
+  const todayStr = (() => { const t = new Date(); return t.getFullYear() + '-' + pad(t.getMonth() + 1) + '-' + pad(t.getDate()); })();
+  return (
+    <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '16px 20px', border: '1px solid var(--grey-100)', marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--grey-800)' }}>📅 {cursor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn sm" onClick={() => setCursor(new Date(y, mo - 1, 1))}>‹</button>
+          <button className="btn sm" onClick={() => { const t = new Date(); setCursor(new Date(t.getFullYear(), t.getMonth(), 1)); }}>Today</button>
+          <button className="btn sm" onClick={() => setCursor(new Date(y, mo + 1, 1))}>›</button>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} style={{ fontSize: 10, textTransform: 'uppercase', color: 'var(--grey-400)', textAlign: 'center', padding: 2 }}>{d}</div>)}
+        {cells.map((d, i) => {
+          if (d == null) return <div key={i} />;
+          const ds = y + '-' + pad(mo + 1) + '-' + pad(d);
+          const items = byDate[ds] || []; const isToday = ds === todayStr;
+          return (
+            <div key={i} style={{ minHeight: 70, border: '1px solid ' + (isToday ? 'var(--pink)' : 'var(--grey-100)'), borderRadius: 6, padding: '3px 4px', background: isToday ? 'var(--pink-light)' : 'white' }}>
+              <div style={{ fontSize: 11, color: 'var(--grey-500)', textAlign: 'right' }}>{d}</div>
+              {items.slice(0, 3).map((it, j) => (
+                <div key={j} onClick={() => onNavigate && onNavigate('events', { eventId: it.event_id, label: it.ref || 'Event' })} title={it.label + (it.client ? ' · ' + it.client : '')} style={{ background: it.color.bg, color: it.color.fg, fontSize: 10, borderRadius: 4, padding: '1px 5px', marginTop: 2, cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.label}</div>
+              ))}
+              {items.length > 3 && <div style={{ fontSize: 9, color: 'var(--grey-400)', marginTop: 2 }}>+{items.length - 3} more</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard({ user, onNavigate }) {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -13,10 +69,11 @@ export function Dashboard({ user, onNavigate }) {
   const [clientResp, setClientResp] = React.useState([]);   // client RFQs submitted, awaiting review
   const [vendorResp, setVendorResp] = React.useState([]);   // vendor bids submitted, awaiting costing
   const [loading, setLoading] = React.useState(true);
+  const [calEvents, setCalEvents] = React.useState([]);
   React.useEffect(() => { (async () => {
     setLoading(true);
     const now = new Date(), _p = (n) => String(n).padStart(2, '0'), todayStr = now.getFullYear() + '-' + _p(now.getMonth() + 1) + '-' + _p(now.getDate()), monthStr = now.getFullYear() + '-' + _p(now.getMonth() + 1);
-    const [{ data: leads }, { data: events }, { data: quotes }, { data: pays }, { data: invs }, { count: rfqReview }, { data: cResp }, { data: vResp }] = await Promise.all([
+    const [{ data: leads }, { data: events }, { data: quotes }, { data: pays }, { data: invs }, { count: rfqReview }, { data: cResp }, { data: vResp }, { data: subEv }] = await Promise.all([
       supabase.from('leads').select('stage').eq('is_deleted', false),
       supabase.from('events').select('event_id,name,ref_number,main_date,status,client_name').eq('is_deleted', false),
       supabase.from('quotations').select('grand_total,doc_date,status,event_id').eq('is_deleted', false),
@@ -25,6 +82,7 @@ export function Dashboard({ user, onNavigate }) {
       supabase.from('rfqs').select('rfq_id', { count: 'exact', head: true }).eq('is_deleted', false).eq('party_type', 'client').eq('is_sourcing_anchor', false).eq('status', 'submitted'),
       supabase.from('rfqs').select('rfq_id,ref_number,contact_name,event_type,revision_number,client_submitted_at').eq('is_deleted', false).eq('party_type', 'client').eq('is_sourcing_anchor', false).eq('status', 'submitted').order('client_submitted_at', { ascending: false }).limit(6),
       supabase.from('rfqs').select('rfq_id,ref_number,vendor_id,parent_rfq_id,client_submitted_at').eq('is_deleted', false).eq('party_type', 'vendor').eq('status', 'submitted').order('client_submitted_at', { ascending: false }).limit(6),
+      supabase.from('sub_events').select('event_id,name,date').eq('is_deleted', false),
     ]);
     // resolve vendor names for the bid card
     const vIds = [...new Set((vResp || []).map((v) => v.vendor_id).filter(Boolean))];
@@ -40,6 +98,8 @@ export function Dashboard({ user, onNavigate }) {
     const collectedMonth = (pays || []).filter((p) => p.payment_date && p.payment_date.slice(0, 7) === monthStr && !cancelledInv[p.invoice_id]).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
     const out = (invs || []).filter((i) => !['paid', 'cancelled'].includes(i.status) && (parseFloat(i.total_outstanding) || 0) > 0).sort((a, b) => (parseFloat(b.total_outstanding) || 0) - (parseFloat(a.total_outstanding) || 0));
     setStats({ activeLeads, upcomingCount: up.length, quotedMonth, collectedMonth, rfqReview: rfqReview || 0 });
+    const subsByEvent = {}; (subEv || []).forEach((s) => { if (s.date) (subsByEvent[s.event_id] = subsByEvent[s.event_id] || []).push({ name: s.name, date: s.date }); });
+    setCalEvents((events || []).filter((e) => (e.status || '').toLowerCase() !== 'cancelled').map((e) => ({ event_id: e.event_id, name: e.name, client_name: e.client_name, ref_number: e.ref_number, main_date: e.main_date, subs: subsByEvent[e.event_id] || [] })));
     setUpcoming(up.slice(0, 5)); setOutstanding(out.slice(0, 5)); setLoading(false);
   })(); }, []);
   const inr = (n) => '₹' + (parseFloat(n) || 0).toLocaleString('en-IN');
@@ -91,6 +151,7 @@ export function Dashboard({ user, onNavigate }) {
             ))}
         </div>
       </div>
+      <EventCalendar events={calEvents} onNavigate={onNavigate} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
         <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '16px 20px', border: '1px solid var(--grey-100)' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)', marginBottom: 10 }}>Upcoming events</div>

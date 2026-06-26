@@ -454,12 +454,16 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
       // Event mirrors the quote: rebuild the event's sub-events + items to match (best-effort; the quote is already saved)
       if(originEvent){
         try {
+          // preserve any date/venue already captured on the event's sub-events across the re-sync
+          const {data:prevSubs}=await supabase.from('sub_events').select('name,date,location').eq('event_id',originEvent.eventId).eq('is_deleted',false);
+          const prevByName={}; (prevSubs||[]).forEach(s=>{ prevByName[String(s.name||'').toLowerCase().trim()]={date:s.date||null,location:s.location||null}; });
           await supabase.from('sub_event_items').update({is_deleted:true}).eq('event_id',originEvent.eventId);
           await supabase.from('sub_events').update({is_deleted:true}).eq('event_id',originEvent.eventId);
           const seNames=[...new Set(lineItems.map(i=>i.sub_event_name).filter(n=>n&&String(n).trim()))];
           const nameToId={}; let so=0;
           for(const nm of seNames){
-            const {data:se,error:see}=await supabase.from('sub_events').insert({event_id:originEvent.eventId,name:nm,sort_order:so++,created_at:new Date().toISOString(),is_deleted:false}).select().single();
+            const prev=prevByName[String(nm).toLowerCase().trim()]||{};
+            const {data:se,error:see}=await supabase.from('sub_events').insert({event_id:originEvent.eventId,name:nm,date:prev.date||null,location:prev.location||null,sort_order:so++,created_at:new Date().toISOString(),is_deleted:false}).select().single();
             if(see) throw see;
             nameToId[nm]=se.sub_event_id;
           }

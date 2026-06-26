@@ -68,6 +68,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [qUserMap, setQUserMap] = React.useState({});
   const [srcLead, setSrcLead] = React.useState(null);
   const [srcEvent, setSrcEvent] = React.useState(null);
+  const [schedule, setSchedule] = React.useState([]);
   const [srcRfq, setSrcRfq] = React.useState(null);
   const [invoiceIssued, setInvoiceIssued] = React.useState(false);
   const [qActExpanded, setQActExpanded] = React.useState(false);
@@ -132,10 +133,11 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     try{ const {data:rq}=await supabase.from('rfqs').select('rfq_id,ref_number').eq('quotation_id',q.quotation_id).eq('is_deleted',false).maybeSingle(); setSrcRfq(rq||null); }catch(e){ setSrcRfq(null); }
     if(q&&q.event_id){
       const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status,main_date').eq('event_id',q.event_id).maybeSingle(); setSrcEvent(ev||null);
+      try{ const {data:subs}=await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id',q.event_id).eq('is_deleted',false).order('sort_order'); setSchedule((subs||[]).filter(s=>s.name||s.date).map(s=>({name:s.name||'',date:s.date||null,venue:s.location||''}))); }catch(e){ setSchedule([]); }
       if(ev&&ev.main_date) _evd=ev.main_date;
       const {data:invs}=await supabase.from('invoices').select('status').eq('event_id',q.event_id).eq('is_deleted',false);
       setInvoiceIssued((invs||[]).some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase())));
-    } else { setSrcEvent(null); setInvoiceIssued(false); }
+    } else { setSrcEvent(null); setInvoiceIssued(false); setSchedule([]); }
     if(_evd) setQuot(prev=>prev?{...prev,event_date:_evd}:prev);
     if(q&&(q.revision_number||0)>0){
       let qy=supabase.from('quotations').select('revision_number,doc_date,grand_total,created_at').eq('is_deleted',false);
@@ -155,7 +157,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. Send it to the client anyway?')) return;
     setSharing(true);
     notify('Preparing the quotation PDF…','info',2500);
-    const url = await uploadQuotePdf(quot, items, displayOpts, qSettings, {showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
+    const url = await uploadQuotePdf(await withSchedule(quot), items, displayOpts, qSettings, {showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
     if(!url) notify("Couldn't attach the PDF link — sharing the message; you can attach the downloaded PDF manually.",'error');
     const msg = buildQuoteShareMsg(quot, qSettings, url);
     if(channel==='whatsapp') openWhatsApp(quot.client_phone, msg);
@@ -164,10 +166,20 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     const {data:qact}=await supabase.from('quotation_activity_log').select('*').eq('quotation_id',quot.quotation_id).order('logged_at',{ascending:false});
     setQActivity(qact||[]); setSharing(false);
   };
+  // Attach the linked event's schedule (functions · dates · venues) so the PDF prints it.
+  const withSchedule = async (q) => {
+    if(!q || !q.event_id) return q;
+    try {
+      const {data:subs}=await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id',q.event_id).eq('is_deleted',false).order('sort_order');
+      const sched=(subs||[]).filter(s=>s.name||s.date).map(s=>({name:s.name||'',date:s.date||null,venue:s.location||''}));
+      return sched.length ? {...q, event_schedule:sched} : q;
+    } catch(e){ return q; }
+  };
   const doExport = async (action) => {
     if(!quot) return;
     if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. '+(action==='download'?'Download':action==='print'?'Print':'Open')+' it anyway?')) return;
-    buildQuotationPDF(quot, items, {action, displayOpts, settings:qSettings, showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
+    const q2 = await withSchedule(quot);
+    buildQuotationPDF(q2, items, {action, displayOpts, settings:qSettings, showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
   };
   const doConfirmQuote = async () => {
     if(confirming||!quot) return;
@@ -354,6 +366,20 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
         </div>
       </div>
 
+      {/* Event schedule (functions · dates · venues) */}
+      {schedule.length>0&&(
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'14px 18px',marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:'var(--gold)',marginBottom:8}}>📅 EVENT SCHEDULE</div>
+          {schedule.map((s,i)=>(
+            <div key={i} style={{display:'grid',gridTemplateColumns:'1.2fr 1fr 1.4fr',gap:8,fontSize:13,padding:'5px 0',borderTop:i?'1px solid var(--grey-50)':'none'}}>
+              <span style={{fontWeight:500,color:'var(--grey-800)'}}>{s.name}</span>
+              <span style={{color:'var(--grey-500)'}}>{s.date?fmtDate(s.date,{day:'numeric',month:'short',year:'numeric'}):'—'}</span>
+              <span style={{color:s.venue?'var(--grey-700)':'var(--grey-400)'}}>{s.venue?('📍 '+s.venue):'TBD'}</span>
+            </div>
+          ))}
+          <div style={{fontSize:11,color:'var(--grey-400)',marginTop:6}}>Dates &amp; venues are set on the event; this prints on the quotation PDF.</div>
+        </div>
+      )}
       {/* Line items */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
         {Object.keys(groups).map(k=>(

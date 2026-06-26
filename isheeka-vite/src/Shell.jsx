@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import { NAV, SESSION_TIMEOUT, SESSION_WARNING } from './lib/constants.js';
-import { ToastHost } from './lib/toast.jsx';
+import { ToastHost, notify } from './lib/toast.jsx';
 import { LoginScreen } from './components/LoginScreen.jsx';
 import { SessionWarning } from './components/SessionWarning.jsx';
 import { NavBar } from './components/NavBar.jsx';
@@ -75,6 +75,11 @@ export default function Shell() {
     setUser(null);
     setShowWarning(false);
   };
+
+  // After a PWA auto-update reload, confirm the new version once.
+  useEffect(() => {
+    try { if (sessionStorage.getItem('isheeka-updated')) { sessionStorage.removeItem('isheeka-updated'); setTimeout(() => notify('Updated to the latest version ✓', 'success'), 600); } } catch (e) { /* noop */ }
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setUser(session?.user ?? null); setLoading(false); });
@@ -166,6 +171,7 @@ export default function Shell() {
             <div className="page-subtitle">Isheeka Events ERP</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button onClick={() => window.location.reload()} title="Refresh app" aria-label="Refresh app" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, border: '1.5px solid var(--pink)', borderRadius: 8, background: 'transparent', color: 'var(--pink)', cursor: 'pointer', fontSize: 17, lineHeight: 1, flexShrink: 0 }}>↻</button>
             <NotificationBell userId={profile && profile.user_id} onNavigate={navigate} />
             <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)' }} title="Connected"></div>

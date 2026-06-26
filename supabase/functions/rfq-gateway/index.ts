@@ -305,8 +305,12 @@ Deno.serve(async (req) => {
           }
         } catch { /* optional */ }
         let event_types: string[] = [];
-        try { const { data: ets } = await db.from("event_types").select("label").eq("is_active", true).order("sort_order"); event_types = (ets ?? []).map((x: any) => x.label).filter(Boolean); } catch { /* optional */ }
-        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog, change_note, subevent_suggestions, event_types });
+        try { const { data: ets } = await db.from("event_types").select("label").eq("is_active", true).order("label"); event_types = (ets ?? []).map((x: any) => x.label).filter(Boolean); } catch { /* optional */ }
+        // Vendor portal: surface the parent client RFQ's schedule (dates + venues) read-only,
+        // so the vendor knows when/where the functions they're pricing happen.
+        let schedule: any = null;
+        try { if (r.party_type === "vendor" && r.parent_rfq_id) { const { data: p } = await db.from("rfqs").select("sub_events,location,event_date").eq("rfq_id", r.parent_rfq_id).maybeSingle(); if (p) schedule = { sub_events: p.sub_events || [], location: p.location || null, event_date: p.event_date || null }; } } catch { /* optional */ }
+        return json({ ok: true, rfq: publicRfq(r), items: items ?? [], catalog, change_note, subevent_suggestions, event_types, schedule });
       }
 
       // ── autosave / resume: write details + replace items ─────────────────

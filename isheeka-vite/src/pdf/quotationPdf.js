@@ -115,6 +115,23 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
   card(M + cardW + gap, 'EVENT', quot.event_name, [quot.event_ref ? ('Ref: ' + quot.event_ref) : null, quot.event_city || null, (isInv && quot.quotation_ref) ? ('From quote: ' + quot.quotation_ref) : null].filter(Boolean));
   y += cardH + 22;
 
+  // Event schedule (functions · dates · venues) — only when present; matches the items-table style.
+  let _sched = quot.event_schedule; if (typeof _sched === 'string') { try { _sched = JSON.parse(_sched || '[]'); } catch (e) { _sched = []; } } _sched = Array.isArray(_sched) ? _sched : [];
+  if (dOpts.eventSchedule !== false && _sched.length) {
+    sans('bold', 8); setText(ROSE_DK); doc.text('SCHEDULE', M, y); y += 6;
+    doc.autoTable({
+      head: [['Function', 'Date', 'Venue']],
+      body: _sched.map((s) => [String(s.name || ''), s.date ? fmt(s.date) : '--', s.venue || '']),
+      startY: y, margin: { left: M, right: M },
+      theme: 'grid', tableLineColor: LINE, tableLineWidth: 0.4,
+      styles: { fontSize: 9, cellPadding: 5, lineColor: LINE, lineWidth: 0.4, textColor: INK },
+      headStyles: { fillColor: PSOFT, textColor: ROSE_DK, fontStyle: 'bold', fontSize: 8.5 },
+      columnStyles: { 0: { cellWidth: 'auto' }, 1: { cellWidth: 90 }, 2: { cellWidth: 170 } },
+      didDrawPage: () => { drawFrame(); },
+    });
+    y = doc.lastAutoTable.finalY + 18;
+  }
+
   // Line items table
   const showPrices = !!dOpts.prices, showQty = !!dOpts.qty;
   const head = ['Description']; if (showQty) head.push('Qty'); if (showPrices) { head.push('Unit price', 'Amount'); }

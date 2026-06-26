@@ -119,6 +119,7 @@ let pasteText = '';       // pasted WhatsApp message / list text
 let pendingItems = null;  // client: extracted items awaiting review before merge
 let pendingCosts = null;  // vendor: matched costs awaiting review before apply
 let vitems = [];          // vendor mode: cost items [{rfq_item_id, description, quantity, unit_cost, can_supply, item_note}]
+let vschedule = null;     // vendor mode: parent client RFQ schedule (read-only) {sub_events, location, event_date}
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 
@@ -333,8 +334,10 @@ function toggleSub(name){
 }
 function renderSubDates(){
   $('subdates').innerHTML = subEvents.map((s,i)=>
-    '<div class="subrow"><span class="nm">'+esc(s.name)+'</span><input type="date" data-i="'+i+'" value="'+esc(s.planned_date)+'"></div>').join('');
+    '<div class="subrow"><span class="nm">'+esc(s.name)+'</span><input type="date" data-i="'+i+'" value="'+esc(s.planned_date)+'"></div>'
+    +'<div class="subrow"><span class="nm"></span><input data-vi="'+i+'" placeholder="Venue (optional)" value="'+esc(s.venue||'')+'"></div>').join('');
   $('subdates').querySelectorAll('input[data-i]').forEach(inp=>inp.onchange=()=>{ subEvents[+inp.getAttribute('data-i')].planned_date=inp.value||null; });
+  $('subdates').querySelectorAll('input[data-vi]').forEach(inp=>inp.oninput=()=>{ subEvents[+inp.getAttribute('data-vi')].venue=inp.value; });
 }
 
 // ---------- attachment / photo → item list (Claude vision via gateway) ----------
@@ -597,6 +600,7 @@ async function extractCostsFromText(){
 }
 
 function renderVendorPortal(r){
+  vschedule = r.schedule || null;
   vitems = (Array.isArray(r.items)? r.items : []).map(it=>({
     rfq_item_id: it.rfq_item_id,
     sub_event_name: it.sub_event_name||'',
@@ -615,11 +619,25 @@ function vendorTotal(){
   return vitems.reduce((s,it)=> s + ((it.can_supply && it.unit_cost!=='') ? ((Number(it.unit_cost)||0)*(Number(it.quantity)||1)) : 0), 0);
 }
 
+// Read-only schedule (dates + venues) for the functions the vendor is pricing.
+function vScheduleHtml(){
+  if(!vschedule) return '';
+  var subs = Array.isArray(vschedule.sub_events)? vschedule.sub_events : [];
+  if(!subs.length) return '';
+  var rows = subs.map(function(s){
+    return '<div style="display:grid;grid-template-columns:1fr .8fr 1.1fr;gap:6px;font-size:11.5px;border-top:1px solid #f0eee9;padding:5px 0"><span>'+esc(s.name||'')+'</span><span>'+(s.planned_date?esc(fmtD(s.planned_date)):'—')+'</span><span>'+(s.venue?esc(s.venue):'<span style="color:#bbb">TBD</span>')+'</span></div>';
+  }).join('');
+  return '<div style="background:#fff;border:1px solid #eadfca;border-radius:12px;padding:10px 14px;margin:8px 0 14px">'
+    + '<div style="font-size:10.5px;font-weight:600;color:#7a1533;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">Schedule for your items <span style="color:#B8893A;font-weight:400">· read-only</span></div>'
+    + rows + '</div>';
+}
+
 function renderVendorForm(){
   const evbits = [data.event_type||'Event', data.event_date?fmtD(data.event_date):'', data.city||''].filter(Boolean).join(' · ');
   let html = '<div class="pad">'
     + '<h1>Your pricing</h1>'
     + '<div class="sub">'+esc(evbits)+'. Enter your unit cost for each item, or mark any you can’t supply. You can save and resume; you can revise after submitting until pricing is finalised.</div>';
+  html += vScheduleHtml();
   if(Array.isArray(pendingCosts)){
     const rows=pendingCosts.map((c,i)=>{ const it=vitems.find(x=>String(x.rfq_item_id)===String(c.rfq_item_id)); const nm=it?it.description:'item'; const val=(c.can_supply===false)?'<span style="color:#a32d2d">can’t supply</span>':(c.unit_cost!=null?('₹'+Number(c.unit_cost).toLocaleString('en-IN')):'<span style="color:#bbb">—</span>'); const conf=(c.confidence==='low')?' <span style="font-size:9px;color:#a32d2d">· low confidence</span>':''; const src=c.source?('<div style="font-size:10px;color:#aaa">from: '+esc(c.source)+'</div>'):''; return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-top:1px solid #f0eee9;padding:6px 0;font-size:12.5px"><span>'+esc(nm)+conf+src+'</span><span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><b>'+val+'</b><span data-vrem="'+i+'" style="cursor:pointer;color:#bbb;font-size:13px">✕</span></span></div>'; }).join('');
     html += '<div style="background:#fff;border:1px solid #e6d9bf;border-radius:12px;padding:12px 14px;margin:8px 0 14px">'

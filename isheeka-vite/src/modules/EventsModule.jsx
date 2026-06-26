@@ -858,7 +858,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                 <div style={{width:8,height:8,borderRadius:'50%',background:'#e8185a',flexShrink:0}}/>
                 <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{se.name}</div>
-                {se.date&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {fmtDate(se.date,{day:'numeric',month:'short'})}</div>}
+                {se.date&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {fmtDate(se.date,{day:'numeric',month:'short'})}</div>}{se.location&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· 📍 {se.location}</div>}
                 {se.location&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {se.location}</div>}
               </div>
               {se.items.length>0

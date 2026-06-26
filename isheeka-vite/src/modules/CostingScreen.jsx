@@ -3,6 +3,10 @@
 // priced draft quote + a saved costing summary. See docs/milestone-s-vendor-rfq-spec.md.
 import React from 'react';
 import { notify } from '../lib/toast.jsx';
+import { fmtDate } from '../lib/format.js';
+import { buildCostingPdf, buildCostingXlsx } from '../lib/costingSheet.js';
+import { uploadToQuotations, signedUrl } from '../lib/storage.js';
+import { openWhatsApp } from '../lib/share.js';
 import { loadCostingData, generateQuoteFromCosting, saveCostingSummary, costKey } from '../lib/costing.js';
 
 const MARGIN_FLOOR_PCT = 15; // soft-warning threshold (spec §5 #5)
@@ -14,6 +18,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [warn, setWarn] = React.useState(null);
+  const [gmk, setGmk] = React.useState('30');
 
   React.useEffect(() => { (async () => {
     setLoading(true);
@@ -26,10 +31,21 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
       return { key: costKey(it), sub_event_name: it.sub_event_name || '', description: it.description, quantity: Number(it.quantity) || 1, bids, inHouse: false, inHouseCost: '', chosen, markup: data.defaultMarkup, markupOverridden: false, autoCheapest: chosen };
     });
     setRows(rs);
+    setGmk(String(data.defaultMarkup ?? 30));
     setLoading(false);
   })(); }, [rfqId]);
 
   const setRow = (i, patch) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  // Global markup: typing/dragging re-prices every non-customised row live; "Apply to
+  // all" (force) resets per-item overrides too. Keeps d.defaultMarkup in sync for saves.
+  const applyGlobalMarkup = (raw, force) => {
+    const clean = (raw === '' ? '' : String(Math.max(0, parseFloat(raw) || 0)));
+    setGmk(clean);
+    const val = clean === '' ? '0' : clean;
+    setRows((rs) => rs.map((r) => (force ? { ...r, markup: val, markupOverridden: false } : (!r.markupOverridden ? { ...r, markup: val } : r))));
+    setD((dd) => (dd ? { ...dd, defaultMarkup: Number(val) || 0 } : dd));
+  };
 
   const chosenCostOf = (r) => {
     if (r.inHouse) return (r.inHouseCost === '' || r.inHouseCost == null) ? null : Number(r.inHouseCost);
@@ -96,6 +112,36 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div>;
   if (!d || !d.rfq) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--grey-400)' }}>Could not load costing. <button className="btn sm" onClick={onBack}>← Back</button></div>;
 
+  // Internal costing sheet (PDF / Excel / WhatsApp) — vendor costs + margins, never shared with clients.
+  const sheetPayload = () => ({
+    rfq: d.rfq, columns: d.columns, schedule: (d.rfq && d.rfq.sub_events) || [], totals,
+    rows: rows.map((r) => {
+      const cost = chosenCostOf(r), client = clientUnitOf(r);
+      return {
+        sub_event_name: r.sub_event_name, description: r.description, quantity: r.quantity,
+        bids: d.columns.map((c) => { const b = r.bids.find((x) => x.vendor_id === c.vendor_id); return (b && b.can_supply !== false && b.unit_cost != null) ? Number(b.unit_cost) : null; }),
+        inhouse: r.inHouse ? (r.inHouseCost === '' ? null : Number(r.inHouseCost)) : null,
+        chosen: cost, markupPct: Number(r.markup) || 0,
+        markupRs: (cost != null && client != null) ? (client - cost) * r.quantity : null,
+        clientUnit: client, lineTotal: (client != null) ? client * r.quantity : null,
+      };
+    }),
+  });
+  const dlPdf = () => { try { buildCostingPdf(sheetPayload(), { action: 'download' }); } catch (e) { notify('Could not generate the PDF.', 'error'); } };
+  const dlXlsx = async () => { try { await buildCostingXlsx(sheetPayload()); } catch (e) { notify('Could not generate the Excel.', 'error'); } };
+  const shareWa = async () => {
+    try {
+      notify('Preparing the costing sheet…', 'info', 2000);
+      const blob = buildCostingPdf(sheetPayload(), { output: 'blob' });
+      const file = new File([blob], 'costing.pdf', { type: 'application/pdf' });
+      const path = await uploadToQuotations(file, 'costing');
+      const url = path ? await signedUrl(path, 60 * 60 * 24 * 30) : null;
+      const nm = [d.rfq.contact_first_name, d.rfq.contact_last_name].filter(Boolean).join(' ').trim() || d.rfq.contact_name || '';
+      const msg = 'Internal costing — ' + (d.rfq.ref_number || '') + (nm ? (' · ' + nm) : '') + '\nClient total ' + inr(totals.client) + ' · Margin ' + inr(totals.margin) + (url ? ('\n\n' + url) : '') + '\n\n(Internal — not for the client)';
+      openWhatsApp('', msg);
+    } catch (e) { notify('Could not prepare the share.', 'error'); }
+  };
+
   const readOnly = !!(d && d.eventClosed);
 
   return (
@@ -105,11 +151,36 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
           <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>Costing &amp; markup</div>
           <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 2 }}>{d.rfq.ref_number}{d.rfq.event_type ? (' · ' + d.rfq.event_type) : ''} · {d.columns.length} vendor bid{d.columns.length === 1 ? '' : 's'} · default markup {d.defaultMarkup}%</div>
         </div>
-        <button className="btn sm" onClick={onBack}>← Back</button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 10.5, color: 'var(--grey-400)', marginRight: 2 }} title="Internal use only — contains vendor costs & margins">🔒 Internal:</span>
+          <button className="btn sm" onClick={dlPdf} title="Download internal costing PDF">⬇ PDF</button>
+          <button className="btn sm" onClick={dlXlsx} title="Download internal costing Excel">⬇ Excel</button>
+          <button className="btn sm" onClick={shareWa} title="Share the internal costing PDF via WhatsApp">💬 WhatsApp</button>
+          <button className="btn sm" onClick={onBack}>← Back</button>
+        </div>
       </div>
 
       {readOnly && <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', color: 'var(--grey-600)', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>🔒 The event for this RFQ is completed or cancelled — this costing is <b>view-only</b>. You can review the chosen bids and margins, but can't re-price or regenerate the quote.</div>}
       {!readOnly && d.columns.length === 0 && <div style={{ background: 'var(--orange-light)', color: '#854F0B', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>No vendor has submitted a bid yet — you can still price items in-house below.</div>}
+
+      {!readOnly && (
+        <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--grey-800)' }}>Global markup</span>
+            <input value={gmk} onChange={(e) => applyGlobalMarkup(e.target.value, false)} inputMode="numeric" style={{ width: 56, fontSize: 14, fontWeight: 600, padding: '4px 8px', textAlign: 'right' }} />
+            <span style={{ fontSize: 13, color: 'var(--grey-500)' }}>%</span>
+            <input type="range" min="0" max="80" step="1" value={Math.min(80, parseFloat(gmk) || 0)} onChange={(e) => applyGlobalMarkup(e.target.value, false)} style={{ flex: 1, minWidth: 130 }} />
+            {[20, 25, 30, 35, 40].map((p) => <button key={p} className="btn sm" onClick={() => applyGlobalMarkup(String(p), false)} style={(parseFloat(gmk) === p) ? { borderColor: 'var(--pink)', color: 'var(--pink)' } : {}}>{p}%</button>)}
+            <button className="btn sm primary" onClick={() => applyGlobalMarkup(gmk || '0', true)} title="Set every item (including customised) to this %">Apply to all</button>
+          </div>
+          <div style={{ display: 'flex', gap: 18, marginTop: 10, flexWrap: 'wrap', fontSize: 12.5 }}>
+            <span style={{ color: 'var(--grey-500)' }}>Total cost <b style={{ color: 'var(--grey-800)' }}>{inr(totals.cost)}</b></span>
+            <span style={{ color: 'var(--grey-500)' }}>Client total <b style={{ color: 'var(--pink)' }}>{inr(totals.client)}</b></span>
+            <span style={{ color: 'var(--grey-500)' }}>Margin <b style={{ color: 'var(--green)' }}>{inr(totals.margin)}{totals.cost > 0 ? ' · ' + Math.round(totals.margin / totals.cost * 100) + '%' : ''}</b></span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--grey-400)', marginTop: 6 }}>Updates every item except ones you've customised (✎). “Apply to all” overrides those too.</div>
+        </div>
+      )}
 
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', overflowX: 'auto', marginBottom: 14 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 560 }}>
@@ -123,31 +194,46 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => {
-              const cu = clientUnitOf(r);
-              return (
-                <tr key={i} style={{ borderTop: '1px solid var(--grey-100)', textAlign: 'right' }}>
-                  <td style={{ textAlign: 'left', padding: '9px 12px' }}>{r.description}<span style={{ color: 'var(--grey-400)' }}> · ×{r.quantity}</span>{r.sub_event_name ? <div style={{ fontSize: 11, color: 'var(--grey-400)' }}>{r.sub_event_name}</div> : null}</td>
-                  {d.columns.map((c) => {
-                    const b = r.bids.find((x) => x.vendor_id === c.vendor_id);
-                    if (!b) return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--grey-300)' }}>—</td>;
-                    if (b.can_supply === false) return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--red)' }} title="Can't supply">✕</td>;
-                    const isChosen = !r.inHouse && r.chosen === c.vendor_id;
-                    return (
-                      <td key={c.vendor_id} onClick={() => { if (!readOnly) setRow(i, { inHouse: false, chosen: c.vendor_id }); }} title={(b.item_note ? ('Note: ' + b.item_note + '  ') : '') + (readOnly ? (isChosen ? 'chosen' : '') : (isChosen ? 'chosen' : 'click to choose'))} style={{ padding: '9px 8px', cursor: readOnly ? 'default' : 'pointer', background: isChosen ? 'var(--green-light)' : 'transparent', color: isChosen ? 'var(--green)' : 'var(--grey-800)', fontWeight: isChosen ? 600 : 400 }}>
-                        {b.unit_cost != null ? Number(b.unit_cost).toLocaleString('en-IN') : '—'}{b.item_note ? ' 📝' : ''}
+            {(() => {
+              const colCount = d.columns.length + 4;
+              const sched = {}; ((d.rfq && d.rfq.sub_events) || []).forEach((s) => { sched[String(s.name || '').toLowerCase().trim()] = s; });
+              const order = []; const grp = {};
+              rows.forEach((r, i) => { const k = r.sub_event_name || 'General'; if (!grp[k]) { grp[k] = []; order.push(k); } grp[k].push({ r, i }); });
+              const out = [];
+              order.forEach((k) => {
+                const s = sched[k.toLowerCase().trim()] || {};
+                out.push(<tr key={'h-' + k}><td colSpan={colCount} style={{ background: 'var(--pink-light)', color: 'var(--pink)', fontWeight: 700, fontSize: 11, padding: '7px 12px', textAlign: 'left' }}>{k}{s.planned_date ? (' · ' + fmtDate(s.planned_date, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}{s.venue ? (' · 📍 ' + s.venue) : ''}</td></tr>);
+                let gcost = 0, gclient = 0;
+                grp[k].forEach(({ r, i }) => {
+                  const cu = clientUnitOf(r); const cc = chosenCostOf(r);
+                  if (cc != null) gcost += cc * r.quantity; if (cu != null) gclient += cu * r.quantity;
+                  out.push(
+                    <tr key={i} style={{ borderTop: '1px solid var(--grey-100)', textAlign: 'right' }}>
+                      <td style={{ textAlign: 'left', padding: '9px 12px' }}>{r.description}<span style={{ color: 'var(--grey-400)' }}> · ×{r.quantity}</span></td>
+                      {d.columns.map((c) => {
+                        const b = r.bids.find((x) => x.vendor_id === c.vendor_id);
+                        if (!b) return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--grey-300)' }}>—</td>;
+                        if (b.can_supply === false) return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--red)' }} title="Can't supply">✕</td>;
+                        const isChosen = !r.inHouse && r.chosen === c.vendor_id;
+                        return (
+                          <td key={c.vendor_id} onClick={() => { if (!readOnly) setRow(i, { inHouse: false, chosen: c.vendor_id }); }} title={(b.item_note ? ('Note: ' + b.item_note + '  ') : '') + (readOnly ? (isChosen ? 'chosen' : '') : (isChosen ? 'chosen' : 'click to choose'))} style={{ padding: '9px 8px', cursor: readOnly ? 'default' : 'pointer', background: isChosen ? 'var(--green-light)' : 'transparent', color: isChosen ? 'var(--green)' : 'var(--grey-800)', fontWeight: isChosen ? 600 : 400 }}>
+                            {b.unit_cost != null ? Number(b.unit_cost).toLocaleString('en-IN') : '—'}{b.item_note ? ' 📝' : ''}
+                          </td>
+                        );
+                      })}
+                      <td style={{ padding: '9px 8px', background: r.inHouse ? 'var(--green-light)' : 'transparent', whiteSpace: 'nowrap' }}>
+                        <input type="checkbox" checked={r.inHouse} disabled={readOnly} onChange={(e) => setRow(i, { inHouse: e.target.checked, chosen: e.target.checked ? null : r.autoCheapest })} title="Manage in-house" style={{ verticalAlign: 'middle' }} />
+                        {r.inHouse && <input value={r.inHouseCost} disabled={readOnly} onChange={(e) => setRow(i, { inHouseCost: e.target.value })} placeholder="cost" inputMode="numeric" style={{ width: 64, marginLeft: 4, fontSize: 12, padding: '3px 6px' }} />}
                       </td>
-                    );
-                  })}
-                  <td style={{ padding: '9px 8px', background: r.inHouse ? 'var(--green-light)' : 'transparent', whiteSpace: 'nowrap' }}>
-                    <input type="checkbox" checked={r.inHouse} disabled={readOnly} onChange={(e) => setRow(i, { inHouse: e.target.checked, chosen: e.target.checked ? null : r.autoCheapest })} title="Manage in-house" style={{ verticalAlign: 'middle' }} />
-                    {r.inHouse && <input value={r.inHouseCost} disabled={readOnly} onChange={(e) => setRow(i, { inHouseCost: e.target.value })} placeholder="cost" inputMode="numeric" style={{ width: 64, marginLeft: 4, fontSize: 12, padding: '3px 6px' }} />}
-                  </td>
-                  <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}><input value={r.markup} disabled={readOnly} onChange={(e) => setRow(i, { markup: e.target.value, markupOverridden: true })} inputMode="numeric" style={{ width: 46, fontSize: 12, padding: '3px 6px', textAlign: 'right' }} />%</td>
-                  <td style={{ padding: '9px 12px', fontWeight: 600 }}>{cu != null ? inr(cu * r.quantity) : <span style={{ color: 'var(--red)' }}>—</span>}</td>
-                </tr>
-              );
-            })}
+                      <td style={{ padding: '9px 8px', whiteSpace: 'nowrap' }}>{r.markupOverridden && <span title="Customised — not changed by the global markup" style={{ color: '#B8893A', marginRight: 2 }}>✎</span>}<input value={r.markup} disabled={readOnly} onChange={(e) => setRow(i, { markup: e.target.value, markupOverridden: true })} inputMode="numeric" style={{ width: 46, fontSize: 12, padding: '3px 6px', textAlign: 'right' }} />%</td>
+                      <td style={{ padding: '9px 12px', fontWeight: 600 }}>{cu != null ? inr(cu * r.quantity) : <span style={{ color: 'var(--red)' }}>—</span>}</td>
+                    </tr>
+                  );
+                });
+                out.push(<tr key={'s-' + k}><td colSpan={colCount} style={{ textAlign: 'right', fontSize: 11, color: 'var(--grey-500)', padding: '5px 12px', background: 'var(--grey-50)' }}>{k} subtotal — cost {inr(gcost)} · client {inr(gclient)}</td></tr>);
+              });
+              return out;
+            })()}
           </tbody>
         </table>
       </div>

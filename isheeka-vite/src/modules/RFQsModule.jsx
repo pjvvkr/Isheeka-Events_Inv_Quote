@@ -469,7 +469,18 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
             {!eventClosed && !['withdrawn', 'expired'].includes(r.status) && <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>}
           </div>
         </div>
-        {subs.length > 0 && <div style={{ fontSize: 12, color: 'var(--grey-600)', marginTop: 10, background: 'var(--grey-50)', borderRadius: 'var(--radius-sm)', padding: '8px 12px' }}>{subs.map((s) => s.name + (s.planned_date ? (' ' + fmtDate(s.planned_date, { day: 'numeric', month: 'short' })) : '')).join(' · ')}</div>}
+        {subs.length > 0 && (
+          <div style={{ marginTop: 10, background: 'var(--grey-50)', borderRadius: 'var(--radius-sm)', padding: '10px 12px' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)', marginBottom: 6 }}>SCHEDULE</div>
+            {subs.map((s, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.4fr', gap: 8, fontSize: 12.5, color: 'var(--grey-700)', padding: '4px 0', borderTop: i ? '1px solid var(--grey-100)' : 'none' }}>
+                <span>{s.name}</span>
+                <span style={{ color: 'var(--grey-500)' }}>{s.planned_date ? fmtDate(s.planned_date, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
+                <span style={{ color: s.venue ? 'var(--grey-700)' : 'var(--grey-400)' }}>{s.venue ? ('📍 ' + s.venue) : 'TBD'}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {r.notes && <div style={{ fontSize: 13, color: 'var(--grey-700)', marginTop: 10, background: 'var(--grey-50)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}><b style={{ color: 'var(--grey-800)' }}>Notes:</b> {r.notes}</div>}
       </div>
 

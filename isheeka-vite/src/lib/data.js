@@ -29,7 +29,7 @@ export function clearEventTypesCache() { _eventTypesCache = null; }
 export async function fetchEventTypes() {
   if (_eventTypesCache) return _eventTypesCache;
   try {
-    const { data } = await supabase.from('event_types').select('*').eq('is_active', true).order('sort_order');
+    const { data } = await supabase.from('event_types').select('*').eq('is_active', true).order('label');
     if (data && data.length > 0) {
       _eventTypesCache = data.map((t) => ({ value: t.value, label: t.label }));
       // Register custom labels so eventTypeLabel() renders them (replaces the old
