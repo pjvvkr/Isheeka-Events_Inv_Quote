@@ -33,7 +33,10 @@ export default function Shell() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   // Global navigation history stack. Each entry: {page, opts?, label}. Top entry = current screen.
-  const [navStack, setNavStack] = useState([{ page: 'dashboard', label: 'Dashboard' }]);
+  const [navStack, setNavStack] = useState(() => {
+    try { const s = sessionStorage.getItem('isheeka-nav'); const p = s ? JSON.parse(s) : null; if (Array.isArray(p) && p.length) return p; } catch (e) { /* noop */ }
+    return [{ page: 'dashboard', label: 'Dashboard' }];
+  });
   const current = navStack[navStack.length - 1];
   const activePage = current.page;
   const navigate = useCallback((page, opts = {}) => {
@@ -80,6 +83,8 @@ export default function Shell() {
   useEffect(() => {
     try { if (sessionStorage.getItem('isheeka-updated')) { sessionStorage.removeItem('isheeka-updated'); setTimeout(() => notify('Updated to the latest version ✓', 'success'), 600); } } catch (e) { /* noop */ }
   }, []);
+  // Persist the navigation stack so a refresh (or PWA auto-update reload) keeps you on the same screen.
+  useEffect(() => { try { sessionStorage.setItem('isheeka-nav', JSON.stringify(navStack)); } catch (e) { /* noop */ } }, [navStack]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setUser(session?.user ?? null); setLoading(false); });

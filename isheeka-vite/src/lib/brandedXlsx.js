@@ -8,7 +8,7 @@ const MAROON = 'FFA0123A', PINK = 'FFE8185A', LIGHT = 'FFFCEAF1', WHITE = 'FFFFF
 const thin = () => { const s = { style: 'thin', color: { argb: LINE } }; return { top: s, left: s, bottom: s, right: s }; };
 const MONEY = '"₹"#,##0';
 
-function buildSheet(wb, company, sh) {
+function buildSheet(wb, company, sh, logoId) {
   const ws = wb.addWorksheet((sh.name || 'Report').slice(0, 31), { views: [{ showGridLines: false }] });
   const cols = sh.columns || [];
   const n = Math.max(1, cols.length);
@@ -17,11 +17,18 @@ function buildSheet(wb, company, sh) {
 
   ws.mergeCells(r, 1, r, n);
   const tc = ws.getCell(r, 1);
-  tc.value = (company || 'Isheeka Events').toUpperCase();
-  tc.font = { bold: true, size: 15, color: { argb: WHITE } };
-  tc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: MAROON } };
-  tc.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-  ws.getRow(r).height = 26; r++;
+  if (logoId !== null && logoId !== undefined) {
+    // Script wordmark image (matches the quotation/invoice/costing PDF header) on a clean white band.
+    ws.getRow(r).height = 34;
+    ws.addImage(logoId, { tl: { col: 0, row: 0 }, ext: { width: 210, height: 44 }, editAs: 'oneCell' });
+  } else {
+    tc.value = (company || 'Isheeka Events').toUpperCase();
+    tc.font = { bold: true, size: 15, color: { argb: WHITE } };
+    tc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: MAROON } };
+    tc.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    ws.getRow(r).height = 26;
+  }
+  r++;
 
   if (sh.title) { ws.mergeCells(r, 1, r, n); const c = ws.getCell(r, 1); c.value = sh.title; c.font = { bold: true, size: 12, color: { argb: MAROON } }; c.alignment = { indent: 1 }; r++; }
   if (sh.subtitle) { ws.mergeCells(r, 1, r, n); const c = ws.getCell(r, 1); c.value = sh.subtitle; c.font = { size: 10, color: { argb: GREY } }; c.alignment = { indent: 1 }; r++; }
@@ -69,7 +76,12 @@ export async function downloadBrandedWorkbook(filename, company, sheets) {
   const wb = new ExcelJS.Workbook();
   wb.creator = company || 'Isheeka Events';
   wb.created = new Date();
-  (sheets || []).forEach((sh) => buildSheet(wb, company, sh));
+  let logoId = null;
+  try {
+    const resp = await fetch('/isheeka-wordmark.png');
+    if (resp && resp.ok) { const buf = await resp.arrayBuffer(); logoId = wb.addImage({ buffer: buf, extension: 'png' }); }
+  } catch (e) { logoId = null; }
+  (sheets || []).forEach((sh) => buildSheet(wb, company, sh, logoId));
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');

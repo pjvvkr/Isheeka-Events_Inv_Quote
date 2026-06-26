@@ -123,9 +123,10 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
       head: [['Function', 'Date', 'Venue']],
       body: _sched.map((s) => [String(s.name || ''), s.date ? fmt(s.date) : '--', s.venue || '']),
       startY: y, margin: { left: M, right: M },
-      theme: 'grid', tableLineColor: LINE, tableLineWidth: 0.4,
-      styles: { fontSize: 9, cellPadding: 5, lineColor: LINE, lineWidth: 0.4, textColor: INK },
-      headStyles: { fillColor: PSOFT, textColor: ROSE_DK, fontStyle: 'bold', fontSize: 8.5 },
+      theme: 'grid', tableLineColor: PINK, tableLineWidth: 0.8,
+      styles: { fontSize: 9, cellPadding: 7, lineColor: LINE, lineWidth: 0.4, textColor: INK },
+      headStyles: { fillColor: PINK, textColor: [255, 255, 255], fontSize: 9, halign: 'left' },
+      alternateRowStyles: { fillColor: [252, 252, 252] },
       columnStyles: { 0: { cellWidth: 'auto' }, 1: { cellWidth: 90 }, 2: { cellWidth: 170 } },
       didDrawPage: () => { drawFrame(); },
     });
