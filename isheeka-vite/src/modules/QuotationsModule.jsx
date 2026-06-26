@@ -133,11 +133,11 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     try{ const {data:rq}=await supabase.from('rfqs').select('rfq_id,ref_number').eq('quotation_id',q.quotation_id).eq('is_deleted',false).maybeSingle(); setSrcRfq(rq||null); }catch(e){ setSrcRfq(null); }
     if(q&&q.event_id){
       const {data:ev}=await supabase.from('events').select('event_id,ref_number,name,status,main_date').eq('event_id',q.event_id).maybeSingle(); setSrcEvent(ev||null);
-      try{ const {data:subs}=await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id',q.event_id).eq('is_deleted',false).order('sort_order'); setSchedule((subs||[]).filter(s=>s.name||s.date).map(s=>({name:s.name||'',date:s.date||null,venue:s.location||''}))); }catch(e){ setSchedule([]); }
+      try{ const {data:subs}=await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id',q.event_id).eq('is_deleted',false).order('sort_order'); let _sc=(subs||[]).filter(s=>s.name||s.date).map(s=>({name:s.name||'',date:s.date||null,venue:s.location||''})); if(!_sc.length){ const {data:rq}=await supabase.from('rfqs').select('sub_events').eq('quotation_id',q.quotation_id).eq('is_deleted',false).maybeSingle(); _sc=((rq&&Array.isArray(rq.sub_events))?rq.sub_events:[]).filter(s=>s.name||s.planned_date).map(s=>({name:s.name||'',date:s.planned_date||null,venue:s.venue||''})); } setSchedule(_sc); }catch(e){ setSchedule([]); }
       if(ev&&ev.main_date) _evd=ev.main_date;
       const {data:invs}=await supabase.from('invoices').select('status').eq('event_id',q.event_id).eq('is_deleted',false);
       setInvoiceIssued((invs||[]).some(i=>['sent','partially_paid','paid','overdue'].includes((i.status||'').toLowerCase())));
-    } else { setSrcEvent(null); setInvoiceIssued(false); setSchedule([]); }
+    } else { setSrcEvent(null); setInvoiceIssued(false); try{ const {data:rq}=await supabase.from('rfqs').select('sub_events').eq('quotation_id',q.quotation_id).eq('is_deleted',false).maybeSingle(); setSchedule(((rq&&Array.isArray(rq.sub_events))?rq.sub_events:[]).filter(s=>s.name||s.planned_date).map(s=>({name:s.name||'',date:s.planned_date||null,venue:s.venue||''}))); }catch(e){ setSchedule([]); } }
     if(_evd) setQuot(prev=>prev?{...prev,event_date:_evd}:prev);
     if(q&&(q.revision_number||0)>0){
       let qy=supabase.from('quotations').select('revision_number,doc_date,grand_total,created_at').eq('is_deleted',false);
@@ -167,14 +167,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     setQActivity(qact||[]); setSharing(false);
   };
   // Attach the linked event's schedule (functions · dates · venues) so the PDF prints it.
-  const withSchedule = async (q) => {
-    if(!q || !q.event_id) return q;
-    try {
-      const {data:subs}=await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id',q.event_id).eq('is_deleted',false).order('sort_order');
-      const sched=(subs||[]).filter(s=>s.name||s.date).map(s=>({name:s.name||'',date:s.date||null,venue:s.location||''}));
-      return sched.length ? {...q, event_schedule:sched} : q;
-    } catch(e){ return q; }
-  };
+  const withSchedule = (q) => (schedule.length ? { ...q, event_schedule: schedule } : q);
   const doExport = async (action) => {
     if(!quot) return;
     if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. '+(action==='download'?'Download':action==='print'?'Print':'Open')+' it anyway?')) return;

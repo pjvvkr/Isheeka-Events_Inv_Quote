@@ -209,8 +209,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     const evtId = (i && i.event_id) || (sq && sq.event_id) || null;
     if (evtId) { const { data: ev } = await supabase.from('events').select('event_id,ref_number,name,status,main_date').eq('event_id', evtId).maybeSingle(); setSrcEvent(ev || null); }
     else setSrcEvent(null);
-    if (evtId) { try { const { data: subs } = await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id', evtId).eq('is_deleted', false).order('sort_order'); setSchedule((subs || []).filter((s) => s.name || s.date).map((s) => ({ name: s.name || '', date: s.date || null, venue: s.location || '' }))); } catch (e) { setSchedule([]); } }
-    else setSchedule([]);
+    { try { let _sc = []; if (evtId) { const { data: subs } = await supabase.from('sub_events').select('name,date,location,sort_order').eq('event_id', evtId).eq('is_deleted', false).order('sort_order'); _sc = (subs || []).filter((s) => s.name || s.date).map((s) => ({ name: s.name || '', date: s.date || null, venue: s.location || '' })); } if (!_sc.length) { const _qid = (sq && sq.quotation_id) || (i && i.quotation_id); if (_qid) { const { data: rq } = await supabase.from('rfqs').select('sub_events').eq('quotation_id', _qid).eq('is_deleted', false).maybeSingle(); _sc = ((rq && Array.isArray(rq.sub_events)) ? rq.sub_events : []).filter((s) => s.name || s.planned_date).map((s) => ({ name: s.name || '', date: s.planned_date || null, venue: s.venue || '' })); } } setSchedule(_sc); } catch (e) { setSchedule([]); } }
     setLoading(false);
   }, [invoiceId]);
   React.useEffect(() => { loadAll(); }, [loadAll]);

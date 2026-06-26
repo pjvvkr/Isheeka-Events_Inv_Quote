@@ -4,7 +4,7 @@
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { downloadBrandedWorkbook } from './brandedXlsx.js';
-import { LOGO } from '../pdf/assets.js';
+import { LOGO, GV_FONT } from '../pdf/assets.js';
 import { fmtDate } from './format.js';
 
 const inr0 = (n) => (n == null ? '' : 'Rs.' + Math.round(Number(n) || 0).toLocaleString('en-IN'));
@@ -38,9 +38,11 @@ export function buildCostingPdf(payload, opts = {}) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
   const PINK = [232, 24, 90], ROSE = [160, 16, 68], GOLD = [184, 137, 58], PSOFT = [252, 234, 241], INK = [42, 39, 35], MUTED = [107, 102, 96], LINE = [229, 221, 210], REDBG = [252, 235, 235], RED = [163, 45, 45];
   const W = doc.internal.pageSize.getWidth(), M = 32;
+  let SCRIPT_OK = false;
+  try { doc.addFileToVFS('GreatVibes.ttf', GV_FONT); doc.addFont('GreatVibes.ttf', 'GreatVibes', 'normal'); SCRIPT_OK = true; } catch (e) { SCRIPT_OK = false; }
   let y = 36;
   try { doc.addImage(LOGO, 'PNG', M, y - 6, 30, 38); } catch (e) { /* logo optional */ }
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(...PINK); doc.text('Isheeka Events', M + 38, y + 12);
+  doc.setFont(SCRIPT_OK ? 'GreatVibes' : 'helvetica', SCRIPT_OK ? 'normal' : 'bold'); doc.setFontSize(SCRIPT_OK ? 23 : 15); doc.setTextColor(...PINK); doc.text('Isheeka Events', M + 38, y + 14);
   doc.setFontSize(10); doc.setTextColor(...ROSE); doc.text('INTERNAL COSTING SHEET', W - M, y + 4, { align: 'right' });
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...INK); doc.text(String(rfq && rfq.ref_number || ''), W - M, y + 20, { align: 'right' });
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...MUTED);
