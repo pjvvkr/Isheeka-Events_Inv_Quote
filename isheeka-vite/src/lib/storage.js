@@ -46,3 +46,21 @@ export async function openStoredFile(stored) {
   else if (w) { w.close(); }
   return url;
 }
+
+// Fetch a stored file as a base64 data-URI (for embedding in PDFs).
+// Returns null if not set or on error.
+export async function fetchAsBase64(stored, expirySec = 3600) {
+  const url = await signedUrl(stored, expirySec);
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    const b64 = btoa(bin);
+    const mime = res.headers.get('content-type') || 'image/png';
+    return 'data:' + mime + ';base64,' + b64;
+  } catch (e) { return null; }
+}

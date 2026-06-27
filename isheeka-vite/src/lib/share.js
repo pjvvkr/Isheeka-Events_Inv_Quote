@@ -3,6 +3,7 @@
 import { supabase } from './supabase';
 import { fmtDate } from './format.js';
 import { buildQuotationPDF } from '../pdf/quotationPdf.js';
+import { fetchAsBase64 } from './storage.js';
 
 export function waNormalize(phone) {
   const num = (phone || '').replace(/\D/g, '');
@@ -61,7 +62,8 @@ async function makeShortLink(bucket, path, kind, ref) {
 
 export async function uploadQuotePdf(quot, items, displayOpts, settings, extra) {
   try {
-    const blob = buildQuotationPDF(quot, items, { action: 'blob', displayOpts, settings, ...(extra || {}) });
+    const qrBase64 = (displayOpts && displayOpts.bankDetails && settings && settings.payment_qr_path) ? await fetchAsBase64(settings.payment_qr_path) : null;
+    const blob = buildQuotationPDF(quot, items, { action: 'blob', displayOpts, settings, qrBase64, ...(extra || {}) });
     if (!blob || !blob.size) return null;
     const _ref = String(quot.ref_number || 'draft').replace(/[^A-Za-z0-9_-]/g, '');
     const _rev = (quot.revision_number && quot.revision_number > 0) ? ('-r' + quot.revision_number) : '';
@@ -103,7 +105,9 @@ export function buildQuoteShareMsg(quot, settings, url) {
 // Upload an invoice PDF to Storage and return a signed URL (mirrors uploadQuotePdf).
 export async function uploadInvoicePdf(inv, items, settings, displayOpts, extra) {
   try {
-    const blob = buildQuotationPDF(inv, items, { action: 'blob', docType: 'invoice', displayOpts: { ...(displayOpts || { prices: true, qty: true, schedule: true, discount: true, coverPage: false, bankDetails: true }), grouping: true }, settings, ...(extra || {}) });
+    const _dispOpts = { ...(displayOpts || { prices: true, qty: true, schedule: true, discount: true, coverPage: false, bankDetails: true }), grouping: true };
+    const qrBase64 = (_dispOpts.bankDetails && settings && settings.payment_qr_path) ? await fetchAsBase64(settings.payment_qr_path) : null;
+    const blob = buildQuotationPDF(inv, items, { action: 'blob', docType: 'invoice', displayOpts: _dispOpts, settings, qrBase64, ...(extra || {}) });
     if (!blob || !blob.size) return null;
     const _ref = String(inv.ref_number || 'draft').replace(/[^A-Za-z0-9_-]/g, '');
     const _rev = (inv.revision_number && inv.revision_number > 0) ? ('-r' + inv.revision_number) : '';

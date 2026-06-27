@@ -17,7 +17,7 @@ export async function loadCostingData(clientRfqId) {
   const vIds = vrfqs.map((v) => v.rfq_id);
   let vendorItems = [];
   if (vIds.length) {
-    const { data } = await supabase.from('rfq_items').select('rfq_id,sub_event_name,description,quantity,unit_cost,can_supply,item_note').in('rfq_id', vIds).eq('is_deleted', false);
+    const { data } = await supabase.from('rfq_items').select('rfq_id,rfq_item_id,source_item_id,sub_event_name,description,quantity,unit_cost,can_supply,item_note').in('rfq_id', vIds).eq('is_deleted', false);
     vendorItems = data || [];
   }
   const { data: vendors } = await supabase.from('vendors').select('vendor_id,name').eq('is_deleted', false);
@@ -29,12 +29,28 @@ export async function loadCostingData(clientRfqId) {
   const submittedIds = submitted.map((v) => v.vendor_id);
   const rfqVendorOf = {}; vrfqs.forEach((v) => { rfqVendorOf[v.rfq_id] = v.vendor_id; });
   const bidsByKey = {};
+  // vendorItemBySource[vendor_rfq_id][source_item_id] → vendor rfq_item record.
+  // Used by the costing screen to distinguish "Not requested" / "Awaiting" / "Bid" states.
+  const vendorItemBySource = {};
   vendorItems.forEach((vi) => {
     const vendorId = rfqVendorOf[vi.rfq_id];
+    // Build source-item lookup for ALL vendors (not only submitted) so the UI can
+    // show "Awaiting" for pending vendors that were sent the item.
+    if (vi.source_item_id) {
+      if (!vendorItemBySource[vi.rfq_id]) vendorItemBySource[vi.rfq_id] = {};
+      vendorItemBySource[vi.rfq_id][vi.source_item_id] = vi;
+    }
     if (!submittedIds.includes(vendorId)) return;
     (bidsByKey[costKey(vi)] = bidsByKey[costKey(vi)] || []).push({ vendor_id: vendorId, unit_cost: vi.unit_cost, can_supply: vi.can_supply, item_note: vi.item_note });
   });
-  const columns = submittedIds.map((id) => ({ vendor_id: id, name: (vendorMap[id] || {}).name || 'Vendor' }));
+  // All vendor RFQs become columns (submitted or not) so the UI can show per-item states.
+  // rfq_id is included so CostingScreen can look up vendorItemBySource[rfq_id][source_item_id].
+  const columns = vrfqs.map((v) => ({
+    vendor_id: v.vendor_id,
+    rfq_id: v.rfq_id,
+    status: v.status,
+    name: (vendorMap[v.vendor_id] || {}).name || 'Vendor',
+  }));
 
   // Is the linked event completed/cancelled? → costing becomes view-only.
   let eventClosed = false;
@@ -49,6 +65,7 @@ export async function loadCostingData(clientRfqId) {
     rfq: rfq || null,
     clientItems: clientItems || [],
     bidsByKey, columns,
+    vendorItemBySource,
     defaultMarkup: (settings && settings.default_markup_pct != null) ? Number(settings.default_markup_pct) : 30,
     draftQuoteId: rfq ? rfq.quotation_id : null,
     eventClosed,

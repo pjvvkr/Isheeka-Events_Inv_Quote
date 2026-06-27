@@ -10,6 +10,7 @@ import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid, logInvoiceActivity } from '../lib/session.js';
 import { recordClientRefund, reconcileInvoiceInstallments } from '../lib/money.js';
 import { buildQuotationPDF } from '../pdf/quotationPdf.js';
+import { fetchAsBase64 } from '../lib/storage.js';
 import { uploadInvoicePdf, buildInvoiceShareMsg, openWhatsApp, openEmail, validClientPhone } from '../lib/share.js';
 import { fmtDate, isInvoiceOverdue } from '../lib/format.js';
 import { INVOICE_STATUS_COLORS, INVOICE_STATUS_LABELS, QUOT_STATUS_LABELS, LEAD_STAGE_LABELS } from '../lib/constants.js';
@@ -177,7 +178,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
       supabase.from('invoices').select('*').eq('invoice_id', invoiceId).single(),
       supabase.from('invoice_line_items').select('*').eq('invoice_id', invoiceId).eq('is_deleted', false).order('sort_order'),
       supabase.from('invoice_installments').select('*').eq('invoice_id', invoiceId).eq('is_deleted', false).order('installment_number'),
-      supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,upi_id,phone_1,email,website,company_name,cover_intro').single(),
+      supabase.from('settings').select('gst_pct,default_invoice_due_days,bank_name,account_number,ifsc_code,upi_id,phone_1,email,website,company_name,cover_intro,payment_qr_path').single(),
       supabase.from('invoice_activity_log').select('*').eq('invoice_id', invoiceId).order('changed_at', { ascending: false }),
       supabase.from('users').select('user_id,first_name,last_name'),
       supabase.from('invoice_payments').select('*').eq('invoice_id', invoiceId).order('payment_date', { ascending: false }),
@@ -286,10 +287,11 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
   });
   const revRows = (() => { const log = (activity || []).filter((a) => a.action === 'revised').sort((x, y) => (x.revision_number || 0) - (y.revision_number || 0)); if (!log.length) return []; const rows = [{ label: 'Original', date: fmtDate(log[0].changed_at, { day: 'numeric', month: 'short', year: 'numeric' }), change: (log[0].old_value || '') }]; log.forEach((a) => rows.push({ label: 'Rev ' + (a.revision_number || ''), date: fmtDate(a.changed_at, { day: 'numeric', month: 'short', year: 'numeric' }), change: (a.old_value || '') + ' → ' + (a.new_value || ''), reason: a.reason || '' })); return rows; })();
   const revOpts = () => ({ showRevisionHistory: includeRevHistory && (inv.revision_number || 0) > 0, revisionHistory: revRows });
-  const pdfOpts = (action) => ({ action, docType: 'invoice', displayOpts: { ...pdfDisplay, grouping: true }, settings, ...revOpts() });
-  const downloadPdf = () => { try { buildQuotationPDF(invForPdf(), items, pdfOpts('download')); } catch (e) { notify('Could not generate the PDF.', 'error'); } };
-  const printPdf = () => { try { buildQuotationPDF(invForPdf(), items, pdfOpts('print')); } catch (e) { notify('Could not open the print view.', 'error'); } };
-  const previewPdf = () => { try { buildQuotationPDF(invForPdf(), items, pdfOpts('preview')); } catch (e) { notify('Could not open the preview.', 'error'); } };
+  const pdfOpts = (action, qrBase64) => ({ action, docType: 'invoice', displayOpts: { ...pdfDisplay, grouping: true }, settings, qrBase64: qrBase64 || null, ...revOpts() });
+  const fetchQr = () => (pdfDisplay.bankDetails && settings.payment_qr_path) ? fetchAsBase64(settings.payment_qr_path) : Promise.resolve(null);
+  const downloadPdf = async () => { try { const qr = await fetchQr(); buildQuotationPDF(invForPdf(), items, pdfOpts('download', qr)); } catch (e) { notify('Could not generate the PDF.', 'error'); } };
+  const printPdf = async () => { try { const qr = await fetchQr(); buildQuotationPDF(invForPdf(), items, pdfOpts('print', qr)); } catch (e) { notify('Could not open the print view.', 'error'); } };
+  const previewPdf = async () => { try { const qr = await fetchQr(); buildQuotationPDF(invForPdf(), items, pdfOpts('preview', qr)); } catch (e) { notify('Could not open the preview.', 'error'); } };
   const handleSaveClient = async (form) => {
     const { error } = await supabase.from('clients').update({ ...form, updated_at: new Date().toISOString() }).eq('client_id', inv.client_id);
     if (error) { notify('Could not update client: ' + (error.message || ''), 'error'); throw error; }

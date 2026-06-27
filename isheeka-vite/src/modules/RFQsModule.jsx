@@ -7,6 +7,7 @@ import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid } from '../lib/session.js';
 import { fmtDate } from '../lib/format.js';
 import { RFQ_STATUS, RFQ_ACTION_LABEL } from '../lib/constants.js';
+import { useEventTypes } from '../lib/data.js';
 import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuote, findClientMatch } from '../lib/rfq.js';
 import { waLink } from '../lib/share.js';
 import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg } from '../lib/vendorRfq.js';
@@ -39,6 +40,7 @@ function RFQShareCard({ created, contact, onDone }) {
 }
 
 function NewRFQForm({ prefill, onCreated, onCancel, onNavigate }) {
+  const eventTypes = useEventTypes();
   const [existingRfqs, setExistingRfqs] = React.useState([]);
   React.useEffect(() => { (async () => {
     if (!prefill || (!prefill.client_id && !prefill.lead_id)) return;
@@ -52,7 +54,11 @@ function NewRFQForm({ prefill, onCreated, onCancel, onNavigate }) {
     contact_first_name: prefill?.contact_first_name || (pn[0] || ''), contact_last_name: prefill?.contact_last_name || (pn.slice(1).join(' ') || ''),
     contact_phone: prefill?.contact_phone || '', contact_email: prefill?.contact_email || '',
     secondary_contact_name: prefill?.secondary_contact_name || '', secondary_contact_phone: prefill?.secondary_contact_phone || '',
-    event_type: prefill?.event_type || '', location: prefill?.location || '', city: prefill?.city || 'Hyderabad', access_mode: 'pin',
+    event_type: prefill?.event_type || '',
+    event_date: prefill?.event_date || '',
+    guest_count: prefill?.guest_count ? String(prefill.guest_count) : '',
+    budget: prefill?.budget ? String(prefill.budget) : '',
+    location: prefill?.location || '', city: prefill?.city || (prefill?.lead_city || 'Hyderabad'), access_mode: 'pin',
   });
   const [saving, setSaving] = React.useState(false);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
@@ -79,7 +85,16 @@ function NewRFQForm({ prefill, onCreated, onCancel, onNavigate }) {
         <div><label className="field-label">Last name *</label><input className="field-input" value={f.contact_last_name} onChange={(e) => set('contact_last_name', e.target.value)} /></div>
         <div><label className="field-label">Phone</label><input className="field-input" value={f.contact_phone} onChange={(e) => set('contact_phone', e.target.value)} /></div>
         <div><label className="field-label">Email{f.access_mode === 'email_otp' ? ' *' : ''}</label><input className="field-input" value={f.contact_email} onChange={(e) => set('contact_email', e.target.value)} /></div>
-        <div><label className="field-label">Event type</label><input className="field-input" value={f.event_type} onChange={(e) => set('event_type', e.target.value)} placeholder="e.g. Wedding" /></div>
+        <div>
+          <label className="field-label">Event type</label>
+          <select className="field-input" value={f.event_type} onChange={(e) => set('event_type', e.target.value)}>
+            <option value="">— Select —</option>
+            {eventTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </div>
+        <div><label className="field-label">Tentative date</label><input className="field-input" type="date" value={f.event_date} onChange={(e) => set('event_date', e.target.value)} /></div>
+        <div><label className="field-label">Guest count (approx)</label><input className="field-input" type="number" value={f.guest_count} onChange={(e) => set('guest_count', e.target.value)} placeholder="e.g. 300" /></div>
+        <div><label className="field-label">Budget (₹ approx)</label><input className="field-input" type="number" value={f.budget} onChange={(e) => set('budget', e.target.value)} placeholder="e.g. 1200000" /></div>
         <div><label className="field-label">Venue</label><input className="field-input" value={f.location} onChange={(e) => set('location', e.target.value)} /></div>
         <div><label className="field-label">City</label><input className="field-input" value={f.city} onChange={(e) => set('city', e.target.value)} /></div>
         <div><label className="field-label">Access</label><select className="field-input" value={f.access_mode} onChange={(e) => set('access_mode', e.target.value)}><option value="pin">Shared PIN (no email needed)</option><option value="email_otp">Email OTP</option></select></div>
@@ -262,7 +277,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'center', padding: '11px 14px' }}>
                   <div>
                     <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--grey-800)' }}>{v.name || '—'}</div>
-                    <div style={{ fontSize: 12, color: 'var(--grey-400)' }}>{vr.status === 'submitted' ? (s.priced + ' priced' + (s.cant ? (' · ' + s.cant + ' can’t supply') : '')) : (s.total + ' items')}{vr.reminder_count > 0 ? (' · reminded ' + vr.reminder_count + '×') : ''}</div>
+                    <div style={{ fontSize: 12, color: 'var(--grey-400)' }}>{vr.status === 'submitted' ? (s.priced + ' priced' + (s.cant ? (' · ' + s.cant + " can't supply") : '')) : (s.total + ' items')}{vr.reminder_count > 0 ? (' · reminded ' + vr.reminder_count + '×') : ''}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c }}>{sc.l}</span>
@@ -276,7 +291,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                     {bidItems.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--grey-400)' }}>No items.</div> : bidItems.map((it) => (
                       <div key={it.rfq_item_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5, padding: '3px 0' }}>
                         <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{it.description} <span style={{ color: 'var(--grey-400)' }}>×{it.quantity}</span>{it.item_note ? <span style={{ color: 'var(--grey-400)' }}> · {it.item_note}</span> : ''}</span>
-                        <span style={{ whiteSpace: 'nowrap', color: it.can_supply === false ? 'var(--red)' : 'var(--grey-800)' }}>{it.can_supply === false ? 'can’t supply' : (it.unit_cost != null ? ('₹' + Number(it.unit_cost).toLocaleString('en-IN')) : '—')}</span>
+                        <span style={{ whiteSpace: 'nowrap', color: it.can_supply === false ? 'var(--red)' : 'var(--grey-800)' }}>{it.can_supply === false ? "can't supply" : (it.unit_cost != null ? ('₹' + Number(it.unit_cost).toLocaleString('en-IN')) : '—')}</span>
                       </div>
                     ))}
                   </div>
@@ -347,6 +362,21 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [openAct, setOpenAct] = React.useState(0);
   const [dupe, setDupe] = React.useState(null);
   const [eventClosed, setEventClosed] = React.useState(false);   // linked event completed/cancelled → sourcing/costing read-only
+  // Item 6 + 7: staff edit mode
+  const [editMode, setEditMode] = React.useState(false);
+  const [editItems, setEditItems] = React.useState([]);
+  const [editFields, setEditFields] = React.useState({});
+  const [saving, setSaving] = React.useState(false);
+  const [editSaved, setEditSaved] = React.useState(false);
+  const [dragIdx, setDragIdx] = React.useState(null);
+  // Item 10: selective sourcing panel + vendor picker
+  const [selectedItemIds, setSelectedItemIds] = React.useState([]);
+  const [showSourcingPanel, setShowSourcingPanel] = React.useState(false);
+  const [showVendorPicker, setShowVendorPicker] = React.useState(false);
+  const [allVendors, setAllVendors] = React.useState([]);
+  const [pickedVendors, setPickedVendors] = React.useState({});
+  const [sendingVendors, setSendingVendors] = React.useState(false);
+  const [settings, setSettings] = React.useState(null);
   const load = async () => { setLoading(true);
     const [{ data: rfq }, { data: its }, { data: act }] = await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id', rfqId).single(),
@@ -378,6 +408,17 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
     setR(rfq || null); setItems(its || []); setActivity(act || []); setRevisions(revs); setLoading(false);
   };
   React.useEffect(() => { load(); }, [rfqId]);
+  // Load vendors + settings for selective sourcing panel (Item 10)
+  React.useEffect(() => {
+    (async () => {
+      const [vRes, sRes] = await Promise.all([
+        supabase.from('vendors').select('vendor_id,name,contact_person,phone_1,email_1,status').eq('is_deleted', false).order('name'),
+        supabase.from('settings').select('company_name,default_markup_pct').limit(1).maybeSingle(),
+      ]);
+      setAllVendors((vRes.data || []).filter((v) => v.status === 'active'));
+      setSettings(sRes.data || null);
+    })();
+  }, [rfqId]);
   const regenerate = async () => {
     if (!window.confirm('Generate a NEW link & PIN? The previous link will stop working.')) return;
     const token = genRfqToken(), pin = (r.access_mode === 'email_otp') ? null : genRfqPin();
@@ -410,6 +451,87 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
     if (!window.confirm('Approve and create a draft quote' + (basisRev != null ? (' from revision ' + basisRev) : '') + '?\n\nThis creates the client and opens the quote for you to price.')) return;
     doApprove(basisItems, null);
   };
+
+  // Item 6A: start edit mode for submitted RFQ
+  const startEdit = () => {
+    setEditItems(items.map((it, idx) => ({ ...it, _tmpId: idx })));
+    setEditFields({ event_date: r.event_date || '', location: r.location || '', city: r.city || '', guest_count: r.guest_count != null ? String(r.guest_count) : '', notes: r.notes || '' });
+    setEditMode(true);
+    setEditSaved(false);
+  };
+  const setEF = (k, v) => setEditFields((f) => ({ ...f, [k]: v }));
+  const setEI = (idx, k, v) => setEditItems((arr) => arr.map((it, i) => i === idx ? { ...it, [k]: v } : it));
+
+  // Item 6A: save staff edits
+  const saveEdits = async () => {
+    setSaving(true);
+    const uid = await _currentUid();
+    const newRevNum = (r.revision_number || 1) + 1;
+    // 1. Update rfqs schedule fields + bump revision
+    const { error: rfqErr } = await runDb(supabase.from('rfqs').update({
+      event_date: editFields.event_date || null,
+      location: editFields.location || null,
+      city: editFields.city || null,
+      guest_count: editFields.guest_count ? parseInt(editFields.guest_count, 10) : null,
+      notes: editFields.notes || null,
+      revision_number: newRevNum,
+      updated_at: new Date().toISOString(),
+    }).eq('rfq_id', rfqId), 'save edits');
+    if (rfqErr) { setSaving(false); return; }
+    // 2. Soft-delete old items and re-insert
+    await runDb(supabase.from('rfq_items').update({ is_deleted: true }).eq('rfq_id', rfqId).eq('is_deleted', false), 'delete items');
+    const newItems = editItems.map((it, idx) => ({
+      rfq_id: rfqId,
+      sub_event_name: it.sub_event_name || null,
+      description: it.description || '',
+      quantity: parseFloat(it.quantity) || 1,
+      sort_order: idx,
+      source: it.source || 'custom',
+    }));
+    if (newItems.length > 0) await runDb(supabase.from('rfq_items').insert(newItems), 'insert items');
+    // 3. Log activity
+    try { await supabase.from('rfq_activity').insert({ rfq_id: rfqId, actor: uid || 'staff', action: 'staff_edited', notes: 'Revision ' + newRevNum }); } catch (e) { /* noop */ }
+    notify('Changes saved — revision ' + newRevNum, 'success');
+    setSaving(false);
+    setEditSaved(true);
+    setEditMode(false);
+    load();
+  };
+
+  // Item 6B: request client confirmation via WhatsApp
+  const requestConfirmation = async () => {
+    const uid = await _currentUid();
+    // Regenerate a fresh token so we have the plaintext to build the link
+    const newToken = genRfqToken();
+    const { error } = await runDb(supabase.from('rfqs').update({
+      confirmation_status: 'pending',
+      confirmation_requested_at: new Date().toISOString(),
+      token_hash: await sha256Hex(newToken),
+      token_expires_at: new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('rfq_id', rfqId), 'request confirmation');
+    if (error) return;
+    try { await supabase.from('rfq_activity').insert({ rfq_id: rfqId, actor: uid || 'staff', action: 'confirmation_requested', notes: null }); } catch (e) { /* noop */ }
+    // Open WhatsApp with the fresh link
+    const contactName = r.contact_name || 'there';
+    const link = rfqLink(newToken);
+    const msg = 'Hi ' + contactName + ', we\'ve updated your event requirements (' + r.ref_number + '). Please review and confirm: ' + link;
+    window.open(waLink(r.contact_phone, msg), '_blank');
+    notify('Confirmation request sent — fresh link generated.', 'success');
+    load();
+  };
+
+  // Item 7: drag-and-drop reorder handlers
+  const onDragStart = (idx) => setDragIdx(idx);
+  const onDragOver = (e) => e.preventDefault();
+  const onDrop = (targetIdx) => {
+    if (dragIdx === null || dragIdx === targetIdx) { setDragIdx(null); return; }
+    const arr = [...editItems];
+    const [moved] = arr.splice(dragIdx, 1);
+    arr.splice(targetIdx, 0, moved);
+    setEditItems(arr.map((it, i) => ({ ...it, sort_order: i })));
+    setDragIdx(null);
+  };
   if (loading) return <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }}></div></div>;
   if (!r) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--grey-400)' }}>RFQ not found.</div>;
   const sc = RFQ_STATUS[r.status] || RFQ_STATUS.sent;
@@ -434,6 +556,49 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
           </div>
         </div>
       ); })()}
+      {/* Item 10: vendor picker modal for selective sourcing */}
+      {showVendorPicker && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={(e) => { if (e.target === e.currentTarget) setShowVendorPicker(false); }}>
+          <div style={{ background: 'white', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: 460 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>Send vendor RFQ</div>
+                <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>{selectedItemIds.length} item{selectedItemIds.length === 1 ? '' : 's'} selected</div>
+              </div>
+              <button className="btn sm" onClick={() => setShowVendorPicker(false)}>✕</button>
+            </div>
+            <div style={{ padding: '14px 20px' }}>
+              <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginBottom: 10 }}>Pick vendors — each gets a secure link with only the {selectedItemIds.length} selected items.</div>
+              {allVendors.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>No active vendors yet. <button className="btn sm primary" style={{ marginTop: 8 }} onClick={() => { setShowVendorPicker(false); onNavigate && onNavigate('vendors', { mode: 'new', label: 'New vendor' }); }}>＋ Add a vendor →</button></div>
+                : <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)' }}>
+                  {allVendors.map((v, i) => (
+                    <label key={v.vendor_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: i > 0 ? '1px solid var(--grey-50)' : 'none', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={!!pickedVendors[v.vendor_id]} onChange={(e) => setPickedVendors((p) => ({ ...p, [v.vendor_id]: e.target.checked }))} />
+                      <span style={{ fontSize: 13 }}>{v.name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--grey-400)', marginLeft: 'auto' }}>{v.phone_1 || v.email_1 || ''}</span>
+                    </label>
+                  ))}
+                </div>}
+            </div>
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={() => setShowVendorPicker(false)}>Cancel</button>
+              <button className="btn primary" disabled={sendingVendors || !Object.values(pickedVendors).some(Boolean)} onClick={async () => {
+                const chosen = allVendors.filter((v) => pickedVendors[v.vendor_id]);
+                if (!chosen.length) { notify('Pick at least one vendor.', 'error'); return; }
+                setSendingVendors(true);
+                try {
+                  const selectedItems = items.filter((it) => selectedItemIds.includes(it.rfq_item_id));
+                  const created = await createVendorRfqs(r, chosen, selectedItems);
+                  setShowVendorPicker(false); setPickedVendors({});
+                  notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + ' with ' + selectedItemIds.length + ' items.', 'success');
+                } catch (e) { /* toasted */ }
+                setSendingVendors(false);
+              }}>{sendingVendors ? 'Sending…' : 'Send'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {viewRev && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }} onClick={() => setViewRev(null)}>
           <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', maxWidth: 480, width: '100%', maxHeight: '80vh', overflowY: 'auto', padding: '20px 22px' }} onClick={(e) => e.stopPropagation()}>
@@ -461,8 +626,11 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
               <option value="">Latest (v{r.revision_number || revisions[0].revision_number})</option>
               {revisions.map((rv) => <option key={rv.revision_id} value={rv.revision_number}>Use v{rv.revision_number}</option>)}
             </select>}
-            {canApprove && <button className="btn sm" style={{ background: 'var(--green-light)', color: 'var(--green)', borderColor: '#86EFAC' }} disabled={approving} onClick={approve}>{approving ? 'Approving…' : '✅ Approve → create quote'}</button>}
+            {canApprove && r.confirmation_status !== 'pending' && <button className="btn sm" style={{ background: 'var(--green-light)', color: 'var(--green)', borderColor: '#86EFAC' }} disabled={approving} onClick={approve}>{approving ? 'Approving…' : '✅ Approve → create quote'}</button>}
+            {canApprove && r.confirmation_status === 'pending' && <button className="btn sm" style={{ background: 'var(--orange-light)', color: 'var(--orange)', borderColor: '#FCD34D' }} disabled={approving} onClick={approve}>{approving ? 'Approving…' : '✅ Approve anyway (verbal)'}</button>}
+            {r.status === 'submitted' && !editMode && <button className="btn sm" onClick={startEdit}>✏️ Edit</button>}
             {r.status === 'submitted' && <button className="btn sm" style={{ color: 'var(--red)', borderColor: 'rgba(163,45,45,0.3)' }} onClick={requestChanges}>↩ Request changes</button>}
+            {editSaved && r.status === 'submitted' && <button className="btn sm" style={{ background: 'var(--green-light)', color: 'var(--green)', borderColor: '#86EFAC' }} onClick={requestConfirmation}>📲 Request Confirmation</button>}
             {r.lead_id && <button className="btn sm" title="Open the source lead" onClick={() => onNavigate && onNavigate('leads', { leadId: r.lead_id, label: r.contact_name || 'Lead' })}>🎯 View lead →</button>}
             {r.client_id && <button className="btn sm" title="Open the client 360" onClick={() => onNavigate && onNavigate('clients', { clientId: r.client_id, label: r.contact_name || 'Client' })}>👤 View client →</button>}
             {r.quotation_id && <button className="btn sm" onClick={() => onNavigate && onNavigate('quotations', { quotId: r.quotation_id, label: 'Quote' })}>📄 Go to quote →</button>}
@@ -484,16 +652,87 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
         {r.notes && <div style={{ fontSize: 13, color: 'var(--grey-700)', marginTop: 10, background: 'var(--grey-50)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}><b style={{ color: 'var(--grey-800)' }}>Notes:</b> {r.notes}</div>}
       </div>
 
-      {/* Requested items */}
-      <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)', marginBottom: 10 }}>Requested items {items.length > 0 ? ('(' + items.length + ')') : ''}</div>
-        {items.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>Nothing submitted yet — the client hasn’t added items.</div>
+      {/* Item 6C: Confirmation status banner */}
+      {r.confirmation_status === 'pending' && (
+        <div style={{ background: '#FFFBEB', border: '1.5px solid #F59E0B', borderRadius: 'var(--radius-lg)', padding: '12px 16px', marginBottom: 16 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#92400E' }}>⏳ Waiting for client to confirm the revised requirements.</span>
+          <span style={{ fontSize: 12, color: '#78350F', marginLeft: 8 }}>You can still approve — use "Approve anyway (verbal)" above.</span>
+        </div>
+      )}
+      {r.confirmation_status === 'confirmed' && (
+        <div style={{ background: '#ECFDF5', border: '1.5px solid #34D399', borderRadius: 'var(--radius-lg)', padding: '12px 16px', marginBottom: 16, fontSize: 13, fontWeight: 600, color: '#065F46' }}>
+          ✅ Client confirmed the revisions.
+        </div>
+      )}
+      {r.confirmation_status === 'declined' && (
+        <div style={{ background: '#FEF2F2', border: '1.5px solid #FCA5A5', borderRadius: 'var(--radius-lg)', padding: '12px 16px', marginBottom: 16, fontSize: 13, fontWeight: 600, color: '#991B1B' }}>
+          ❌ Client declined the revisions — please review.{r.client_confirm_note ? (' Note: ' + r.client_confirm_note) : ''}
+        </div>
+      )}
+
+      {/* Requested items — with staff edit mode (Item 6A+7) */}
+      <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: editMode ? '2px solid var(--pink)' : '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>Requested items {items.length > 0 ? ('(' + items.length + ')') : ''}</div>
+          {editMode && <span style={{ fontSize: 11, color: 'var(--pink)', fontWeight: 600 }}>✏️ Edit mode — drag ⠿ to reorder</span>}
+        </div>
+
+        {editMode ? (
+          <div>
+            {/* Schedule fields */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 12px', marginBottom: 12, padding: '10px 12px', background: 'var(--grey-50)', borderRadius: 'var(--radius-md)' }}>
+              <div><label className="field-label">Event date</label><input className="field-input" type="date" value={editFields.event_date || ''} onChange={(e) => setEF('event_date', e.target.value)} /></div>
+              <div><label className="field-label">Location / Venue</label><input className="field-input" value={editFields.location || ''} onChange={(e) => setEF('location', e.target.value)} /></div>
+              <div><label className="field-label">City</label><input className="field-input" value={editFields.city || ''} onChange={(e) => setEF('city', e.target.value)} /></div>
+              <div><label className="field-label">Guest count</label><input className="field-input" type="number" value={editFields.guest_count || ''} onChange={(e) => setEF('guest_count', e.target.value)} /></div>
+              <div style={{ gridColumn: '1 / -1' }}><label className="field-label">Notes</label><textarea className="field-input" rows={2} value={editFields.notes || ''} onChange={(e) => setEF('notes', e.target.value)} style={{ resize: 'vertical' }} /></div>
+            </div>
+            {/* Item 7: draggable item rows */}
+            {editItems.map((it, idx) => (
+              <div key={it._tmpId !== undefined ? it._tmpId : idx}
+                draggable
+                onDragStart={() => onDragStart(idx)}
+                onDragOver={onDragOver}
+                onDrop={() => onDrop(idx)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', marginBottom: 4, border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-sm)', background: dragIdx === idx ? 'var(--grey-50)' : 'white', cursor: 'grab' }}>
+                <span style={{ fontSize: 16, color: 'var(--grey-300)', cursor: 'grab', userSelect: 'none' }}>⠿</span>
+                <input className="field-input" style={{ flex: 2, fontSize: 12, padding: '4px 8px' }} value={it.description || ''} placeholder="Description" onChange={(e) => setEI(idx, 'description', e.target.value)} />
+                <input className="field-input" style={{ width: 70, fontSize: 12, padding: '4px 8px' }} type="number" value={it.quantity || 1} min={1} onChange={(e) => setEI(idx, 'quantity', e.target.value)} />
+                <input className="field-input" style={{ width: 100, fontSize: 12, padding: '4px 8px' }} value={it.sub_event_name || ''} placeholder="Function" onChange={(e) => setEI(idx, 'sub_event_name', e.target.value)} />
+                <button className="btn sm" style={{ color: 'var(--red)', flexShrink: 0 }} onClick={() => setEditItems((arr) => arr.filter((_, i) => i !== idx))}>✕</button>
+              </div>
+            ))}
+            <button className="btn sm" style={{ marginTop: 6 }} onClick={() => setEditItems((arr) => [...arr, { _tmpId: Date.now(), description: '', quantity: 1, sub_event_name: arr.length > 0 ? arr[arr.length - 1].sub_event_name : '', source: 'custom', sort_order: arr.length }])}>+ Add item</button>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button className="btn" onClick={() => { setEditMode(false); }}>Cancel</button>
+              <button className="btn primary" disabled={saving} onClick={saveEdits}>{saving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+          </div>
+        ) : (
+          items.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>Nothing submitted yet — the client hasn't added items.</div>
           : Object.keys(groups).map((k) => (
             <div key={k} style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)', marginBottom: 4 }}>{k.toUpperCase()}</div>
-              {groups[k].map((it) => (<div key={it.rfq_item_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, fontSize: 13, padding: '3px 0' }}><span style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', minWidth: 0 }}>{it.description}</span><span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>×{it.quantity}</span></div>))}
+              {groups[k].map((it) => (
+                <div key={it.rfq_item_id} style={{ padding: '3px 0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, fontSize: 13 }}>
+                    <span style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', minWidth: 0 }}>{it.description}</span>
+                    <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>×{it.quantity}</span>
+                  </div>
+                  {Array.isArray(it.sub_items) && it.sub_items.length > 0 && (
+                    <div style={{ paddingLeft: 12, marginTop: 2 }}>
+                      {it.sub_items.map((si, si_i) => (
+                        <div key={si_i} style={{ fontSize: 12, color: 'var(--grey-400)', lineHeight: 1.5 }}>
+                          • {si.name} × {si.qty}{si.note ? <span> ({si.note})</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          ))
+        )}
       </div>
 
       {/* Revision history + diff — one snapshot per client/vendor submission. */}
@@ -534,6 +773,53 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* Item 10: Selective Sourcing Panel — visible when submitted or approved */}
+      {r.party_type !== 'vendor' && ['submitted', 'approved', 'converted'].includes(r.status) && items.length > 0 && (
+        <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>🎯 Source vendors</div>
+              <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>{selectedItemIds.length} of {items.length} item{items.length === 1 ? '' : 's'} selected</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn sm" onClick={() => setSelectedItemIds(items.map((it) => it.rfq_item_id))}>Select all</button>
+              <button className="btn sm" onClick={() => setSelectedItemIds([])}>Deselect all</button>
+              <button className="btn sm" onClick={() => setShowSourcingPanel((v) => !v)}>{showSourcingPanel ? 'Hide ▲' : 'Show ▼'}</button>
+            </div>
+          </div>
+          {showSourcingPanel && (
+            <div>
+              {Object.keys(groups).map((grp) => (
+                <div key={grp} style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)' }}>{grp.toUpperCase()}</div>
+                    <button className="btn sm" style={{ fontSize: 10, padding: '1px 8px' }} onClick={() => {
+                      const grpIds = groups[grp].map((it) => it.rfq_item_id);
+                      const allSelected = grpIds.every((id) => selectedItemIds.includes(id));
+                      setSelectedItemIds((prev) => allSelected ? prev.filter((id) => !grpIds.includes(id)) : [...new Set([...prev, ...grpIds])]);
+                    }}>
+                      {groups[grp].every((it) => selectedItemIds.includes(it.rfq_item_id)) ? 'Deselect function' : 'Select function'}
+                    </button>
+                  </div>
+                  {groups[grp].map((it) => (
+                    <label key={it.rfq_item_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', cursor: 'pointer', fontSize: 13 }}>
+                      <input type="checkbox" checked={selectedItemIds.includes(it.rfq_item_id)} onChange={(e) => setSelectedItemIds((prev) => e.target.checked ? [...prev, it.rfq_item_id] : prev.filter((id) => id !== it.rfq_item_id))} />
+                      <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{it.description}</span>
+                      <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>×{it.quantity}</span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="btn sm primary" disabled={selectedItemIds.length === 0} onClick={() => { setPickedVendors({}); setShowVendorPicker(true); }}>
+                  Create vendor RFQ ({selectedItemIds.length} item{selectedItemIds.length === 1 ? '' : 's'})
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

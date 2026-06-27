@@ -137,7 +137,7 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
   const showPrices = !!dOpts.prices, showQty = !!dOpts.qty;
   const head = ['Description']; if (showQty) head.push('Qty'); if (showPrices) { head.push('Unit price', 'Amount'); }
   const groups = {}; const order = []; (lineItems || []).forEach((li) => { const k = li.sub_event_name || 'General'; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(li); });
-  const body = []; const grpRows = [];
+  const body = []; const grpRows = []; const subItemRows = [];
   order.forEach((k) => {
     if (dOpts.grouping && order.length > 1) { grpRows.push(body.length); body.push([{ content: k, colSpan: head.length }]); }
     groups[k].forEach((li) => {
@@ -145,6 +145,13 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
       if (showQty) row.push(String(parseFloat(li.quantity || 0)));
       if (showPrices) { row.push(money(li.unit_price)); row.push(money(li.amount)); }
       body.push(row);
+      // Sub-items: each rendered as an indented bullet row spanning all columns
+      (li.sub_items || []).forEach((si) => {
+        if (!si || !String(si.name || '').trim()) return;
+        const siText = '  • ' + String(si.name).trim() + ' × ' + String(si.qty || 1) + (si.note ? ' (' + String(si.note) + ')' : '');
+        subItemRows.push(body.length);
+        body.push([{ content: siText, colSpan: head.length }]);
+      });
     });
   });
   const colStyles = { 0: { cellWidth: 'auto' } };
@@ -164,7 +171,10 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
     headStyles: { fillColor: PINK, textColor: [255, 255, 255], fontSize: 9, halign: 'left' },
     alternateRowStyles: { fillColor: [252, 252, 252] },
     columnStyles: colStyles,
-    didParseCell: (d) => { if (d.section === 'body' && grpRows.includes(d.row.index)) { d.cell.styles.fillColor = PSOFT; d.cell.styles.textColor = PINK; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fontSize = 8; } },
+    didParseCell: (d) => {
+      if (d.section === 'body' && grpRows.includes(d.row.index)) { d.cell.styles.fillColor = PSOFT; d.cell.styles.textColor = PINK; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fontSize = 8; }
+      if (d.section === 'body' && subItemRows.includes(d.row.index)) { d.cell.styles.fontSize = 8; d.cell.styles.textColor = MUTED; d.cell.styles.fillColor = [252, 252, 252]; d.cell.styles.cellPadding = { top: 2, bottom: 3, left: 16, right: 6 }; }
+    },
     didDrawPage: (d) => { drawFrame(); if (d.pageNumber > 1) { drawHeaderBand(); } },
   });
   y = doc.lastAutoTable.finalY + 24;
@@ -199,13 +209,26 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
 
   // Payment details
   const hasBank = dOpts.bankDetails && (settings.bank_name || settings.account_number || settings.upi_id);
+  const qrBase64 = opts.qrBase64 || null;
   if (hasBank) {
-    if (H - 58 - y < 46) { doc.addPage(); drawFrame(); drawHeaderBand(); y = HDR_BOTTOM + 8; }
-    setFill([250, 247, 248]); doc.roundedRect(M, y, W - 2 * M, 34, 5, 5, 'F');
+    const QR_SIZE = 80; // points
+    const hasQr = hasBank && qrBase64;
+    const boxH = hasQr ? Math.max(46, QR_SIZE + 16) : 46;
+    if (H - 58 - y < boxH) { doc.addPage(); drawFrame(); drawHeaderBand(); y = HDR_BOTTOM + 8; }
+    setFill([250, 247, 248]); doc.roundedRect(M, y, W - 2 * M, boxH, 5, 5, 'F');
     sans('bold', 8); setText(INK); doc.text('Payment details', M + 12, y + 14);
     sans('normal', 9); setText([85, 85, 85]);
+    const textW = hasQr ? W - 2 * M - 24 - QR_SIZE - 10 : W - 2 * M - 24;
     const bl = [settings.bank_name && ('Bank: ' + settings.bank_name), settings.account_number && ('A/c: ' + settings.account_number), settings.ifsc_code && ('IFSC: ' + settings.ifsc_code), settings.upi_id && ('UPI: ' + settings.upi_id)].filter(Boolean).join('    |    ');
-    doc.text(doc.splitTextToSize(bl, W - 2 * M - 24), M + 12, y + 26); y += 48;
+    doc.text(doc.splitTextToSize(bl, textW), M + 12, y + 26);
+    if (hasQr) {
+      try {
+        const qrX = M + (W - 2 * M) - QR_SIZE - 8;
+        const qrY = y + (boxH - QR_SIZE) / 2;
+        doc.addImage(qrBase64, 'PNG', qrX, qrY, QR_SIZE, QR_SIZE);
+      } catch (e) { /* QR image failed to embed — skip silently */ }
+    }
+    y += boxH + 2;
   }
 
   // Terms

@@ -12,17 +12,24 @@ import { sha256Hex, genRfqToken, genRfqPin, rfqLink, createRfq } from './rfq.js'
 // Spin up one vendor RFQ per selected vendor from an (approved) client RFQ.
 // Freezes the client RFQ's item list as the sourcing basis (copied item-for-item,
 // costs blank). Returns [{ vendor_id, vendor_name, rfq_id, ref_number, token, pin }].
-export async function createVendorRfqs(parentRfq, vendors) {
+// Optional: pass selectedItems (array of rfq_item rows) to scope to a subset;
+// each vendor rfq_item gets source_item_id set to the client rfq_item's rfq_item_id.
+export async function createVendorRfqs(parentRfq, vendors, selectedItems) {
   if (!parentRfq || !parentRfq.rfq_id) throw new Error('parent RFQ required');
   const list = (vendors || []).filter((v) => v && v.vendor_id);
   if (!list.length) return [];
   const uid = await _currentUid();
 
-  // Freeze the parent's item list (the sourcing basis).
-  const { data: parentItems } = await supabase.from('rfq_items')
-    .select('sub_event_name,description,quantity,unit,source,sort_order')
-    .eq('rfq_id', parentRfq.rfq_id).eq('is_deleted', false).order('sort_order');
-  const baseItems = parentItems || [];
+  // Freeze the parent's item list (the sourcing basis), or use caller-supplied subset.
+  let baseItems;
+  if (selectedItems && selectedItems.length > 0) {
+    baseItems = selectedItems;
+  } else {
+    const { data: parentItems } = await supabase.from('rfq_items')
+      .select('rfq_item_id,sub_event_name,description,quantity,unit,source,sort_order')
+      .eq('rfq_id', parentRfq.rfq_id).eq('is_deleted', false).order('sort_order');
+    baseItems = parentItems || [];
+  }
 
   const out = [];
   for (const v of list) {
@@ -52,6 +59,7 @@ export async function createVendorRfqs(parentRfq, vendors) {
         rfq_id: rfq.rfq_id, sub_event_name: it.sub_event_name || null,
         description: it.description, quantity: it.quantity ?? 1, unit: it.unit || null,
         source: it.source || 'custom', sort_order: it.sort_order ?? i,
+        source_item_id: it.rfq_item_id || null,   // back-link to the client rfq_item
         can_supply: true, is_deleted: false, created_at: now,
       }));
       await runDb(supabase.from('rfq_items').insert(rows), 'copy items to vendor RFQ');

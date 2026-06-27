@@ -10,6 +10,7 @@ import { getNextClientRef, getNextQuotRef } from '../lib/refs.js';
 import { uploadQuotePdf, buildQuoteShareMsg, openWhatsApp, openEmail } from '../lib/share.js';
 import { logQuoteSend } from '../lib/session.js';
 import { buildQuotationPDF } from '../pdf/quotationPdf.js';
+import { fetchAsBase64 } from '../lib/storage.js';
 import { createInvoiceFromQuote } from '../lib/money.js';
 import { FastEntryTable } from './ItemEntry.jsx';
 import { filesToPayloads, extractItems, extractErrMsg } from '../lib/staffExtract.js';
@@ -87,11 +88,24 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
   const [subEventBlocks, setSubEventBlocks] = React.useState(()=>{
     const blocks = (leadSubEvents||[]).filter(se=>se.name&&se.name.trim()).map(se=>({
       id:'se-'+Date.now()+Math.random(), name:se.name,
-      items:(se.items||[]).map(i=>({id:'li-'+Date.now()+Math.random(),description:i.description,quantity:i.quantity,unit_price:i.unit_price}))
+      items:(se.items||[]).map(i=>({id:'li-'+Date.now()+Math.random(),description:i.description,quantity:i.quantity,unit_price:i.unit_price,sub_items:i.sub_items||[]}))
     }));
     if(!blocks.some(b=>(b.name||'').trim().toLowerCase()==='general items')) blocks.push({id:'se-main', name:'General Items', items:[]});
     return blocks;
   });
+  // Track which item ids have their sub-items panel expanded
+  const [expandedSubItems, setExpandedSubItems] = React.useState({});
+  const toggleSubItems = (itemId) => setExpandedSubItems(p=>({...p,[itemId]:!p[itemId]}));
+  const addSubItem = (blockId, itemId) => {
+    setSubEventBlocks(bs=>bs.map(b=>b.id!==blockId?b:{...b,items:(b.items||[]).map(i=>i.id!==itemId?i:{...i,sub_items:[...(i.sub_items||[]),{id:'si-'+Date.now()+Math.random(),name:'',qty:1,note:''}]})}));
+    setExpandedSubItems(p=>({...p,[itemId]:true}));
+  };
+  const updateSubItem = (blockId, itemId, siId, field, val) => {
+    setSubEventBlocks(bs=>bs.map(b=>b.id!==blockId?b:{...b,items:(b.items||[]).map(i=>i.id!==itemId?i:{...i,sub_items:(i.sub_items||[]).map(si=>si.id!==siId?si:{...si,[field]:val})})}));
+  };
+  const removeSubItem = (blockId, itemId, siId) => {
+    setSubEventBlocks(bs=>bs.map(b=>b.id!==blockId?b:{...b,items:(b.items||[]).map(i=>i.id!==itemId?i:{...i,sub_items:(i.sub_items||[]).filter(si=>si.id!==siId)})}));
+  };
 
   const today = new Date().toISOString().split('T')[0];
   const [quotDetails, setQuotDetails] = React.useState({
@@ -128,7 +142,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
         let block;
         if (se) { block = blocks.find((b) => (b.name || '').trim().toLowerCase() === se.toLowerCase()); if (!block) { block = { id: 'se-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), name: se, items: [] }; blocks.push(block); } }
         else { if (!blocks.length) blocks.push({ id: 'se-' + Date.now(), name: '', items: [] }); block = blocks[0]; }
-        block.items.push({ id: 'imp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), description: desc, quantity: Math.max(1, Math.round(Number(ex.quantity) || 1)), unit_price: 0 });
+        block.items.push({ id: 'imp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), description: desc, quantity: Math.max(1, Math.round(Number(ex.quantity) || 1)), unit_price: 0, sub_items: [] });
         added++;
       });
       return blocks;
@@ -217,7 +231,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
           const seNames=[...new Set(li.map(i=>i.sub_event_name||'General Items'))];
           setSubEventBlocks(seNames.map(name=>({
             id:'se-'+Date.now()+Math.random(), name,
-            items:li.filter(i=>(i.sub_event_name||'General Items')===name).map(i=>({id:'li-'+i.line_item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price}))
+            items:li.filter(i=>(i.sub_event_name||'General Items')===name).map(i=>({id:'li-'+i.line_item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price,sub_items:Array.isArray(i.sub_items)?i.sub_items:[]}))
           })));
         }
       });
@@ -278,7 +292,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
     const items=templateItems[templateId]; if(!items) return;
     const matchKey=Object.keys(items).find(k=>k.toLowerCase()===(subEventName||'').toLowerCase());
     const srcItems=matchKey?items[matchKey]:Object.values(items).flat();
-    const newItems=srcItems.map(i=>({id:'li-'+Date.now()+Math.random(),description:i.description,quantity:i.default_quantity||1,unit_price:0}));
+    const newItems=srcItems.map(i=>({id:'li-'+Date.now()+Math.random(),description:i.description,quantity:i.default_quantity||1,unit_price:0,sub_items:[]}));
     setSubEventBlocks(bs=>bs.map(b=>b.id===blockId?{...b,items:newItems}:b));
   };
 
@@ -358,6 +372,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
             quotation_id:existingQuotationId,sub_event_name:seName,description:i.description,
             quantity:parseFloat(i.quantity)||1,unit_price:parseFloat(i.unit_price)||0,
             amount:(parseFloat(i.quantity)||1)*(parseFloat(i.unit_price)||0),
+            sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(1,parseInt(si.qty)||1),note:si.note||null})),
             sort_order:idx,created_at:new Date().toISOString(),is_deleted:false
           }));
         });
@@ -416,6 +431,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
           sub_event_name:seName,description:i.description,
           quantity:parseFloat(i.quantity)||1,unit_price:parseFloat(i.unit_price)||0,
           amount:(parseFloat(i.quantity)||1)*(parseFloat(i.unit_price)||0),
+          sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(1,parseInt(si.qty)||1),note:si.note||null})),
           sort_order:idx,created_at:new Date().toISOString(),is_deleted:false
         }));
       });
@@ -528,7 +544,8 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
     const pdfItems=subEventBlocks.flatMap(b=>(b.items||[]).filter(i=>i.description&&i.description.trim()).map(i=>({
       sub_event_name:(b.name&&b.name.trim()&&b.name.trim().toLowerCase()!=='general items')?b.name.trim():null,
       description:i.description, quantity:i.quantity, unit_price:i.unit_price,
-      amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
+      amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0),
+      sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim())
     })));
     const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
     const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:quotDetails.event_date||lead.tentative_date||null};
@@ -564,11 +581,13 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
       sub_event_name:(b.name&&b.name.trim()&&b.name.trim().toLowerCase()!=='general items')?b.name.trim():null,
       description:i.description,
       quantity:i.quantity, unit_price:i.unit_price,
-      amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0)
+      amount:(parseFloat(i.quantity)||0)*(parseFloat(i.unit_price)||0),
+      sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim())
     })));
-    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single();
+    const {data:s}=await supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name,payment_qr_path').single();
     const enrichedQuot={...createdQuot,client_phone:lead.phone||'',client_email:lead.email||'',client_city:lead.location||'',event_date:quotDetails.event_date||lead.tentative_date||null};
-    buildQuotationPDF(enrichedQuot,pdfItems,{action,displayOpts,settings:s||{}});
+    const qrBase64 = (displayOpts.bankDetails && s?.payment_qr_path) ? await fetchAsBase64(s.payment_qr_path) : null;
+    buildQuotationPDF(enrichedQuot,pdfItems,{action,displayOpts,settings:s||{},qrBase64});
   };
 
   const steps=['Client','Line items','Quote details','Share'];
@@ -714,7 +733,55 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
                     }}/>
                     {subEventBlocks.length>1&&<button style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14,flexShrink:0}} onClick={()=>setSubEventBlocks(bs=>bs.filter(b=>b.id!==block.id))}>X</button>}
                   </div>
-                  <FastEntryTable key={block.id} items={block.items||[]} onChange={items=>setSubEventBlocks(bs=>bs.map(b=>b.id===block.id?{...b,items}:b))}/>
+                  <FastEntryTable key={block.id} items={block.items||[]} onChange={items=>setSubEventBlocks(bs=>bs.map(b=>{
+                    if(b.id!==block.id) return b;
+                    // Preserve sub_items from previous state by item id
+                    const prevById={}; (b.items||[]).forEach(pi=>{prevById[pi.id]=pi.sub_items||[];});
+                    return {...b,items:items.map(i=>({...i,sub_items:prevById[i.id]||i.sub_items||[]}))};
+                  }))}/>
+                  {/* Sub-items editor — one expandable panel per filled line item */}
+                  {(block.items||[]).filter(i=>i.description&&i.description.trim()).map(item=>{
+                    const sis=item.sub_items||[];
+                    const isOpen=!!expandedSubItems[item.id];
+                    return (
+                      <div key={item.id} style={{marginTop:4,marginLeft:8,borderLeft:'2px solid var(--grey-100)',paddingLeft:10}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6}}>
+                          <button type="button" onClick={()=>sis.length>0?toggleSubItems(item.id):addSubItem(block.id,item.id)}
+                            style={{background:'none',border:'none',cursor:'pointer',fontSize:11,color:'var(--grey-400)',padding:'2px 4px',display:'flex',alignItems:'center',gap:4}}
+                            onMouseEnter={e=>e.currentTarget.style.color='var(--pink)'}
+                            onMouseLeave={e=>e.currentTarget.style.color='var(--grey-400)'}>
+                            {sis.length>0?(isOpen?'▾ Sub-items ('+sis.length+')':'▸ Sub-items ('+sis.length+')'):'＋ Add sub-item'}
+                          </button>
+                          <span style={{fontSize:11,color:'var(--grey-300)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.description}</span>
+                        </div>
+                        {isOpen&&(
+                          <div style={{marginTop:6,marginBottom:6}}>
+                            {sis.map(si=>(
+                              <div key={si.id} style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                                <input className="field-input" style={{flex:3,fontSize:11,padding:'3px 6px'}}
+                                  value={si.name} onChange={e=>updateSubItem(block.id,item.id,si.id,'name',e.target.value)}
+                                  placeholder="Name (required)"/>
+                                <input type="number" className="field-input" style={{width:52,fontSize:11,padding:'3px 6px',textAlign:'right'}}
+                                  value={si.qty} min={1}
+                                  onChange={e=>updateSubItem(block.id,item.id,si.id,'qty',Math.max(1,parseInt(e.target.value)||1))}/>
+                                <input className="field-input" style={{flex:2,fontSize:11,padding:'3px 6px'}}
+                                  value={si.note||''} onChange={e=>updateSubItem(block.id,item.id,si.id,'note',e.target.value||null)}
+                                  placeholder="Note (optional)"/>
+                                <button type="button" onClick={()=>removeSubItem(block.id,item.id,si.id)}
+                                  style={{background:'none',border:'none',cursor:'pointer',color:'var(--grey-400)',fontSize:13,padding:'2px 4px',flexShrink:0}}
+                                  onMouseEnter={e=>e.currentTarget.style.color='var(--red)'}
+                                  onMouseLeave={e=>e.currentTarget.style.color='var(--grey-400)'}>✕</button>
+                              </div>
+                            ))}
+                            <button type="button" onClick={()=>addSubItem(block.id,item.id)}
+                              style={{background:'none',border:'1px dashed var(--grey-200)',borderRadius:'var(--radius-sm)',cursor:'pointer',fontSize:11,color:'var(--grey-400)',padding:'2px 8px',marginTop:2}}
+                              onMouseEnter={e=>e.currentTarget.style.color='var(--pink)'}
+                              onMouseLeave={e=>e.currentTarget.style.color='var(--grey-400)'}>＋ Add sub-item</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8}}>

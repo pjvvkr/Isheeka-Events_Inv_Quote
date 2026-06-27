@@ -8,6 +8,7 @@ import { getNextClientRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
 import { fmtDate, eventTypeLabel, leadStageDisplay } from '../lib/format.js';
 import { EVENT_STATUS_COLORS, EVENT_STATUS_LABELS, QUOT_STATUS_COLORS, QUOT_STATUS_LABELS } from '../lib/constants.js';
+import { CLIENT_TEMPLATES, sendWhatsApp } from '../lib/messaging.js';
 
 export function ClientForm({ initial = {}, onSave, onCancel, title = 'New client' }) {
   const empty = { first_name: '', last_name: '', phone_1: '', phone_2: '', phone_3: '',
@@ -265,6 +266,48 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
     setAltContacts((ac) => ac.filter((a) => a.contact_id !== contactId));
   };
 
+  // Messaging composer state
+  const [showMsgModal, setShowMsgModal] = useState(false);
+  const [msgTemplate, setMsgTemplate] = useState(CLIENT_TEMPLATES[0].id);
+  const [msgBody, setMsgBody] = useState('');
+  const [msgPhone, setMsgPhone] = useState('');
+  const [msgSent, setMsgSent] = useState(false);
+  const [msgLog, setMsgLog] = useState([]);
+  const [msgLogLoading, setMsgLogLoading] = useState(false);
+
+  // Load message history for this client
+  useEffect(() => {
+    if (!clientId) return;
+    setMsgLogLoading(true);
+    supabase.from('message_log').select('*').eq('party_type', 'client').eq('party_id', clientId).order('created_at', { ascending: false }).limit(50)
+      .then(({ data }) => { setMsgLog(data || []); setMsgLogLoading(false); });
+  }, [clientId]);
+
+  const openMsgModal = () => {
+    setMsgTemplate(CLIENT_TEMPLATES[0].id);
+    const tpl = CLIENT_TEMPLATES[0];
+    setMsgBody(client ? tpl.body(client) : '');
+    setMsgPhone(client ? (client.phone_1 || '') : '');
+    setMsgSent(false);
+    setShowMsgModal(true);
+  };
+
+  const handleTemplateChange = (id) => {
+    setMsgTemplate(id);
+    const tpl = CLIENT_TEMPLATES.find((t) => t.id === id) || CLIENT_TEMPLATES[0];
+    setMsgBody(client ? tpl.body(client) : '');
+  };
+
+  const handleSendWA = () => {
+    sendWhatsApp({ phone: msgPhone, body: msgBody, party_type: 'client', party_id: clientId, template: msgTemplate });
+    setMsgSent(true);
+    // Refresh log after short delay to let the insert settle
+    setTimeout(() => {
+      supabase.from('message_log').select('*').eq('party_type', 'client').eq('party_id', clientId).order('created_at', { ascending: false }).limit(50)
+        .then(({ data }) => setMsgLog(data || []));
+    }, 1200);
+  };
+
   const [statusSaving, setStatusSaving] = useState(false);
   const handleSetStatus = async (newStatus) => {
     if (!newStatus || newStatus === client.status) return;
@@ -338,6 +381,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
             <option value="vip">VIP</option>
           </select>
           <button className="btn sm" onClick={() => onNavigate && onNavigate('rfqs', { mode: 'new', label: 'New RFQ', prefill: { client_id: clientId, contact_first_name: client.first_name, contact_last_name: client.last_name, contact_phone: client.phone_1, contact_email: client.email_1, city: client.city } })} title="Send this client a requirements link">📝 New RFQ</button>
+          <button className="btn sm" onClick={openMsgModal}>💬 Send Message</button>
           <button className="btn sm primary" onClick={() => setEditing(true)}>✏️ Edit client</button>
           <button className="btn sm" style={{ color: 'var(--red)', borderColor: 'rgba(163,45,45,0.3)' }} onClick={handleDeleteClient}>🗑 Delete</button>
         </div>
@@ -500,6 +544,56 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
           ))}
         </div>
       </div>
+
+      {/* Message history */}
+      <div style={{ marginTop: 16, background: 'white', borderRadius: 'var(--radius-lg)', padding: '20px 24px', border: '1px solid var(--grey-100)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>Message history</div>
+          <button className="btn sm" onClick={openMsgModal}>💬 Send Message</button>
+        </div>
+        {msgLogLoading ? <div style={{ textAlign: 'center', padding: '16px 0' }}><div className="spinner" style={{ margin: '0 auto' }}></div></div>
+          : msgLog.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)', textAlign: 'center', padding: '12px 0' }}>No messages sent yet.</div>
+            : msgLog.map((m) => (
+              <div key={m.id || m.created_at} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', borderBottom: '1px solid var(--grey-100)', fontSize: 13 }}>
+                <span style={{ fontSize: 16 }}>{m.channel === 'whatsapp' ? '📲' : '📧'}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 500, color: 'var(--grey-700)' }}>{(CLIENT_TEMPLATES.find((t) => t.id === m.template) || {}).label || m.template || 'Custom'}</span>
+                  {m.body && <span style={{ color: 'var(--grey-400)', marginLeft: 8 }}>{m.body.slice(0, 40)}{m.body.length > 40 ? '…' : ''}</span>}
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>{m.created_at ? new Date(m.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : ''}</span>
+              </div>
+            ))}
+      </div>
+
+      {/* Compose modal */}
+      {showMsgModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '24px 28px', width: 480, maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,.18)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--grey-800)' }}>💬 Send Message</div>
+              <button className="btn sm" onClick={() => setShowMsgModal(false)}>✕ Close</button>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Template</label>
+              <select className="field-input" value={msgTemplate} onChange={(e) => handleTemplateChange(e.target.value)} style={{ width: '100%' }}>
+                {CLIENT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Message</label>
+              <textarea className="field-input" value={msgBody} onChange={(e) => setMsgBody(e.target.value)} rows={5} style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }} placeholder="Type your message…" />
+            </div>
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Phone number (for this send)</label>
+              <input className="field-input" value={msgPhone} onChange={(e) => setMsgPhone(e.target.value)} style={{ width: '100%' }} placeholder="+91 98765 43210" />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button className="btn primary" onClick={handleSendWA} disabled={!msgPhone || !msgBody}>📲 Send on WhatsApp</button>
+              {msgSent && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 500 }}>✅ Sent</span>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

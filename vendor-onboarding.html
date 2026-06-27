@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>Vendor Registration · Isheeka Events</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Cormorant+Garamond:ital@1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --pink:#E8185A;--rose:#A01044;--pink-light:#FCEAF1;--pink-mid:#EF93B4;
+    --gold:#B8893A;--gold-soft:#F0C674;
+    --ink:#2A2723;--muted:#6B6660;--faint:#9A938A;--line:#E5DDD2;--line2:#F1ECE4;
+    --bg:#F3EFE9;--card:#ffffff;--field:#FAF7F3;--green:#0F6E56;--red:#A32D2D;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:560px;margin:0 auto;padding:16px 16px 40px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 6px 22px rgba(0,0,0,.06);}
+  .mast{background:var(--rose);padding:20px 16px;text-align:center;}
+  .mast .name{font-family:'Great Vibes',cursive;color:#fff;font-size:34px;line-height:1;}
+  .mast .tag{font-family:'Cormorant Garamond',serif;font-style:italic;color:#F3C9D9;font-size:13px;margin-top:3px;}
+  .mast .since{font-family:'Great Vibes',cursive;color:var(--gold-soft);font-size:17px;margin-top:2px;}
+  .pad{padding:20px 20px 24px;}
+  h1{font-size:16px;font-weight:600;margin:0 0 4px;}
+  .sub{font-size:13px;color:var(--faint);margin-bottom:18px;line-height:1.5;}
+  label{display:block;font-size:11px;color:var(--faint);margin:12px 0 4px;font-weight:500;}
+  input,select,textarea{width:100%;font-family:inherit;font-size:14px;color:var(--ink);background:var(--card);border:1.5px solid var(--line);border-radius:9px;padding:10px 12px;outline:none;transition:border-color .15s;}
+  input:focus,select:focus,textarea:focus{border-color:var(--pink-mid);}
+  textarea{resize:vertical;min-height:72px;}
+  .row{display:flex;gap:10px;}.row>div{flex:1;min-width:0;}
+  .section-label{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--gold);margin:18px 0 4px;text-transform:uppercase;}
+  .req{color:var(--rose);}
+  .btn{display:block;width:100%;text-align:center;font-size:14px;font-weight:600;border-radius:11px;padding:13px;border:none;cursor:pointer;font-family:inherit;transition:opacity .15s;}
+  .btn:disabled{opacity:.55;cursor:default;}
+  .btn.primary{background:var(--rose);color:#fff;}
+  .btn.gold{background:var(--gold);color:#fff;}
+  .note{font-size:11px;color:var(--faint);margin-top:14px;text-align:center;line-height:1.6;}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:13px;padding:10px 18px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50;white-space:nowrap;}
+  .toast.show{opacity:1;}
+  .spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--rose);border-radius:50%;animation:sp 1s linear infinite;margin:40px auto;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .center{text-align:center;}
+  .err{color:var(--red);font-size:12px;margin-top:10px;text-align:center;}
+  .pinbox{display:flex;gap:10px;justify-content:center;margin:14px 0;}
+  .pinbox input{width:52px;height:58px;text-align:center;font-size:22px;font-weight:700;color:var(--rose);border-radius:10px;}
+  .success-icon{font-size:48px;margin:20px 0 10px;}
+  @media(max-width:400px){.row{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="mast">
+      <div class="name">Isheeka Events</div>
+      <div class="tag">Making Every Event Memorable</div>
+      <div class="since">Since 2017</div>
+    </div>
+    <div id="app"><div class="spin"></div></div>
+  </div>
+  <div class="note">Your details are securely transmitted to Isheeka Events.<br>Please fill in accurate information for smooth onboarding.</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const GATEWAY = 'https://jlcssesetnxulnkbrmyp.supabase.co/functions/v1/rfq-gateway';
+const token = new URLSearchParams(location.search).get('t') || '';
+const app = document.getElementById('app');
+const toastEl = document.getElementById('toast');
+
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  setTimeout(() => toastEl.classList.remove('show'), 2200);
+}
+
+function msg(html) {
+  return '<div class="pad center">' + html + '</div>';
+}
+
+async function api(payload) {
+  const r = await fetch(GATEWAY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({ token }, payload))
+  });
+  let j = {};
+  try { j = await r.json(); } catch (e) {}
+  return Object.assign({ _http: r.status }, j);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+(async function boot() {
+  if (!token) {
+    app.innerHTML = msg('<p style="font-size:14px;color:var(--muted)">This link is missing its code. Please use the full link Isheeka shared with you.</p>');
+    return;
+  }
+  const r = await api({ action: 'get_vendor_onboarding' });
+  if (r.error === 'already_submitted') {
+    renderAlreadySubmitted();
+    return;
+  }
+  if (!r.ok) {
+    app.innerHTML = msg('<p style="font-size:14px;color:var(--muted)">' + (r.error === 'link_not_found' ? 'This link is invalid or has expired.' : r.error === 'link_approved' ? 'Your registration has already been approved. Welcome to Isheeka Events!' : 'Unable to load this form. Please try again or contact Isheeka Events.') + '</p>');
+    return;
+  }
+  if (r.requires_pin) {
+    renderPinGate(r.categories || []);
+  } else {
+    renderForm(r.categories || []);
+  }
+})();
+
+// ── PIN gate ──────────────────────────────────────────────────────────────────
+function renderPinGate(categories) {
+  app.innerHTML = '<div class="pad">'
+    + '<h1>Vendor Registration</h1>'
+    + '<div class="sub">Please enter the PIN shared with you by Isheeka Events to continue.</div>'
+    + '<div class="pinbox">'
+    + '<input id="p0" inputmode="numeric" maxlength="1">'
+    + '<input id="p1" inputmode="numeric" maxlength="1">'
+    + '<input id="p2" inputmode="numeric" maxlength="1">'
+    + '<input id="p3" inputmode="numeric" maxlength="1">'
+    + '<input id="p4" inputmode="numeric" maxlength="1" style="display:none">'
+    + '<input id="p5" inputmode="numeric" maxlength="1" style="display:none">'
+    + '</div>'
+    + '<button class="btn primary" id="pinGo">Continue →</button>'
+    + '<div class="err" id="perr"></div>'
+    + '</div>';
+
+  const boxes = [0,1,2,3,4,5].map(i => document.getElementById('p'+i));
+  boxes.forEach((b, i) => {
+    b.addEventListener('input', () => {
+      if (b.value && i < 5 && boxes[i+1].style.display !== 'none') boxes[i+1].focus();
+      // auto-submit at 4 if p4/p5 hidden and p3 filled
+      if (i === 3 && b.value && boxes[4].style.display === 'none') document.getElementById('pinGo').click();
+    });
+    b.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !b.value && i > 0) { boxes[i-1].focus(); }
+    });
+  });
+  boxes[0].focus();
+
+  document.getElementById('pinGo').onclick = async () => {
+    const visible = boxes.filter(b => b.style.display !== 'none');
+    const pin = visible.map(b => b.value).join('');
+    if (pin.length < 4) { document.getElementById('perr').textContent = 'Enter the PIN.'; return; }
+    const btn = document.getElementById('pinGo');
+    btn.disabled = true; btn.textContent = 'Checking…';
+    const r = await api({ action: 'get_vendor_onboarding', pin });
+    if (r.ok) {
+      renderForm(r.categories || categories);
+    } else {
+      btn.disabled = false; btn.textContent = 'Continue →';
+      document.getElementById('perr').textContent =
+        r.error === 'wrong_pin' ? 'Incorrect PIN. Please try again.' :
+        r.error === 'locked' ? 'Too many attempts — please wait a few minutes.' :
+        'Could not verify. Please try again.';
+    }
+  };
+}
+
+// ── Main form ─────────────────────────────────────────────────────────────────
+function renderForm(categories) {
+  const catOptions = categories.length
+    ? categories.map(c => '<option value="' + esc(c) + '">' + esc(c) + '</option>').join('')
+    : '<option value="Caterer">Caterer</option><option value="Decorator">Decorator</option><option value="Photographer">Photographer</option><option value="Sound &amp; Lighting">Sound &amp; Lighting</option><option value="Venue">Venue</option><option value="Transport">Transport</option><option value="Makeup">Makeup</option><option value="Entertainment">Entertainment</option><option value="Other">Other</option>';
+
+  app.innerHTML = '<div class="pad">'
+    + '<h1>Vendor Registration</h1>'
+    + '<div class="sub">Fill in your business details below. Fields marked <span class="req">*</span> are required.</div>'
+
+    + '<div class="section-label">Business information</div>'
+    + '<label>Business name <span class="req">*</span></label>'
+    + '<input id="f_name" type="text" placeholder="e.g. Blooms Decor" autocomplete="organization">'
+
+    + '<label>Category <span class="req">*</span></label>'
+    + '<select id="f_category"><option value="">Select a category…</option>' + catOptions + '</select>'
+
+    + '<div class="section-label">Contact details</div>'
+    + '<label>Contact person <span class="req">*</span></label>'
+    + '<input id="f_contact_person" type="text" placeholder="Owner / manager name" autocomplete="name">'
+
+    + '<div class="row"><div>'
+    + '<label>Phone <span class="req">*</span></label>'
+    + '<input id="f_phone" type="tel" placeholder="+91 98765 43210" autocomplete="tel">'
+    + '</div><div>'
+    + '<label>Email</label>'
+    + '<input id="f_email" type="email" placeholder="you@example.com" autocomplete="email">'
+    + '</div></div>'
+
+    + '<label>Address</label>'
+    + '<textarea id="f_address" placeholder="Street, City, State, PIN"></textarea>'
+
+    + '<div class="section-label">Tax &amp; compliance <span style="font-weight:400;font-size:10px;color:var(--faint)">(optional)</span></div>'
+    + '<div class="row"><div>'
+    + '<label>GSTIN</label>'
+    + '<input id="f_gstin" type="text" placeholder="22AAAAA0000A1Z5" style="text-transform:uppercase">'
+    + '</div><div>'
+    + '<label>PAN</label>'
+    + '<input id="f_pan" type="text" placeholder="AAAAA0000A" style="text-transform:uppercase">'
+    + '</div></div>'
+
+    + '<div class="section-label">Bank details <span style="font-weight:400;font-size:10px;color:var(--faint)">(optional)</span></div>'
+    + '<label>Bank name</label>'
+    + '<input id="f_bank_name" type="text" placeholder="e.g. HDFC Bank">'
+    + '<div class="row"><div>'
+    + '<label>Account number</label>'
+    + '<input id="f_account_number" type="text" inputmode="numeric" placeholder="Account number">'
+    + '</div><div>'
+    + '<label>IFSC code</label>'
+    + '<input id="f_ifsc" type="text" placeholder="HDFC0001234" style="text-transform:uppercase">'
+    + '</div></div>'
+
+    + '<div class="err" id="ferr"></div>'
+    + '<button class="btn primary" id="submitBtn" style="margin-top:20px">Submit details →</button>'
+    + '</div>';
+
+  document.getElementById('submitBtn').onclick = submitForm;
+}
+
+async function submitForm() {
+  const g = id => (document.getElementById(id) || {}).value || '';
+  const name = g('f_name').trim();
+  const category = g('f_category').trim();
+  const contact_person = g('f_contact_person').trim();
+  const phone = g('f_phone').trim();
+  const err = document.getElementById('ferr');
+
+  if (!name) { err.textContent = 'Business name is required.'; return; }
+  if (!category) { err.textContent = 'Please select a category.'; return; }
+  if (!contact_person) { err.textContent = 'Contact person name is required.'; return; }
+  if (!phone) { err.textContent = 'Phone number is required.'; return; }
+  err.textContent = '';
+
+  const fields = {
+    name,
+    category,
+    contact_person,
+    phone,
+    email: g('f_email').trim() || undefined,
+    address: g('f_address').trim() || undefined,
+    gstin: g('f_gstin').trim().toUpperCase() || undefined,
+    pan: g('f_pan').trim().toUpperCase() || undefined,
+    bank_name: g('f_bank_name').trim() || undefined,
+    account_number: g('f_account_number').trim() || undefined,
+    ifsc: g('f_ifsc').trim().toUpperCase() || undefined,
+  };
+  // remove undefined keys
+  Object.keys(fields).forEach(k => fields[k] === undefined && delete fields[k]);
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+
+  const r = await api({ action: 'submit_vendor_onboarding', fields });
+  if (r.ok) {
+    renderSuccess(name);
+  } else if (r.error === 'already_submitted') {
+    renderAlreadySubmitted();
+  } else {
+    btn.disabled = false; btn.textContent = 'Submit details →';
+    err.textContent = r.error || 'Submission failed. Please try again.';
+  }
+}
+
+function renderSuccess(name) {
+  app.innerHTML = '<div class="pad center">'
+    + '<div class="success-icon">🎉</div>'
+    + '<h1 style="margin-bottom:8px">Thank you' + (name ? ', ' + esc(name) + '!' : '!') + '</h1>'
+    + '<p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0">Your details have been submitted successfully.<br>The Isheeka Events team will review your information and get in touch with you soon.</p>'
+    + '</div>';
+}
+
+function renderAlreadySubmitted() {
+  app.innerHTML = '<div class="pad center">'
+    + '<div class="success-icon">✅</div>'
+    + '<h1 style="margin-bottom:8px">Already submitted</h1>'
+    + '<p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0">Your application is under review. The Isheeka Events team will be in touch with you shortly.</p>'
+    + '</div>';
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

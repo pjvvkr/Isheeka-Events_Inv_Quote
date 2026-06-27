@@ -894,13 +894,22 @@ export function SettingsModule() {
   const [form, setForm] = useState({});
   const [errors, setErrors] = useState({});
   const [editMode, setEditMode] = useState(false);   // form tabs open read-only; "Edit" unlocks them
+  const [qrFile, setQrFile] = useState(null);
+  const [qrUploading, setQrUploading] = useState(false);
+  const [qrPreviewUrl, setQrPreviewUrl] = useState(null);
 
   useEffect(() => { loadSettings(); }, []);
 
   const loadSettings = async () => {
     setLoading(true);
     const { data } = await supabase.from('settings').select('*').single();
-    if (data) { setSettings(data); setForm(data); }
+    if (data) {
+      setSettings(data); setForm(data);
+      if (data.payment_qr_path) {
+        const { data: urlData } = await supabase.storage.from('quotations').createSignedUrl(data.payment_qr_path, 3600);
+        if (urlData?.signedUrl) setQrPreviewUrl(urlData.signedUrl);
+      }
+    }
     setLoading(false);
   };
 
@@ -908,6 +917,39 @@ export function SettingsModule() {
     setForm((f) => ({ ...f, [field]: value }));
     setSaved(false); setSaveError('');
     if (errors[field]) setErrors((e) => ({ ...e, [field]: '' }));
+  };
+
+  const handleQrUpload = async () => {
+    if (!qrFile || !settings?.setting_id) return;
+    setQrUploading(true);
+    try {
+      const ext = ((qrFile.name || 'img').split('.').pop() || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'png';
+      const path = 'payment-qr/' + Date.now() + '.' + ext;
+      const { error: upErr } = await supabase.storage.from('quotations').upload(path, qrFile, { contentType: qrFile.type || 'image/png', upsert: true });
+      if (upErr) throw upErr;
+      const { error: dbErr } = await supabase.from('settings').update({ payment_qr_path: path, updated_at: new Date().toISOString() }).eq('setting_id', settings.setting_id);
+      if (dbErr) throw dbErr;
+      setSettings((s) => ({ ...s, payment_qr_path: path }));
+      setForm((f) => ({ ...f, payment_qr_path: path }));
+      const { data: urlData } = await supabase.storage.from('quotations').createSignedUrl(path, 3600);
+      if (urlData?.signedUrl) setQrPreviewUrl(urlData.signedUrl);
+      setQrFile(null);
+      notify('Payment QR uploaded!', 'success');
+    } catch (e) {
+      notify('QR upload failed: ' + (e?.message || e), 'error');
+    } finally {
+      setQrUploading(false);
+    }
+  };
+
+  const handleQrRemove = async () => {
+    if (!settings?.setting_id) return;
+    const { error } = await supabase.from('settings').update({ payment_qr_path: null, updated_at: new Date().toISOString() }).eq('setting_id', settings.setting_id);
+    if (error) { notify('Failed to remove QR', 'error'); return; }
+    setSettings((s) => ({ ...s, payment_qr_path: null }));
+    setForm((f) => ({ ...f, payment_qr_path: null }));
+    setQrPreviewUrl(null);
+    notify('Payment QR removed', 'success');
   };
 
   const validateTab = (tab) => {
@@ -1059,6 +1101,42 @@ export function SettingsModule() {
                 <strong>IFSC:</strong> {form.ifsc_code || '—'}
                 {form.upi_id && <> &nbsp;|&nbsp; <strong>UPI:</strong> {form.upi_id}</>}
               </div>
+            </div>
+
+            <hr className="divider" />
+            <div className="settings-section-title" style={{ marginTop: 8 }}>Payment QR Code</div>
+            <div className="settings-section-sub">
+              Upload a QR code image to appear alongside payment details on quote/invoice PDFs (only when the bank-details toggle is enabled).
+            </div>
+            {form.payment_qr_path && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
+                <img
+                  src={qrPreviewUrl || ''}
+                  alt="Payment QR"
+                  style={{ width: 100, height: 100, objectFit: 'contain', border: '1px solid var(--grey-200)', borderRadius: 'var(--radius-md)', background: '#fff' }}
+                />
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--grey-500)', marginBottom: 8 }}>Current QR code</div>
+                  <button className="btn danger" style={{ fontSize: 12 }} onClick={handleQrRemove} disabled={!editMode}>Remove</button>
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                type="file"
+                accept="image/*"
+                disabled={!editMode}
+                onChange={(e) => setQrFile(e.target.files?.[0] || null)}
+                style={{ fontSize: 13, flex: 1 }}
+              />
+              <button
+                className="btn primary"
+                style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                onClick={handleQrUpload}
+                disabled={!qrFile || qrUploading || !editMode}
+              >
+                {qrUploading ? 'Uploading…' : 'Upload QR'}
+              </button>
             </div>
           </fieldset>
         )}

@@ -8,9 +8,11 @@ import { notify } from '../lib/toast.jsx';
 import { fmtDate, isQuoteExpired, eventTypeLabel, quoteStatusLabel } from '../lib/format.js';
 import { QUOT_STATUS_COLORS, QUOT_STATUS_LABELS, REJECT_REASONS } from '../lib/constants.js';
 import { closeQuoteNotProceeding, createEventFromQuote, createInvoiceFromQuote } from '../lib/money.js';
-import { uploadQuotePdf, buildQuoteShareMsg, openWhatsApp, openEmail, validClientPhone } from '../lib/share.js';
+import { uploadQuotePdf, buildQuoteShareMsg, openWhatsApp, openEmail, validClientPhone, waLink } from '../lib/share.js';
 import { logQuoteSend } from '../lib/session.js';
 import { buildQuotationPDF } from '../pdf/quotationPdf.js';
+import { fetchAsBase64 } from '../lib/storage.js';
+import { sha256Hex } from '../lib/rfq.js';
 import { ClientLink } from '../components/links.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
 import { WelcomeMessageModal } from './LeadsModule.jsx';
@@ -103,6 +105,12 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [wizardCtx, setWizardCtx] = React.useState(null);
   const [showConvert, setShowConvert] = React.useState(false);
   const [convertLead, setConvertLead] = React.useState(null);
+  // Approval flow
+  const [showApprovalModal, setShowApprovalModal] = React.useState(false);
+  const [approvalPin, setApprovalPin] = React.useState('');
+  const [approvalLink, setApprovalLink] = React.useState('');
+  const [requestingApproval, setRequestingApproval] = React.useState(false);
+  const [approvalAudit, setApprovalAudit] = React.useState([]);
   const setDO=(k,v)=>setDisplayOpts(o=>({...o,[k]:v}));
   const applyPreset=(p)=>{
     if(p==='full') setDisplayOpts(o=>({...o,prices:true,qty:true,grouping:true,schedule:true,discount:true}));
@@ -115,7 +123,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     const [{data:q},{data:li},{data:st},{data:qact},{data:qus},{data:srfq}] = await Promise.all([
       supabase.from('quotations').select('*').eq('quotation_id',quotationId).single(),
       supabase.from('quotation_line_items').select('*').eq('quotation_id',quotationId).eq('is_deleted',false).order('sort_order'),
-      supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name').single(),
+      supabase.from('settings').select('bank_name,account_number,ifsc_code,upi_id,cover_intro,phone_1,email,website,company_name,payment_qr_path').single(),
       supabase.from('quotation_activity_log').select('*').eq('quotation_id',quotationId).order('logged_at',{ascending:false}),
       supabase.from('users').select('user_id,first_name,last_name'),
       supabase.from('rfqs').select('rfq_id,ref_number,status').eq('quotation_id',quotationId).eq('party_type','client').eq('is_deleted',false).maybeSingle(),
@@ -126,6 +134,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       else if(q.lead_id){ const {data:l}=await supabase.from('leads').select('phone,email,location').eq('lead_id',q.lead_id).single(); if(l) qEnriched={...q,client_phone:q.client_phone||l.phone||'',client_email:q.client_email||l.email||'',client_city:q.client_city||l.location||''}; }
     }
     setQuot(qEnriched||null); setItems(li||[]); setQSettings(st||{}); setQActivity(qact||[]); setSourceRfq(srfq||null);
+    const {data:approvalRows}=await supabase.from('quote_approvals').select('*').eq('quotation_id',quotationId).order('created_at',{ascending:false});
+    setApprovalAudit(approvalRows||[]);
     { const m={}; (qus||[]).forEach(u=>{m[u.user_id]=((u.first_name||'')+' '+(u.last_name||'')).trim();}); setQUserMap(m); }
     if(q&&q.display_options){ try{ setDisplayOpts(JSON.parse(q.display_options)); }catch(e){} }
     let _evd=null;
@@ -172,7 +182,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     if(!quot) return;
     if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. '+(action==='download'?'Download':action==='print'?'Print':'Open')+' it anyway?')) return;
     const q2 = await withSchedule(quot);
-    buildQuotationPDF(q2, items, {action, displayOpts, settings:qSettings, showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
+    const qrBase64 = (displayOpts.bankDetails && qSettings.payment_qr_path) ? await fetchAsBase64(qSettings.payment_qr_path) : null;
+    buildQuotationPDF(q2, items, {action, displayOpts, settings:qSettings, qrBase64, showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
   };
   const doConfirmQuote = async () => {
     if(confirming||!quot) return;
@@ -237,6 +248,40 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       setConfirming(false);
     }
   };
+  // Build approval link using the same base as rfq.html but pointing to approval.html
+  const approvalLink_ = (token) => {
+    try {
+      const raw = (import.meta.env && import.meta.env.VITE_RFQ_BASE_URL) || '';
+      const base = raw ? (raw.endsWith('/') ? raw : raw + '/') : location.href;
+      return new URL('approval.html?t=' + token, base).href;
+    } catch (e) { return 'approval.html?t=' + token; }
+  };
+  const doRequestApproval = async () => {
+    if (!approvalPin || approvalPin.length < 4 || approvalPin.length > 6 || !/^\d+$/.test(approvalPin)) {
+      notify('Enter a 4–6 digit numeric PIN.', 'error'); return;
+    }
+    setRequestingApproval(true);
+    try {
+      const arr = new Uint8Array(16); crypto.getRandomValues(arr);
+      const token = [...arr].map(b => b.toString(16).padStart(2, '0')).join('');
+      const [tokenHash, pinHash] = await Promise.all([sha256Hex(token), sha256Hex(approvalPin)]);
+      const { error } = await supabase.from('quotations').update({
+        approval_status: 'pending',
+        approval_token_hash: tokenHash,
+        approval_pin_hash: pinHash,
+        updated_at: new Date().toISOString(),
+      }).eq('quotation_id', quot.quotation_id);
+      if (error) throw error;
+      const link = approvalLink_(token);
+      setApprovalLink(link);
+      setQuot(q => ({ ...q, approval_status: 'pending' }));
+      notify('Approval link generated.', 'success');
+    } catch (err) {
+      notify('Could not set up approval: ' + (err && err.message ? err.message : 'Please try again.'), 'error');
+    }
+    setRequestingApproval(false);
+  };
+
   // Reconstruct the wizard context (lead vs event origin) and open it to edit/revise this quote.
   const launchEdit = async () => {
     let leadObj=null, origin=null;
@@ -303,7 +348,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
           <div>
-            <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number} <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,marginLeft:6}}>{statusLabel}</span>{isQuoteExpired(quot)&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>Expired</span>}</div>
+            <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number} <span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,marginLeft:6}}>{statusLabel}</span>{isQuoteExpired(quot)&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>Expired</span>}{quot.approval_status==='pending'&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>🔏 Pending approval</span>}{quot.approval_status==='signed'&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--green-light)',color:'var(--green)',marginLeft:6}}>✅ Approved by {quot.approver_name||'client'}</span>}{quot.approval_status==='declined'&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--red-light)',color:'var(--red)',marginLeft:6}}>❌ Declined</span>}</div>
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}><ClientLink clientId={quot.client_id} name={quot.client_name} onNavigate={onNavigate}>{quot.client_name||'—'}</ClientLink>{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
             {(srcLead||srcEvent||srcRfq)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
               <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
@@ -322,6 +367,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
           {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id,label:quot.event_name||'Event'})}>Go to event →</button>}
           {!quot.event_id&&!['rejected','converted','expired','superseded'].includes(quot.status)&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={()=>{setCloseForm({outcome:'client',reason:'',notes:''});setShowClose(true);}} title="Client declined or we can't fulfil — close this quote">✕ Close — not proceeding</button>}
+          {['sent','approved','draft'].includes(quot.status)&&(!quot.approval_status||quot.approval_status==='declined')&&<button className="btn sm" style={{color:'var(--pink)',borderColor:'var(--pink)'}} onClick={()=>{setApprovalPin('');setApprovalLink('');setShowApprovalModal(true);}}>🔏 Request Approval</button>}
         </div>
       </div>
 
@@ -429,6 +475,49 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
               {a.action==='sent'?('Sent via '+(a.channel==='whatsapp'?'WhatsApp':(a.channel==='email'?'Email':(a.channel||'—')))):a.action} · {new Date(a.logged_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}{a.logged_by&&qUserMap[a.logged_by]?(' · '+qUserMap[a.logged_by]):''}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Approval history */}
+      {approvalAudit.length>0&&(
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'14px 20px',marginTop:16}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:8}}>🔏 Approval history</div>
+          {approvalAudit.map((a,i)=>(
+            <div key={a.approval_id||i} style={{fontSize:12,color:'var(--grey-500)',padding:'3px 0',borderTop:i?'1px solid var(--grey-100)':'none'}}>
+              <span style={{fontWeight:500,color:a.action==='signed'?'var(--green)':a.action==='declined'?'var(--red)':'var(--grey-700)'}}>{a.action==='requested'?'Approval requested':a.action==='opened'?'Link opened':a.action==='signed'?'✅ Signed':a.action==='declined'?'❌ Declined':a.action}</span>
+              {a.signer_name&&<span style={{color:'var(--grey-700)'}}> by {a.signer_name}</span>}
+              {' · '}{new Date(a.created_at).toLocaleString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit'})}
+              {a.ip&&<span style={{color:'var(--grey-400)'}}> · {a.ip}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {showApprovalModal&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1300,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'50px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget){setShowApprovalModal(false);}}}>
+          <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:460}}>
+            <div style={{padding:'14px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>🔏 Request client approval <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {quot.ref_number}</span></div>
+            <div style={{padding:20}}>
+              {!approvalLink&&(<>
+                <div style={{fontSize:13,color:'var(--grey-500)',marginBottom:14}}>Set a PIN the client will use to access and sign the approval page. Share the link via WhatsApp after generating.</div>
+                <label style={{fontSize:12,fontWeight:600,color:'var(--grey-700)',display:'block',marginBottom:6}}>PIN (4–6 digits) <span style={{color:'var(--pink)'}}>*</span></label>
+                <input type="text" inputMode="numeric" maxLength={6} placeholder="e.g. 1234" value={approvalPin} onChange={e=>setApprovalPin(e.target.value.replace(/\D/g,''))} style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--grey-200)',borderRadius:'var(--radius-md)',fontSize:15,fontFamily:'inherit',letterSpacing:4,textAlign:'center',marginBottom:16}}/>
+                <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+                  <button className="btn sm" onClick={()=>setShowApprovalModal(false)}>Cancel</button>
+                  <button className="btn sm primary" disabled={requestingApproval||approvalPin.length<4} onClick={doRequestApproval}>{requestingApproval?'Generating…':'Generate approval link'}</button>
+                </div>
+              </>)}
+              {approvalLink&&(<>
+                <div style={{fontSize:13,color:'var(--green)',fontWeight:600,marginBottom:8}}>✅ Approval link ready</div>
+                <div style={{fontSize:12,color:'var(--grey-500)',marginBottom:8}}>Share this link and PIN <b>{approvalPin}</b> with the client:</div>
+                <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'10px 12px',fontSize:12,wordBreak:'break-all',color:'var(--grey-700)',marginBottom:14,border:'1px solid var(--grey-200)'}}>{approvalLink}</div>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <a className="btn sm" style={{background:'#25D366',color:'white',border:'none',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:4}} href={waLink(quot.client_phone,'Hi '+((quot.client_name||'').split(' ')[0]||'there')+'! Please review and approve your event quotation '+quot.ref_number+' using this link: '+approvalLink+'\n\nYour PIN is: '+approvalPin+'\n\nThank you! — Isheeka Events')} target="_blank" rel="noreferrer">💬 Share on WhatsApp</a>
+                  <button className="btn sm" onClick={()=>{try{navigator.clipboard.writeText(approvalLink);}catch(e){}notify('Link copied.','success');}}>📋 Copy link</button>
+                  <button className="btn sm" onClick={()=>setShowApprovalModal(false)}>Close</button>
+                </div>
+              </>)}
+            </div>
+          </div>
         </div>
       )}
       {showClose&&(

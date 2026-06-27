@@ -28,7 +28,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
       const bids = data.bidsByKey[costKey(it)] || [];
       let chosen = null, best = Infinity;
       bids.forEach((b) => { if (b.can_supply !== false && b.unit_cost != null && Number(b.unit_cost) < best) { best = Number(b.unit_cost); chosen = b.vendor_id; } });
-      return { key: costKey(it), sub_event_name: it.sub_event_name || '', description: it.description, quantity: Number(it.quantity) || 1, bids, inHouse: false, inHouseCost: '', chosen, markup: data.defaultMarkup, markupOverridden: false, autoCheapest: chosen };
+      return { key: costKey(it), clientItemId: it.rfq_item_id, sub_event_name: it.sub_event_name || '', description: it.description, quantity: Number(it.quantity) || 1, sub_items: Array.isArray(it.sub_items) ? it.sub_items : [], bids, inHouse: false, inHouseCost: '', chosen, markup: data.defaultMarkup, markupOverridden: false, autoCheapest: chosen };
     });
     setRows(rs);
     setGmk(String(data.defaultMarkup ?? 30));
@@ -113,13 +113,15 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
   if (!d || !d.rfq) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--grey-400)' }}>Could not load costing. <button className="btn sm" onClick={onBack}>← Back</button></div>;
 
   // Internal costing sheet (PDF / Excel / WhatsApp) — vendor costs + margins, never shared with clients.
+  // For PDF/Excel only include submitted vendors so the sheet stays clean.
+  const submittedColumns = (d.columns || []).filter((c) => c.status === 'submitted');
   const sheetPayload = () => ({
-    rfq: d.rfq, columns: d.columns, schedule: (d.rfq && d.rfq.sub_events) || [], totals,
+    rfq: d.rfq, columns: submittedColumns, schedule: (d.rfq && d.rfq.sub_events) || [], totals,
     rows: rows.map((r) => {
       const cost = chosenCostOf(r), client = clientUnitOf(r);
       return {
         sub_event_name: r.sub_event_name, description: r.description, quantity: r.quantity,
-        bids: d.columns.map((c) => { const b = r.bids.find((x) => x.vendor_id === c.vendor_id); return (b && b.can_supply !== false && b.unit_cost != null) ? Number(b.unit_cost) : null; }),
+        bids: submittedColumns.map((c) => { const b = r.bids.find((x) => x.vendor_id === c.vendor_id); return (b && b.can_supply !== false && b.unit_cost != null) ? Number(b.unit_cost) : null; }),
         inhouse: r.inHouse ? (r.inHouseCost === '' ? null : Number(r.inHouseCost)) : null,
         chosen: cost, markupPct: Number(r.markup) || 0,
         markupRs: (cost != null && client != null) ? (client - cost) * r.quantity : null,
@@ -149,7 +151,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>Costing &amp; markup</div>
-          <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 2 }}>{d.rfq.ref_number}{d.rfq.event_type ? (' · ' + d.rfq.event_type) : ''} · {d.columns.length} vendor bid{d.columns.length === 1 ? '' : 's'} · default markup {d.defaultMarkup}%</div>
+          <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 2 }}>{d.rfq.ref_number}{d.rfq.event_type ? (' · ' + d.rfq.event_type) : ''} · {d.columns.filter((c) => c.status === 'submitted').length}/{d.columns.length} vendor{d.columns.length === 1 ? '' : 's'} submitted · default markup {d.defaultMarkup}%</div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 10.5, color: 'var(--grey-400)', marginRight: 2 }} title="Internal use only — contains vendor costs & margins">🔒 Internal:</span>
@@ -161,7 +163,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
       </div>
 
       {readOnly && <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', color: 'var(--grey-600)', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>🔒 The event for this RFQ is completed or cancelled — this costing is <b>view-only</b>. You can review the chosen bids and margins, but can't re-price or regenerate the quote.</div>}
-      {!readOnly && d.columns.length === 0 && <div style={{ background: 'var(--orange-light)', color: '#854F0B', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>No vendor has submitted a bid yet — you can still price items in-house below.</div>}
+      {!readOnly && d.columns.filter((c) => c.status === 'submitted').length === 0 && <div style={{ background: 'var(--orange-light)', color: '#854F0B', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>{d.columns.length === 0 ? 'No vendors have been sent this RFQ yet.' : 'No vendor has submitted a bid yet — you can still price items in-house below.'}</div>}
 
       {!readOnly && (
         <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', padding: '12px 14px', marginBottom: 14 }}>
@@ -187,7 +189,12 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
           <thead>
             <tr style={{ color: 'var(--grey-400)', textAlign: 'right' }}>
               <th style={{ textAlign: 'left', padding: '10px 12px', fontWeight: 500 }}>Item</th>
-              {d.columns.map((c) => <th key={c.vendor_id} style={{ padding: '10px 8px', fontWeight: 500 }}>{c.name}</th>)}
+              {d.columns.map((c) => (
+                <th key={c.vendor_id} style={{ padding: '10px 8px', fontWeight: 500 }}>
+                  {c.name}
+                  {c.status !== 'submitted' && <span style={{ display: 'block', fontSize: 9.5, fontWeight: 400, color: '#C07000', letterSpacing: 0.2 }}>{c.status === 'sent' ? 'pending' : c.status}</span>}
+                </th>
+              ))}
               <th style={{ padding: '10px 8px', fontWeight: 500 }}>In-house</th>
               <th style={{ padding: '10px 8px', fontWeight: 500 }}>Markup</th>
               <th style={{ padding: '10px 12px', fontWeight: 500 }}>Client price</th>
@@ -209,15 +216,47 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
                   if (cc != null) gcost += cc * r.quantity; if (cu != null) gclient += cu * r.quantity;
                   out.push(
                     <tr key={i} style={{ borderTop: '1px solid var(--grey-100)', textAlign: 'right' }}>
-                      <td style={{ textAlign: 'left', padding: '9px 12px' }}>{r.description}<span style={{ color: 'var(--grey-400)' }}> · ×{r.quantity}</span></td>
+                      <td style={{ textAlign: 'left', padding: '9px 12px' }}>
+                        {r.description}<span style={{ color: 'var(--grey-400)' }}> · ×{r.quantity}</span>
+                        {Array.isArray(r.sub_items) && r.sub_items.length > 0 && (
+                          <div style={{ paddingLeft: 10, marginTop: 2 }}>
+                            {r.sub_items.map((si, si_i) => (
+                              <div key={si_i} style={{ fontSize: 11, color: 'var(--grey-400)', lineHeight: 1.5 }}>
+                                • {si.name} × {si.qty}{si.note ? <span> ({si.note})</span> : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       {d.columns.map((c) => {
-                        const b = r.bids.find((x) => x.vendor_id === c.vendor_id);
-                        if (!b) return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--grey-300)' }}>—</td>;
-                        if (b.can_supply === false) return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--red)' }} title="Can't supply">✕</td>;
+                        // Look up whether this vendor was sent the client item via source_item_id.
+                        const vendorItem = (d.vendorItemBySource || {})[c.rfq_id]?.[r.clientItemId];
+                        // Fall back to bid-key match for submitted vendors (handles items sent
+                        // before source_item_id was recorded).
+                        const bidFallback = r.bids.find((x) => x.vendor_id === c.vendor_id);
+
+                        if (!vendorItem && !bidFallback) {
+                          // Vendor was not sent this item at all.
+                          return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--grey-400)', fontStyle: 'italic', fontSize: 11.5 }}>Not requested</td>;
+                        }
+
+                        // Use vendorItem if available, otherwise synthesise from bidFallback.
+                        const vi = vendorItem || { unit_cost: bidFallback.unit_cost, can_supply: bidFallback.can_supply, item_note: bidFallback.item_note };
+
+                        if (vi.can_supply === false) {
+                          return <td key={c.vendor_id} style={{ padding: '9px 8px', color: 'var(--red)', fontStyle: 'italic', fontSize: 11.5 }} title="Vendor cannot supply this item">Cannot supply</td>;
+                        }
+
+                        if (vi.unit_cost == null) {
+                          // Sent but not yet priced.
+                          return <td key={c.vendor_id} style={{ padding: '9px 8px', color: '#C07000', fontStyle: 'italic', fontSize: 11.5 }} title="Vendor has not priced this item yet">Awaiting…</td>;
+                        }
+
+                        // Vendor has submitted a price.
                         const isChosen = !r.inHouse && r.chosen === c.vendor_id;
                         return (
-                          <td key={c.vendor_id} onClick={() => { if (!readOnly) setRow(i, { inHouse: false, chosen: c.vendor_id }); }} title={(b.item_note ? ('Note: ' + b.item_note + '  ') : '') + (readOnly ? (isChosen ? 'chosen' : '') : (isChosen ? 'chosen' : 'click to choose'))} style={{ padding: '9px 8px', cursor: readOnly ? 'default' : 'pointer', background: isChosen ? 'var(--green-light)' : 'transparent', color: isChosen ? 'var(--green)' : 'var(--grey-800)', fontWeight: isChosen ? 600 : 400 }}>
-                            {b.unit_cost != null ? Number(b.unit_cost).toLocaleString('en-IN') : '—'}{b.item_note ? ' 📝' : ''}
+                          <td key={c.vendor_id} onClick={() => { if (!readOnly) setRow(i, { inHouse: false, chosen: c.vendor_id }); }} title={(vi.item_note ? ('Note: ' + vi.item_note + '  ') : '') + (readOnly ? (isChosen ? 'chosen' : '') : (isChosen ? 'chosen' : 'click to choose'))} style={{ padding: '9px 8px', cursor: readOnly ? 'default' : 'pointer', background: isChosen ? 'var(--green-light)' : 'transparent', color: isChosen ? 'var(--green)' : 'var(--grey-800)', fontWeight: isChosen ? 600 : 400 }}>
+                            {Number(vi.unit_cost).toLocaleString('en-IN')}{vi.item_note ? ' 📝' : ''}
                           </td>
                         );
                       })}
@@ -236,6 +275,14 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
             })()}
           </tbody>
         </table>
+      </div>
+
+      {/* Bid-state legend */}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11.5, color: 'var(--grey-500)', marginBottom: 14, padding: '6px 2px', alignItems: 'center' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--grey-100)', display: 'inline-block' }} /> <i>Not requested</i></span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 2, background: '#FDDFA0', display: 'inline-block' }} /> <i style={{ color: '#C07000' }}>Awaiting bid</i></span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--green-light)', display: 'inline-block' }} /> Priced</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span style={{ width: 12, height: 12, borderRadius: 2, background: '#FDDEDE', display: 'inline-block' }} /> <span style={{ color: 'var(--red)' }}>Cannot supply</span></span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 14 }}>

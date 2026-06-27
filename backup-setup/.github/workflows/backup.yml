@@ -1,0 +1,63 @@
+name: Nightly DB backup
+
+on:
+  schedule:
+    - cron: '30 20 * * *'   # 20:30 UTC = 02:00 IST, every day
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pg_dump 17 + gnupg
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates gnupg lsb-release
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+
+      - name: Dump + encrypt
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +%Y-%m-%d)
+          mkdir -p backups/daily backups/monthly
+          OUT="backups/daily/isheeka-${STAMP}.dump.gpg"
+
+          /usr/lib/postgresql/17/bin/pg_dump --no-owner --no-privileges --schema=public -Fc "$SUPABASE_DB_URL" -f /tmp/db.dump
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+              --passphrase "$BACKUP_PASSPHRASE" -o "$OUT" /tmp/db.dump
+          rm -f /tmp/db.dump
+          ls -lh "$OUT"
+
+          if [ "$(date -u +%d)" = "01" ]; then
+            cp "$OUT" "backups/monthly/isheeka-$(date -u +%Y-%m).dump.gpg"
+          fi
+
+          ls -1t backups/daily/*.dump.gpg   2>/dev/null | tail -n +91 | xargs -r rm -f || true
+          ls -1t backups/monthly/*.dump.gpg 2>/dev/null | tail -n +13 | xargs -r rm -f || true
+
+      - name: Commit snapshot
+        run: |
+          git config user.name  "backup-bot"
+          git config user.email "backup-bot@users.noreply.github.com"
+          git add backups
+          git commit -m "DB backup $(date -u +%F)" || { echo "no changes"; exit 0; }
+          git push

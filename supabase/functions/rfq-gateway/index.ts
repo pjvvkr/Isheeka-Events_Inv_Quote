@@ -144,6 +144,22 @@ function publicRfq(r: Record<string, unknown>) {
     sub_events: r.sub_events, notes: r.notes,
     revision_number: r.revision_number,
     party_type: r.party_type ?? "client",
+    confirmation_status: r.confirmation_status ?? null,
+    confirmation_requested_at: r.confirmation_requested_at ?? null,
+  };
+}
+// Public-safe projection of a quotation for the approval page.
+function publicQuote(q: Record<string, unknown>) {
+  return {
+    quotation_id: q.quotation_id, ref_number: q.ref_number, status: q.status,
+    client_name: q.client_name, event_name: q.event_name,
+    doc_date: q.doc_date, valid_until: q.valid_until,
+    grand_total: q.grand_total, subtotal: q.subtotal,
+    payment_schedule: q.payment_schedule,
+    additional_notes: q.additional_notes, additional_terms: q.additional_terms,
+    approval_status: q.approval_status ?? null,
+    approver_name: q.approver_name ?? null,
+    client_approved_at: q.client_approved_at ?? null,
   };
 }
 async function rfqByToken(token: string) {
@@ -364,7 +380,9 @@ Deno.serve(async (req) => {
               quantity: it.quantity ?? 1,
               unit: it.unit ?? null,
               source: it.source ?? "custom",
-              sort_order: i,
+              sort_order: it.sort_order !== undefined ? it.sort_order : i,
+              sub_items: Array.isArray(it.sub_items) ? it.sub_items : [],
+              source_item_id: it.source_item_id ?? null,
             }));
           if (rows.length) await db.from("rfq_items").insert(rows);
         }
@@ -477,9 +495,12 @@ Deno.serve(async (req) => {
         const prompt =
           "You are reading a customer's event-requirements list (it may be typed, printed, or handwritten, " +
           "possibly a phone photo). Extract the requested items. Return ONLY a JSON array — no prose, no code fences — " +
-          "of objects: {\"description\": string, \"quantity\": number, \"sub_event\": string|null}. " +
+          "of objects: {\"description\": string, \"quantity\": number, \"sub_event\": string|null, \"sub_items\": [{\"name\": string, \"qty\": number, \"note\": string|null}]}. " +
           "description = the item/service requested. quantity = the number requested (use 1 if not stated). " +
           "sub_event = the function/section it belongs to if the list is grouped (e.g. \"Mehendi\", \"Reception\"), else null. " +
+          "sub_items = a list of sub-details or nested line items for this entry if the list specifies them " +
+          "(e.g. \"Stage setup: 8x12 backdrop, 2 steps, fairy lights\" → sub_items=[{name:\"8x12 backdrop\",qty:1,note:null},{name:\"Steps\",qty:2,note:null},{name:\"Fairy lights\",qty:1,note:null}]). " +
+          "If there are no sub-items for an entry, set sub_items=[]. " +
           "The list may be in English, Telugu, Hindi or a mix (Hinglish/Tenglish) and may be handwritten — read it faithfully; " +
           "give each description as a short clear label in English where the meaning is obvious, otherwise keep the original wording. " +
           "For quantity, read counts like \"2 tubs\", \"200 chairs\", \"8x12 backdrop\" as the number (2, 200, 1) and keep any size/spec in the description. " +
@@ -518,6 +539,13 @@ Deno.serve(async (req) => {
           description: String(it.description ?? it.item ?? "").trim().slice(0, 300),
           quantity: Math.max(1, Math.round(Number(it.quantity) || 1)),
           sub_event: it.sub_event ? String(it.sub_event).trim().slice(0, 80) : null,
+          sub_items: Array.isArray(it.sub_items)
+            ? it.sub_items.map((s: any) => ({
+                name: String(s.name ?? "").trim().slice(0, 200),
+                qty: Math.max(1, Math.round(Number(s.qty) || 1)),
+                note: s.note ? String(s.note).trim().slice(0, 200) : null,
+              })).filter((s: any) => s.name)
+            : [],
         })).filter((it: any) => it.description);
 
         return json({ ok: true, items: clean });
@@ -599,6 +627,193 @@ Deno.serve(async (req) => {
         }
         const costs = [...byId.values()];
         return json({ ok: true, costs, matched: costs.filter((c) => c.unit_cost != null).length, total: itemRows.length });
+      }
+
+      // ── view a quotation by its approval token (public, no staff JWT) ────────
+      case "view_quote_by_token": {
+        const token = String(body.token ?? "").trim();
+        if (!token) return json({ error: "token_required" }, 400);
+        const token_hash = await sha256hex(token);
+        const { data: q } = await db.from("quotations")
+          .select("*").eq("approval_token_hash", token_hash).eq("is_deleted", false).maybeSingle();
+        if (!q) return json({ error: "invalid_link" }, 404);
+        await db.from("quote_approvals").insert({
+          quotation_id: q.quotation_id,
+          action: "opened",
+          ip: req.headers.get("x-forwarded-for") ?? null,
+        });
+        const { data: lines } = await db.from("quotation_line_items")
+          .select("line_item_id,sub_event_name,description,quantity,unit_price,amount,sort_order,sub_items")
+          .eq("quotation_id", q.quotation_id).eq("is_deleted", false).order("sort_order");
+        return json({ ok: true, quote: publicQuote(q), lines: lines ?? [] });
+      }
+
+      // ── client signs or declines the quote ────────────────────────────────────
+      case "submit_quote_approval": {
+        const token = String(body.token ?? "").trim();
+        const pin   = String(body.pin  ?? "").trim();
+        const signer_name = String(body.signer_name ?? "").trim();
+        const act   = String(body.action ?? "").trim(); // "signed" | "declined"
+        if (!token) return json({ error: "token_required" }, 400);
+        if (!pin)   return json({ error: "pin_required" }, 400);
+        if (!signer_name) return json({ error: "signer_name_required" }, 400);
+        if (!["signed", "declined"].includes(act)) return json({ error: "invalid_action" }, 400);
+
+        const token_hash = await sha256hex(token);
+        const { data: q } = await db.from("quotations")
+          .select("quotation_id,ref_number,client_name,event_name,grand_total,approval_pin_hash,approval_status")
+          .eq("approval_token_hash", token_hash).eq("is_deleted", false).maybeSingle();
+        if (!q) return json({ error: "invalid_link" }, 404);
+        if (q.approval_status === "approved") return json({ error: "already_approved" }, 409);
+        if (!q.approval_pin_hash) return json({ error: "pin_not_set" }, 400);
+
+        const since15 = new Date(Date.now() - 15 * 60_000).toISOString();
+        const { count: pinFails } = await db.from("quote_approvals")
+          .select("approval_id", { count: "exact", head: true })
+          .eq("quotation_id", q.quotation_id).eq("action", "pin_failed").gte("created_at", since15);
+        if ((pinFails ?? 0) >= MAX_ATTEMPTS) return json({ error: "locked" }, 429);
+
+        if (!timingSafeEqual(q.approval_pin_hash, await sha256hex(pin))) {
+          await db.from("quote_approvals").insert({ quotation_id: q.quotation_id, action: "pin_failed", ip: req.headers.get("x-forwarded-for") ?? null });
+          return json({ error: "wrong_pin", attempts_left: Math.max(0, MAX_ATTEMPTS - (pinFails ?? 0) - 1) }, 401);
+        }
+
+        const now = new Date().toISOString();
+        const newApprovalStatus = act === "signed" ? "approved" : "declined";
+        await db.from("quotations").update({
+          approval_status: newApprovalStatus,
+          approver_name: signer_name,
+          ...(act === "signed" ? { client_approved_at: now, approved_at: now, approved_via: "link" } : {}),
+        }).eq("quotation_id", q.quotation_id);
+
+        await db.from("quote_approvals").insert({
+          quotation_id: q.quotation_id, action: act, signer_name,
+          ip: req.headers.get("x-forwarded-for") ?? null,
+        });
+
+        try {
+          await db.from("quotation_activity_log").insert({
+            quotation_id: q.quotation_id, actor: signer_name,
+            action: act === "signed" ? "client_approved" : "client_declined",
+            notes: `Signed as: ${signer_name}`,
+          });
+        } catch { /* best-effort */ }
+
+        try {
+          const { data: st } = await db.from("settings").select("email,notify_email_2").limit(1).maybeSingle();
+          const CC_ISHEEKA = "isheekaevents@gmail.com";
+          const recips = [...new Set([st?.email, st?.notify_email_2, CC_ISHEEKA]
+            .filter((e: any) => e && /\S+@\S+\.\S+/.test(String(e)))
+            .map((e: any) => String(e).toLowerCase()))];
+          const ref = q.ref_number || q.quotation_id;
+          const verb = act === "signed" ? "approved" : "declined";
+          const subject = `[Isheeka] Quote ${verb} — ${ref}`;
+          const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p><b>${signer_name}</b> has <b>${verb}</b> quotation <b>${ref}</b>${q.client_name ? ` for ${q.client_name}` : ""}.</p>${q.grand_total ? `<p>Total: &#8377;${Number(q.grand_total).toLocaleString("en-IN")}</p>` : ""}<p style="color:#888;font-size:12px">Signed at ${new Date(now).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</p></div>`;
+          const text = `${signer_name} has ${verb} quotation ${ref}${q.client_name ? ` for ${q.client_name}` : ""}. Signed at ${now}.`;
+          for (const to of recips) { try { await sendEmail({ to: String(to), subject, html, text }); } catch { /* per-recipient */ } }
+        } catch (e) { console.error("[submit_quote_approval] email", e); }
+
+        return json({ ok: true, action: act });
+      }
+
+      // ── fetch vendor onboarding form context (public) ─────────────────────────
+      case "get_vendor_onboarding": {
+        const token = String(body.token ?? "").trim();
+        if (!token) return json({ error: "token_required" }, 400);
+        const token_hash = await sha256hex(token);
+        const { data: ob } = await db.from("vendor_onboarding")
+          .select("onboarding_id,status,submitted_at").eq("token_hash", token_hash).maybeSingle();
+        if (!ob) return json({ error: "invalid_link" }, 404);
+        if (ob.status === "submitted" || ob.status === "approved")
+          return json({ error: "already_submitted", status: ob.status }, 409);
+        let categories: string[] = [];
+        try {
+          const { data: vc } = await db.from("vendor_categories").select("name").order("name");
+          categories = (vc ?? []).map((c: any) => c.name).filter(Boolean);
+        } catch { /* optional */ }
+        return json({ ok: true, categories });
+      }
+
+      // ── vendor submits onboarding form (public) ───────────────────────────────
+      case "submit_vendor_onboarding": {
+        const token = String(body.token ?? "").trim();
+        const pin   = String(body.pin   ?? "").trim();
+        const fields = body.fields && typeof body.fields === "object" ? body.fields : {};
+        if (!token) return json({ error: "token_required" }, 400);
+
+        const token_hash = await sha256hex(token);
+        const { data: ob } = await db.from("vendor_onboarding")
+          .select("onboarding_id,status,pin_hash").eq("token_hash", token_hash).maybeSingle();
+        if (!ob) return json({ error: "invalid_link" }, 404);
+        if (ob.status === "submitted" || ob.status === "approved")
+          return json({ error: "already_submitted", status: ob.status }, 409);
+
+        if (ob.pin_hash) {
+          if (!pin) return json({ error: "pin_required" }, 400);
+          if (!timingSafeEqual(ob.pin_hash, await sha256hex(pin)))
+            return json({ error: "wrong_pin" }, 401);
+        }
+
+        const REQUIRED = ["name", "contact_person", "phone", "email", "category"];
+        const missing = REQUIRED.filter((k) => !String(fields[k] ?? "").trim());
+        if (missing.length) return json({ error: "missing_fields", fields: missing }, 400);
+
+        const now = new Date().toISOString();
+        await db.from("vendor_onboarding").update({
+          submitted_fields: fields, status: "submitted", submitted_at: now,
+        }).eq("onboarding_id", ob.onboarding_id);
+
+        try {
+          const { data: st } = await db.from("settings").select("email,notify_email_2").limit(1).maybeSingle();
+          const recips = [st?.email, st?.notify_email_2].filter((e: any) => e && /\S+@\S+\.\S+/.test(String(e)));
+          if (recips.length) {
+            const vname = String(fields.name ?? "A vendor").trim();
+            const subject = `[Isheeka] New vendor application — ${vname}`;
+            const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p><b>${vname}</b> has submitted a vendor onboarding application.</p><p>Category: ${fields.category ?? "—"} &middot; Contact: ${fields.contact_person ?? "—"} &middot; Phone: ${fields.phone ?? "—"}</p><p>Review in the Vendors module &rarr; Onboarding requests.</p></div>`;
+            const text = `${vname} submitted a vendor application. Category: ${fields.category ?? "—"}. Review in the Vendors module.`;
+            for (const to of recips) { try { await sendEmail({ to: String(to), subject, html, text }); } catch { /* per-recipient */ } }
+          }
+        } catch (e) { console.error("[submit_vendor_onboarding] email", e); }
+
+        return json({ ok: true });
+      }
+
+      // ── client confirms revised RFQ (session-gated) ───────────────────────────
+      case "confirm_rfq_changes": {
+        const s = await readSession(body.session);
+        if (!s) return json({ error: "no_session" }, 401);
+        const confirmed = body.confirmed !== false;
+        const note = body.note ? String(body.note).trim().slice(0, 500) : null;
+        const cfmStatus = confirmed ? "confirmed" : "declined";
+        const now = new Date().toISOString();
+
+        const { data: r } = await db.from("rfqs")
+          .select("rfq_id,ref_number,confirmation_status").eq("rfq_id", s.rfq_id).eq("is_deleted", false).maybeSingle();
+        if (!r) return json({ error: "not_found" }, 404);
+        if (r.confirmation_status === "confirmed") return json({ error: "already_confirmed" }, 409);
+
+        await db.from("rfqs").update({
+          confirmation_status: cfmStatus,
+          client_confirmed_at: now,
+          client_confirm_note: note,
+        }).eq("rfq_id", s.rfq_id);
+
+        await logActivity(s.rfq_id, "client", confirmed ? "changes_confirmed" : "changes_declined", note ?? undefined);
+
+        try {
+          const { data: st } = await db.from("settings").select("email,notify_email_2").limit(1).maybeSingle();
+          const recips = [st?.email, st?.notify_email_2].filter((e: any) => e && /\S+@\S+\.\S+/.test(String(e)));
+          if (recips.length) {
+            const ref = r.ref_number || s.rfq_id;
+            const verb = confirmed ? "confirmed" : "declined";
+            const subject = `[Isheeka] Client ${verb} RFQ changes — ${ref}`;
+            const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>Client has <b>${verb}</b> the revised requirements for <b>${ref}</b>.</p>${note ? `<p>Note: &ldquo;${note}&rdquo;</p>` : ""}</div>`;
+            const text = `Client ${verb} revised requirements for ${ref}.${note ? ` Note: "${note}"` : ""}`;
+            for (const to of recips) { try { await sendEmail({ to: String(to), subject, html, text }); } catch { /* per-recipient */ } }
+          }
+        } catch (e) { console.error("[confirm_rfq_changes] email", e); }
+
+        return json({ ok: true, confirmation_status: cfmStatus });
       }
 
       default:
