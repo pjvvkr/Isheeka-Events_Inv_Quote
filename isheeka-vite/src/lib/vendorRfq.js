@@ -136,6 +136,15 @@ export async function regenerateVendorLink(rfqId) {
   return { token, pin };
 }
 
+// Remove a vendor from sourcing: soft-delete its vendor RFQ so it drops from the
+// sourcing list and the costing grid. Frees the vendor to be re-sent later.
+export async function removeVendorRfq(rfqId) {
+  const uid = await _currentUid();
+  const { error } = await runDb(supabase.from('rfqs').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('rfq_id', rfqId), 'remove vendor RFQ');
+  if (error) throw error;
+  try { await supabase.from('rfq_activity').insert({ rfq_id: rfqId, actor: uid || 'staff', action: 'withdrawn', notes: 'Removed from sourcing' }); } catch (e) { /* non-fatal */ }
+}
+
 // The vendor opens the SAME portal link; the gateway renders vendor mode by party_type.
 export function vendorRfqLink(token) { return rfqLink(token); }
 

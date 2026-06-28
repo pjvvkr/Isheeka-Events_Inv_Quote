@@ -10,7 +10,7 @@ import { RFQ_STATUS, RFQ_ACTION_LABEL } from '../lib/constants.js';
 import { useEventTypes } from '../lib/data.js';
 import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuote, findClientMatch } from '../lib/rfq.js';
 import { waLink } from '../lib/share.js';
-import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg } from '../lib/vendorRfq.js';
+import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg, removeVendorRfq } from '../lib/vendorRfq.js';
 import { CostingScreen } from './CostingScreen.jsx';
 
 function RFQShareCard({ created, contact, onDone }) {
@@ -218,12 +218,12 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
   const markup = (settings && settings.default_markup_pct != null) ? settings.default_markup_pct : 30;
 
   const doSend = async () => {
-    const chosen = allVendors.filter((v) => picked[v.vendor_id]);
+    const chosen = allVendors.filter((v) => picked[v.vendor_id] && !sentVendorIds.has(v.vendor_id));
     if (!chosen.length) { notify('Pick at least one vendor.', 'error'); return; }
     const selectedItems = clientItems.filter((it) => selItems.includes(it.rfq_item_id));
     if (!selectedItems.length) { notify('Select at least one item to source.', 'error'); return; }
     setSending(true);
-    try { const created = await createVendorRfqs(clientRfq, chosen, selectedItems); setJustSent(created); setShowSend(false); setPicked({}); notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + ' with ' + selectedItems.length + ' item' + (selectedItems.length > 1 ? 's' : '') + '.', 'success'); load(); }
+    try { const created = await createVendorRfqs(clientRfq, chosen, selectedItems); setJustSent((prev) => [...prev, ...created]); setShowSend(false); setPicked({}); notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + ' with ' + selectedItems.length + ' item' + (selectedItems.length > 1 ? 's' : '') + '.', 'success'); load(); }
     catch (e) { /* toasted */ }
     setSending(false);
   };
@@ -248,9 +248,20 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
 
   const openBid = async (rfqId) => { if (viewBid === rfqId) { setViewBid(null); return; } setViewBid(rfqId); setBidItems(await loadVendorRfqItems(rfqId)); };
 
+  const remove = async (vr) => {
+    const v = vendorMap[vr.vendor_id] || {};
+    const msg = vr.status === 'submitted'
+      ? ((v.name || 'This vendor') + ' has already submitted a bid. Remove them from sourcing anyway? Their bid will no longer appear in costing.')
+      : ('Remove ' + (v.name || 'this vendor') + ' from sourcing? Their link will stop working.');
+    if (!window.confirm(msg)) return;
+    try { await removeVendorRfq(vr.rfq_id); notify('Vendor removed from sourcing.', 'success'); load(); }
+    catch (e) { notify('Could not remove the vendor.', 'error'); }
+  };
+
   const chip = (st) => ({ sent: { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' }, in_progress: { l: 'Opened', bg: 'var(--orange-light)', c: 'var(--orange)' }, submitted: { l: 'Submitted', bg: 'var(--green-light)', c: 'var(--green)' } }[st] || { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' });
   const respondedN = vrfqs.filter((v) => v.status === 'submitted').length;
   const grouped = rfqItemsGrouped(clientItems);
+  const sentVendorIds = new Set(vrfqs.map((v) => v.vendor_id));
 
   return (
     <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
@@ -259,7 +270,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>Sourcing — vendor RFQs</div>
           <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>Item list frozen · {itemCount} item{itemCount === 1 ? '' : 's'} · default markup {markup}%</div>
         </div>
-        {!dealClosed && <button className="btn sm primary" onClick={() => { setShowSend(true); setJustSent([]); setSelItems(clientItems.map((it) => it.rfq_item_id)); }}>+ Send vendor RFQ</button>}
+        {!dealClosed && <button className="btn sm primary" onClick={() => { setShowSend(true); setSelItems(clientItems.map((it) => it.rfq_item_id)); }}>+ Send vendor RFQ</button>}
       </div>
       {dealClosed && <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', padding: '8px 12px', marginTop: 10, fontSize: 12.5, color: 'var(--grey-600)' }}>🔒 The event for this RFQ is completed or cancelled — sourcing is read-only. You can still view bids and the costing summary.</div>}
 
@@ -292,6 +303,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                     {vr.status === 'submitted'
                       ? <button className="btn sm" onClick={() => openBid(vr.rfq_id)}>{viewBid === vr.rfq_id ? 'Hide' : 'View bid'}</button>
                       : <button className="btn sm" onClick={() => remind(vr)} title="Send a fresh link + reminder on WhatsApp">Remind</button>}
+                    {!dealClosed && <button className="btn sm" onClick={() => remove(vr)} title="Remove this vendor from sourcing" style={{ color: 'var(--red)', borderColor: 'var(--red)' }}>Remove</button>}
                   </div>
                 </div>
                 {viewBid === vr.rfq_id && (
@@ -358,13 +370,13 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                   <div style={{ marginTop: 6, fontSize: 11.5 }}>You'll go to Vendors to add one — then use the breadcrumb above to come back here and resume sourcing.</div>
                 </div>
                 : <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)' }}>
-                  {allVendors.map((v, i) => (
-                    <label key={v.vendor_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: i > 0 ? '1px solid var(--grey-50)' : 'none', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={!!picked[v.vendor_id]} onChange={(e) => setPicked((p) => ({ ...p, [v.vendor_id]: e.target.checked }))} />
+                  {allVendors.map((v, i) => { const already = sentVendorIds.has(v.vendor_id); return (
+                    <label key={v.vendor_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: i > 0 ? '1px solid var(--grey-50)' : 'none', cursor: already ? 'not-allowed' : 'pointer', opacity: already ? 0.55 : 1 }}>
+                      <input type="checkbox" disabled={already} checked={!already && !!picked[v.vendor_id]} onChange={(e) => setPicked((p) => ({ ...p, [v.vendor_id]: e.target.checked }))} />
                       <span style={{ fontSize: 13 }}>{v.name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--grey-400)', marginLeft: 'auto' }}>{v.phone_1 || v.email_1 || ''}</span>
+                      <span style={{ fontSize: 11, color: 'var(--grey-400)', marginLeft: 'auto' }}>{already ? 'Already sent' : (v.phone_1 || v.email_1 || '')}</span>
                     </label>
-                  ))}
+                  ); })}
                 </div>}
             </div>
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
