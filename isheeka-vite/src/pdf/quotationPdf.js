@@ -234,6 +234,17 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
     y += boxH + 2;
   }
 
+  // Notes
+  if (quot.additional_notes) {
+    const noteLines = doc.splitTextToSize(String(quot.additional_notes), W - 2 * M - 24);
+    const noteBoxH = 14 + noteLines.length * 12 + 12;
+    if (H - 58 - y < noteBoxH) { doc.addPage(); drawFrame(); drawHeaderBand(); y = HDR_BOTTOM + 8; }
+    setFill([250, 247, 248]); doc.roundedRect(M, y, W - 2 * M, noteBoxH, 5, 5, 'F');
+    sans('bold', 8); setText(INK); doc.text('Notes', M + 12, y + 14);
+    sans('normal', 9); setText([85, 85, 85]); doc.text(noteLines, M + 12, y + 28);
+    y += noteBoxH + 6;
+  }
+
   // Terms
   if (quot.additional_terms) {
     if (H - 58 - y < 40) { doc.addPage(); drawFrame(); drawHeaderBand(); y = HDR_BOTTOM + 8; }

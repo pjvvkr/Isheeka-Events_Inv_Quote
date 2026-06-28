@@ -276,7 +276,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     event_schedule: schedule.length ? schedule : null,
     event_date: (srcEvent && srcEvent.main_date) || inv.event_date || null,
     client_phone: clientInfo.phone_1 || '', client_email: clientInfo.email_1 || '', client_city: clientInfo.city || '',
-    additional_terms: inv.additional_notes || '',
+    additional_notes: inv.additional_notes || null,
     payment_schedule: installments.map((it) => ({
       pct: parseFloat(it.percentage) || 0,
       amount: parseFloat(it.amount_due) || 0,
@@ -746,6 +746,12 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
           </div>
         </div>
       </div>
+
+      {/* Notes */}
+      {inv.additional_notes&&<div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'14px 20px',border:'1px solid var(--grey-100)',marginTop:16}}>
+        <div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>Notes</div>
+        <div style={{fontSize:13,color:'var(--grey-600)',whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word'}}>{inv.additional_notes}</div>
+      </div>}
 
       {/* Activity & change log */}
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '14px 20px', border: '1px solid var(--grey-100)', marginTop: 16 }}>

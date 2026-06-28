@@ -211,7 +211,7 @@ export async function createInvoiceFromQuote(quotationId, opts = {}) {
     await supabase.from('invoice_installments').update({ is_deleted: true }).eq('invoice_id', existing.invoice_id);
     let rps = quot.payment_schedule; if (typeof rps === 'string') { try { rps = JSON.parse(rps || '[]'); } catch (e) { rps = []; } } rps = Array.isArray(rps) ? rps : [];
     if (rps.length) { await supabase.from('invoice_installments').insert(rps.map((p, idx) => { const pct = parseFloat(p.pct) || 0; const amt = (parseFloat(p.amount) > 0) ? Math.round(parseFloat(p.amount)) : Math.round(rGrand * pct / 100); return { invoice_id: existing.invoice_id, installment_number: idx + 1, percentage: pct, label: p.label || ('Installment ' + (idx + 1)), when_text: p.when || '', amount_due: amt, amount_paid: 0, balance: amt, status: 'pending' }; })); }
-    const { error: rue } = await supabase.from('invoices').update({ quotation_id: quotationId, event_name: quot.event_name || null, client_name: quot.client_name || null, subtotal: rSub, discount_amount: rDisc, tax_amount: rTax, grand_total: rGrand, total_outstanding: rGrand, source_quote_total: parseFloat(quot.grand_total || 0), updated_at: new Date().toISOString() }).eq('invoice_id', existing.invoice_id);
+    const { error: rue } = await supabase.from('invoices').update({ quotation_id: quotationId, event_name: quot.event_name || null, client_name: quot.client_name || null, subtotal: rSub, discount_amount: rDisc, tax_amount: rTax, grand_total: rGrand, total_outstanding: rGrand, source_quote_total: parseFloat(quot.grand_total || 0), additional_notes: quot.additional_notes || null, updated_at: new Date().toISOString() }).eq('invoice_id', existing.invoice_id);
     if (rue) { notify('Could not refresh the draft invoice: ' + (rue.message || ''), 'error'); return existing; }
     try { await logInvoiceActivity(existing.invoice_id, { action: 'auto_refresh', field: 'grand_total', old_value: '₹' + (parseFloat(existing.grand_total) || 0).toLocaleString('en-IN'), new_value: '₹' + rGrand.toLocaleString('en-IN'), reason: 'Synced to confirmed quote ' + (quot.ref_number || ''), revision_number: existing.revision_number || 0 }); } catch (e) { /* non-fatal */ }
     notify('Draft invoice ' + existing.ref_number + ' refreshed from the updated quote.', 'success');
@@ -231,6 +231,7 @@ export async function createInvoiceFromQuote(quotationId, opts = {}) {
     total_received: 0, total_outstanding: grand,
     source_quote_total: parseFloat(quot.grand_total || 0),
     payment_terms: quot.payment_terms || null,
+    additional_notes: quot.additional_notes || null,
   }).select().single();
   if (ie || !inv) { notify('Failed to create the invoice. ' + ((ie && ie.message) || ''), 'error'); return null; }
   if (items && items.length) {
