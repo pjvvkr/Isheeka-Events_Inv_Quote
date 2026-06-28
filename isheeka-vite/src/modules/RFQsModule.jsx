@@ -185,15 +185,20 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
   const [justSent, setJustSent] = React.useState([]);
   const [viewBid, setViewBid] = React.useState(null);
   const [bidItems, setBidItems] = React.useState([]);
+  const [clientItems, setClientItems] = React.useState([]);
+  const [selItems, setSelItems] = React.useState([]);
 
   const load = async () => {
     setLoading(true);
-    const [vs, vendorsRes, setRes] = await Promise.all([
+    const [vs, vendorsRes, setRes, ciRes] = await Promise.all([
       loadVendorRfqs(clientRfq.rfq_id),
       supabase.from('vendors').select('vendor_id,name,contact_person,phone_1,email_1,status').eq('is_deleted', false).order('name'),
       supabase.from('settings').select('company_name,default_markup_pct').limit(1).maybeSingle(),
+      supabase.from('rfq_items').select('rfq_item_id,sub_event_name,description,quantity,sub_items').eq('rfq_id', clientRfq.rfq_id).eq('is_deleted', false).order('sort_order'),
     ]);
     setVrfqs(vs);
+    setClientItems(ciRes.data || []);
+    setSelItems((ciRes.data || []).map((it) => it.rfq_item_id));
     const vmap = {}; (vendorsRes.data || []).forEach((v) => { vmap[v.vendor_id] = v; });
     setVendorMap(vmap);
     setAllVendors((vendorsRes.data || []).filter((v) => v.status === 'active'));
@@ -215,8 +220,10 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
   const doSend = async () => {
     const chosen = allVendors.filter((v) => picked[v.vendor_id]);
     if (!chosen.length) { notify('Pick at least one vendor.', 'error'); return; }
+    const selectedItems = clientItems.filter((it) => selItems.includes(it.rfq_item_id));
+    if (!selectedItems.length) { notify('Select at least one item to source.', 'error'); return; }
     setSending(true);
-    try { const created = await createVendorRfqs(clientRfq, chosen); setJustSent(created); setShowSend(false); setPicked({}); notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + '.', 'success'); load(); }
+    try { const created = await createVendorRfqs(clientRfq, chosen, selectedItems); setJustSent(created); setShowSend(false); setPicked({}); notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + ' with ' + selectedItems.length + ' item' + (selectedItems.length > 1 ? 's' : '') + '.', 'success'); load(); }
     catch (e) { /* toasted */ }
     setSending(false);
   };
@@ -243,6 +250,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
 
   const chip = (st) => ({ sent: { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' }, in_progress: { l: 'Opened', bg: 'var(--orange-light)', c: 'var(--orange)' }, submitted: { l: 'Submitted', bg: 'var(--green-light)', c: 'var(--green)' } }[st] || { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' });
   const respondedN = vrfqs.filter((v) => v.status === 'submitted').length;
+  const grouped = rfqItemsGrouped(clientItems);
 
   return (
     <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
@@ -251,7 +259,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>Sourcing — vendor RFQs</div>
           <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>Item list frozen · {itemCount} item{itemCount === 1 ? '' : 's'} · default markup {markup}%</div>
         </div>
-        {!dealClosed && <button className="btn sm primary" onClick={() => { setShowSend(true); setJustSent([]); }}>+ Send vendor RFQ</button>}
+        {!dealClosed && <button className="btn sm primary" onClick={() => { setShowSend(true); setJustSent([]); setSelItems(clientItems.map((it) => it.rfq_item_id)); }}>+ Send vendor RFQ</button>}
       </div>
       {dealClosed && <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', padding: '8px 12px', marginTop: 10, fontSize: 12.5, color: 'var(--grey-600)' }}>🔒 The event for this RFQ is completed or cancelled — sourcing is read-only. You can still view bids and the costing summary.</div>}
 
@@ -318,7 +326,32 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
               <button className="btn sm" onClick={() => setShowSend(false)}>✕</button>
             </div>
             <div style={{ padding: '14px 20px' }}>
-              <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginBottom: 10 }}>Pick vendors to request pricing from — each gets a secure link with the frozen {itemCount}-item list.</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-700)', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Items to source ({selItems.length}/{clientItems.length})</span>
+                <span style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn sm" onClick={() => setSelItems(clientItems.map((it) => it.rfq_item_id))}>All</button>
+                  <button className="btn sm" onClick={() => setSelItems([])}>None</button>
+                </span>
+              </div>
+              <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', marginBottom: 14, padding: '4px 0' }}>
+                {clientItems.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--grey-400)', padding: '6px 12px' }}>No items on this RFQ.</div>
+                  : Object.keys(grouped).map((grp) => (
+                    <div key={grp} style={{ padding: '2px 12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)' }}>{grp.toUpperCase()}</div>
+                        <button className="btn sm" style={{ fontSize: 10, padding: '0 6px' }} onClick={() => { const ids = grouped[grp].map((it) => it.rfq_item_id); const all = ids.every((id) => selItems.includes(id)); setSelItems((prev) => all ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]); }}>{grouped[grp].every((it) => selItems.includes(it.rfq_item_id)) ? 'Clear' : 'All'}</button>
+                      </div>
+                      {grouped[grp].map((it) => (
+                        <label key={it.rfq_item_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', cursor: 'pointer', fontSize: 12.5 }}>
+                          <input type="checkbox" checked={selItems.includes(it.rfq_item_id)} onChange={(e) => setSelItems((prev) => e.target.checked ? [...prev, it.rfq_item_id] : prev.filter((id) => id !== it.rfq_item_id))} />
+                          <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{it.description}{Array.isArray(it.sub_items) && it.sub_items.length ? <span style={{ color: 'var(--grey-400)' }}> · {it.sub_items.length} detail{it.sub_items.length > 1 ? 's' : ''}</span> : null}</span>
+                          <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>×{it.quantity}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginBottom: 10 }}>Pick vendors — each gets a secure link with the {selItems.length} selected item{selItems.length === 1 ? '' : 's'}.</div>
               {allVendors.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>
                   No active vendors yet.
                   <div style={{ marginTop: 10 }}><button className="btn sm primary" onClick={() => { setShowSend(false); onNavigate && onNavigate('vendors', { mode: 'new', label: 'New vendor' }); }}>＋ Add a vendor →</button></div>
@@ -338,7 +371,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
               <button className="btn sm" onClick={() => { setShowSend(false); onNavigate && onNavigate('vendors', { mode: 'new', label: 'New vendor' }); }}>＋ New vendor</button>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn" onClick={() => setShowSend(false)}>Cancel</button>
-                <button className="btn primary" disabled={sending} onClick={doSend}>{sending ? 'Sending…' : 'Send'}</button>
+                <button className="btn primary" disabled={sending || selItems.length === 0} onClick={doSend}>{sending ? 'Sending…' : 'Send'}</button>
               </div>
             </div>
           </div>
@@ -370,14 +403,6 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [saving, setSaving] = React.useState(false);
   const [editSaved, setEditSaved] = React.useState(false);
   const [dragIdx, setDragIdx] = React.useState(null);
-  // Item 10: selective sourcing panel + vendor picker
-  const [selectedItemIds, setSelectedItemIds] = React.useState([]);
-  const [showSourcingPanel, setShowSourcingPanel] = React.useState(false);
-  const [showVendorPicker, setShowVendorPicker] = React.useState(false);
-  const [allVendors, setAllVendors] = React.useState([]);
-  const [pickedVendors, setPickedVendors] = React.useState({});
-  const [sendingVendors, setSendingVendors] = React.useState(false);
-  const [settings, setSettings] = React.useState(null);
   const load = async () => { setLoading(true);
     const [{ data: rfq }, { data: its }, { data: act }] = await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id', rfqId).single(),
@@ -409,17 +434,6 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
     setR(rfq || null); setItems(its || []); setActivity(act || []); setRevisions(revs); setLoading(false);
   };
   React.useEffect(() => { load(); }, [rfqId]);
-  // Load vendors + settings for selective sourcing panel (Item 10)
-  React.useEffect(() => {
-    (async () => {
-      const [vRes, sRes] = await Promise.all([
-        supabase.from('vendors').select('vendor_id,name,contact_person,phone_1,email_1,status').eq('is_deleted', false).order('name'),
-        supabase.from('settings').select('company_name,default_markup_pct').limit(1).maybeSingle(),
-      ]);
-      setAllVendors((vRes.data || []).filter((v) => v.status === 'active'));
-      setSettings(sRes.data || null);
-    })();
-  }, [rfqId]);
   const regenerate = async () => {
     if (!window.confirm('Generate a NEW link & PIN? The previous link will stop working.')) return;
     const token = genRfqToken(), pin = (r.access_mode === 'email_otp') ? null : genRfqPin();
@@ -588,49 +602,6 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
           </div>
         </div>
       ); })()}
-      {/* Item 10: vendor picker modal for selective sourcing */}
-      {showVendorPicker && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={(e) => { if (e.target === e.currentTarget) setShowVendorPicker(false); }}>
-          <div style={{ background: 'white', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: 460 }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 600 }}>Send vendor RFQ</div>
-                <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>{selectedItemIds.length} item{selectedItemIds.length === 1 ? '' : 's'} selected</div>
-              </div>
-              <button className="btn sm" onClick={() => setShowVendorPicker(false)}>✕</button>
-            </div>
-            <div style={{ padding: '14px 20px' }}>
-              <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginBottom: 10 }}>Pick vendors — each gets a secure link with only the {selectedItemIds.length} selected items.</div>
-              {allVendors.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>No active vendors yet. <button className="btn sm primary" style={{ marginTop: 8 }} onClick={() => { setShowVendorPicker(false); onNavigate && onNavigate('vendors', { mode: 'new', label: 'New vendor' }); }}>＋ Add a vendor →</button></div>
-                : <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)' }}>
-                  {allVendors.map((v, i) => (
-                    <label key={v.vendor_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderTop: i > 0 ? '1px solid var(--grey-50)' : 'none', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={!!pickedVendors[v.vendor_id]} onChange={(e) => setPickedVendors((p) => ({ ...p, [v.vendor_id]: e.target.checked }))} />
-                      <span style={{ fontSize: 13 }}>{v.name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--grey-400)', marginLeft: 'auto' }}>{v.phone_1 || v.email_1 || ''}</span>
-                    </label>
-                  ))}
-                </div>}
-            </div>
-            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn" onClick={() => setShowVendorPicker(false)}>Cancel</button>
-              <button className="btn primary" disabled={sendingVendors || !Object.values(pickedVendors).some(Boolean)} onClick={async () => {
-                const chosen = allVendors.filter((v) => pickedVendors[v.vendor_id]);
-                if (!chosen.length) { notify('Pick at least one vendor.', 'error'); return; }
-                setSendingVendors(true);
-                try {
-                  const selectedItems = items.filter((it) => selectedItemIds.includes(it.rfq_item_id));
-                  const created = await createVendorRfqs(r, chosen, selectedItems);
-                  setShowVendorPicker(false); setPickedVendors({});
-                  notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + ' with ' + selectedItemIds.length + ' items.', 'success');
-                } catch (e) { /* toasted */ }
-                setSendingVendors(false);
-              }}>{sendingVendors ? 'Sending…' : 'Send'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {viewRev && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }} onClick={() => setViewRev(null)}>
           <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', maxWidth: 480, width: '100%', maxHeight: '80vh', overflowY: 'auto', padding: '20px 22px' }} onClick={(e) => e.stopPropagation()}>
@@ -839,53 +810,6 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
               </div>
             );
           })()}
-        </div>
-      )}
-
-      {/* Item 10: Selective Sourcing Panel — visible when submitted or approved */}
-      {r.party_type !== 'vendor' && ['submitted', 'approved', 'converted'].includes(r.status) && items.length > 0 && (
-        <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>🎯 Source vendors</div>
-              <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>{selectedItemIds.length} of {items.length} item{items.length === 1 ? '' : 's'} selected</div>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn sm" onClick={() => setSelectedItemIds(items.map((it) => it.rfq_item_id))}>Select all</button>
-              <button className="btn sm" onClick={() => setSelectedItemIds([])}>Deselect all</button>
-              <button className="btn sm" onClick={() => setShowSourcingPanel((v) => !v)}>{showSourcingPanel ? 'Hide ▲' : 'Show ▼'}</button>
-            </div>
-          </div>
-          {showSourcingPanel && (
-            <div>
-              {Object.keys(groups).map((grp) => (
-                <div key={grp} style={{ marginBottom: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)' }}>{grp.toUpperCase()}</div>
-                    <button className="btn sm" style={{ fontSize: 10, padding: '1px 8px' }} onClick={() => {
-                      const grpIds = groups[grp].map((it) => it.rfq_item_id);
-                      const allSelected = grpIds.every((id) => selectedItemIds.includes(id));
-                      setSelectedItemIds((prev) => allSelected ? prev.filter((id) => !grpIds.includes(id)) : [...new Set([...prev, ...grpIds])]);
-                    }}>
-                      {groups[grp].every((it) => selectedItemIds.includes(it.rfq_item_id)) ? 'Deselect function' : 'Select function'}
-                    </button>
-                  </div>
-                  {groups[grp].map((it) => (
-                    <label key={it.rfq_item_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', cursor: 'pointer', fontSize: 13 }}>
-                      <input type="checkbox" checked={selectedItemIds.includes(it.rfq_item_id)} onChange={(e) => setSelectedItemIds((prev) => e.target.checked ? [...prev, it.rfq_item_id] : prev.filter((id) => id !== it.rfq_item_id))} />
-                      <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{it.description}</span>
-                      <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>×{it.quantity}</span>
-                    </label>
-                  ))}
-                </div>
-              ))}
-              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="btn sm primary" disabled={selectedItemIds.length === 0} onClick={() => { setPickedVendors({}); setShowVendorPicker(true); }}>
-                  Create vendor RFQ ({selectedItemIds.length} item{selectedItemIds.length === 1 ? '' : 's'})
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       )}
 

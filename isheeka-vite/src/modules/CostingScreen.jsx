@@ -19,6 +19,8 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
   const [busy, setBusy] = React.useState(false);
   const [warn, setWarn] = React.useState(null);
   const [gmk, setGmk] = React.useState('30');
+  const [expanded, setExpanded] = React.useState({});
+  const [allExpanded, setAllExpanded] = React.useState(false);
 
   React.useEffect(() => { (async () => {
     setLoading(true);
@@ -184,6 +186,11 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
         </div>
       )}
 
+      {rows.some((r) => Array.isArray(r.sub_items) && r.sub_items.length > 0) && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+          <button className="btn sm" onClick={() => { setAllExpanded((v) => !v); setExpanded({}); }}>{allExpanded ? 'Collapse all details' : 'Expand all details'}</button>
+        </div>
+      )}
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: '1px solid var(--grey-100)', overflowX: 'auto', marginBottom: 14 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 560 }}>
           <thead>
@@ -218,15 +225,28 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
                     <tr key={i} style={{ borderTop: '1px solid var(--grey-100)', textAlign: 'right' }}>
                       <td style={{ textAlign: 'left', padding: '9px 12px' }}>
                         {r.description}<span style={{ color: 'var(--grey-400)' }}> · ×{r.quantity}</span>
-                        {Array.isArray(r.sub_items) && r.sub_items.length > 0 && (
-                          <div style={{ paddingLeft: 10, marginTop: 2 }}>
-                            {r.sub_items.map((si, si_i) => (
-                              <div key={si_i} style={{ fontSize: 11, color: 'var(--grey-400)', lineHeight: 1.5 }}>
-                                • {si.name}{si.qty > 0 ? ' × ' + si.qty : ''}{si.note ? <span> ({si.note})</span> : null}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        {Array.isArray(r.sub_items) && r.sub_items.length > 0 && (() => {
+                          const rk = r.clientItemId || ('row' + i);
+                          const open = (rk in expanded) ? expanded[rk] : allExpanded;
+                          const summary = r.sub_items.map((si) => si.name).filter(Boolean).join(', ');
+                          return (
+                            <div style={{ marginTop: 2 }}>
+                              <button onClick={(e) => { e.stopPropagation(); setExpanded((pp) => ({ ...pp, [rk]: !open })); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--grey-500)' }} title={open ? 'Hide details' : 'Show details'}>
+                                {open ? '▾' : '▸'} {r.sub_items.length} detail{r.sub_items.length > 1 ? 's' : ''}
+                              </button>
+                              {!open && summary && <span style={{ fontSize: 11, color: 'var(--grey-300)', marginLeft: 6 }}>incl. {summary.length > 48 ? summary.slice(0, 48) + '…' : summary}</span>}
+                              {open && (
+                                <div style={{ paddingLeft: 12, marginTop: 2 }}>
+                                  {r.sub_items.map((si, si_i) => (
+                                    <div key={si_i} style={{ fontSize: 11, color: 'var(--grey-400)', lineHeight: 1.5 }}>
+                                      • {si.name}{si.qty > 0 ? ' × ' + si.qty : ''}{si.note ? <span> ({si.note})</span> : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       {d.columns.map((c) => {
                         // Look up whether this vendor was sent the client item via source_item_id.
