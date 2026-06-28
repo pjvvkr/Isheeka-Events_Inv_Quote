@@ -89,7 +89,7 @@ function NewRFQForm({ prefill, onCreated, onCancel, onNavigate }) {
           <label className="field-label">Event type</label>
           <select className="field-input" value={f.event_type} onChange={(e) => set('event_type', e.target.value)}>
             <option value="">— Select —</option>
-            {eventTypes.map((t) => <option key={t.value} value={t.label}>{t.label}</option>)}
+            {eventTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </div>
         <div><label className="field-label">Tentative date</label><input className="field-input" type="date" value={f.event_date} onChange={(e) => set('event_date', e.target.value)} /></div>
@@ -437,7 +437,19 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   };
   const doApprove = async (basisItems, forced) => {
     setDupe(null); setApproving(true);
-    try { const q = await approveRfqToQuote(r, basisItems, forced); notify('Approved — draft quote ' + q.ref_number + ' created.', 'success'); onNavigate && onNavigate('quotations', { quotId: q.quotation_id, label: q.ref_number }); }
+    try {
+      const q = await approveRfqToQuote(r, basisItems, forced);
+      notify('Approved — draft quote ' + q.ref_number + ' created.', 'success');
+      // Item 4: CC email to client on approval
+      if (r.contact_email) {
+        try {
+          await supabase.functions.invoke('rfq-gateway', {
+            body: { action: 'send_client_rfq_email', rfq_id: rfqId, link: null, pin: null, email_type: 'approval_notification', ref_number: q.ref_number }
+          });
+        } catch (e) { /* non-fatal */ }
+      }
+      onNavigate && onNavigate('quotations', { quotId: q.quotation_id, label: q.ref_number });
+    }
     catch (e) { /* runDb toasted */ }
     setApproving(false);
   };
@@ -528,6 +540,14 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
     const link = rfqLink(newToken);
     const msg = 'Hi ' + contactName + ', we\'ve updated your event requirements (' + r.ref_number + '). Please review and confirm:\n' + link + (newPin ? '\n\nAccess PIN: ' + newPin : '');
     window.open(waLink(r.contact_phone, msg), '_blank');
+    // Also email the link if contact has an email address
+    if (r.contact_email) {
+      try {
+        await supabase.functions.invoke('rfq-gateway', {
+          body: { action: 'send_client_rfq_email', rfq_id: rfqId, link, pin: newPin || null, email_type: 'confirmation_request' }
+        });
+      } catch (e) { /* non-fatal */ }
+    }
     notify('Confirmation request sent — fresh link generated.', 'success');
     load();
   };

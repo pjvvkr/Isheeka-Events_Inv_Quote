@@ -66,6 +66,7 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
     setVMsgTemplate(VENDOR_TEMPLATES[0].id);
     setVMsgBody(VENDOR_TEMPLATES[0].body(v));
     setVMsgPhone(v.phone_1 || '');
+    setVMsgEmail(v.email_1 || '');
     setVMsgSent(false);
     setVMsgPartyId(v.vendor_id);
     setShowVMsgModal(true);
@@ -75,6 +76,15 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
     setVMsgTemplate(id);
     const tpl = VENDOR_TEMPLATES.find((t) => t.id === id) || VENDOR_TEMPLATES[0];
     setVMsgBody(v ? tpl.body(v) : '');
+  };
+
+  const handleVSendEmail = () => {
+    if (!vMsgEmail || !vMsgBody) return;
+    const subject = encodeURIComponent('Isheeka Events — ' + ((VENDOR_TEMPLATES.find((t) => t.id === vMsgTemplate) || {}).label || 'Message'));
+    const body = encodeURIComponent(vMsgBody);
+    window.open('mailto:' + encodeURIComponent(vMsgEmail) + '?subject=' + subject + '&body=' + body, '_blank');
+    logEmail({ to: vMsgEmail, subject: decodeURIComponent(subject), body: vMsgBody, party_type: 'vendor', party_id: vMsgPartyId, template: vMsgTemplate }).catch(() => {});
+    setVMsgSent(true);
   };
 
   const handleVSendWA = () => {
@@ -404,8 +414,13 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
                 <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Phone number (for this send)</label>
                 <input className="field-input" value={vMsgPhone} onChange={(e) => setVMsgPhone(e.target.value)} style={{ width: '100%' }} placeholder="+91 98765 43210" />
               </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Email (for this send)</label>
+                <input className="field-input" value={vMsgEmail} onChange={(e) => setVMsgEmail(e.target.value)} style={{ width: '100%' }} placeholder="vendor@email.com" type="email" />
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="btn primary" onClick={handleVSendWA} disabled={!vMsgPhone || !vMsgBody}>📲 Send on WhatsApp</button>
+                <button className="btn" onClick={handleVSendEmail} disabled={!vMsgEmail || !vMsgBody}>📧 Send by Email</button>
                 {vMsgSent && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 500 }}>✅ Sent</span>}
               </div>
             </div>
@@ -490,7 +505,10 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
                     </div>
                     <div><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: 'var(--blue-light)', color: 'var(--blue)' }}>{catLabel(sf.category) || '—'}</span></div>
                     <div><span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 12, background: sc.bg, color: sc.color }}>{(ob.status || '').toUpperCase()}</span></div>
-                    <div>{ob.status === 'submitted' && <button className="btn sm primary" onClick={() => openReview(ob)}>Review</button>}</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {ob.status === 'submitted' && <button className="btn sm primary" onClick={() => openReview(ob)}>Review</button>}
+                      {ob.status === 'pending' && <button className="btn sm" onClick={() => { setInviteResult({ link: onboardingLink(ob.token) }); setInvitePin(''); setShowInvite(true); }}>🔗 Resend link</button>}
+                    </div>
                   </div>
                 );
               })}

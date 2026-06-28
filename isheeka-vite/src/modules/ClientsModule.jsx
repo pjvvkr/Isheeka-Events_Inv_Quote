@@ -8,7 +8,7 @@ import { getNextClientRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
 import { fmtDate, eventTypeLabel, leadStageDisplay } from '../lib/format.js';
 import { EVENT_STATUS_COLORS, EVENT_STATUS_LABELS, QUOT_STATUS_COLORS, QUOT_STATUS_LABELS } from '../lib/constants.js';
-import { CLIENT_TEMPLATES, sendWhatsApp } from '../lib/messaging.js';
+import { CLIENT_TEMPLATES, logEmail, sendWhatsApp } from '../lib/messaging.js';
 
 export function ClientForm({ initial = {}, onSave, onCancel, title = 'New client' }) {
   const empty = { first_name: '', last_name: '', phone_1: '', phone_2: '', phone_3: '',
@@ -272,6 +272,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
   const [msgBody, setMsgBody] = useState('');
   const [msgPhone, setMsgPhone] = useState('');
   const [msgSent, setMsgSent] = useState(false);
+  const [msgEmail, setMsgEmail] = useState('');
   const [msgLog, setMsgLog] = useState([]);
   const [msgLogLoading, setMsgLogLoading] = useState(false);
 
@@ -288,6 +289,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
     const tpl = CLIENT_TEMPLATES[0];
     setMsgBody(client ? tpl.body(client) : '');
     setMsgPhone(client ? (client.phone_1 || '') : '');
+    setMsgEmail(client ? (client.email_1 || '') : '');
     setMsgSent(false);
     setShowMsgModal(true);
   };
@@ -296,6 +298,19 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
     setMsgTemplate(id);
     const tpl = CLIENT_TEMPLATES.find((t) => t.id === id) || CLIENT_TEMPLATES[0];
     setMsgBody(client ? tpl.body(client) : '');
+  };
+
+  const handleSendEmail = () => {
+    if (!msgEmail || !msgBody) return;
+    const subject = encodeURIComponent('Isheeka Events — ' + (CLIENT_TEMPLATES.find((t) => t.id === msgTemplate) || {}).label || 'Message');
+    const body = encodeURIComponent(msgBody);
+    window.open('mailto:' + encodeURIComponent(msgEmail) + '?subject=' + subject + '&body=' + body, '_blank');
+    logEmail({ to: msgEmail, subject: decodeURIComponent(subject), body: msgBody, party_type: 'client', party_id: clientId, template: msgTemplate }).catch(() => {});
+    setMsgSent(true);
+    setTimeout(() => {
+      supabase.from('message_log').select('*').eq('party_type', 'client').eq('party_id', clientId).order('created_at', { ascending: false }).limit(50)
+        .then(({ data }) => setMsgLog(data || []));
+    }, 1200);
   };
 
   const handleSendWA = () => {
@@ -587,8 +602,13 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
               <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Phone number (for this send)</label>
               <input className="field-input" value={msgPhone} onChange={(e) => setMsgPhone(e.target.value)} style={{ width: '100%' }} placeholder="+91 98765 43210" />
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Email (for this send)</label>
+              <input className="field-input" value={msgEmail} onChange={(e) => setMsgEmail(e.target.value)} style={{ width: '100%' }} placeholder="client@email.com" type="email" />
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button className="btn primary" onClick={handleSendWA} disabled={!msgPhone || !msgBody}>📲 Send on WhatsApp</button>
+              <button className="btn" onClick={handleSendEmail} disabled={!msgEmail || !msgBody}>📧 Send by Email</button>
               {msgSent && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 500 }}>✅ Sent</span>}
             </div>
           </div>

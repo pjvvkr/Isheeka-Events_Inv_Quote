@@ -828,6 +828,44 @@ Deno.serve(async (req) => {
         return json({ ok: true, confirmation_status: cfmStatus });
       }
 
+      // ── staff: email the RFQ link or approval notice to the client ───────────
+      case "send_client_rfq_email": {
+        const rfqId2 = String(body.rfq_id ?? "");
+        const emailType = String(body.email_type ?? "confirmation_request"); // or "approval_notification"
+        const { data: r2 } = await db.from("rfqs")
+          .select("contact_name,contact_email,ref_number").eq("rfq_id", rfqId2).eq("is_deleted", false).maybeSingle();
+        if (!r2 || !r2.contact_email) return json({ ok: false, error: "no_email" });
+        const contactName = r2.contact_name || "there";
+        const ref = r2.ref_number || rfqId2;
+        let subject: string, html: string, text: string;
+        if (emailType === "approval_notification") {
+          const quoteRef = body.ref_number ? String(body.ref_number) : "";
+          subject = `[Isheeka Events] Your event requirements have been accepted — ${ref}`;
+          html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>Hi ${contactName},</p><p>Great news! We've reviewed your event requirements for <b>${ref}</b> and are now preparing your quotation${quoteRef ? " (" + quoteRef + ")" : ""}.</p><p>We'll be in touch shortly with the full quote. Feel free to reach out if you have any questions in the meantime.</p><p style="color:#888;font-size:12px">— Team Isheeka Events</p></div>`;
+          text = `Hi ${contactName},
+
+We've reviewed your event requirements (${ref}) and are preparing your quotation. We'll be in touch shortly.
+
+— Team Isheeka Events`;
+        } else {
+          const link = body.link ? String(body.link) : "";
+          const pin = body.pin ? String(body.pin) : null;
+          subject = `[Isheeka Events] Please review your updated requirements — ${ref}`;
+          html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>Hi ${contactName},</p><p>We've updated your event requirements for <b>${ref}</b>. Please review and confirm.</p>${link ? `<p><a href="${link}" style="display:inline-block;background:#e8185a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Review & Confirm →</a></p>${pin ? `<p style="font-size:13px">Access PIN: <b>${pin}</b></p>` : ""}<p style="color:#888;font-size:12px">${link}</p>` : ""}<p style="color:#888;font-size:12px">— Team Isheeka Events</p></div>`;
+          text = `Hi ${contactName},
+
+We've updated your event requirements (${ref}). Please review and confirm${link ? ":
+" + link : "."}${pin ? "
+
+Access PIN: " + pin : ""}
+
+— Team Isheeka Events`;
+        }
+        try { await sendEmail({ to: String(r2.contact_email), subject, html, text }); } catch (e) { return json({ ok: false, error: "email_failed" }); }
+        await logActivity(rfqId2, "staff", emailType === "approval_notification" ? "approval_email_sent" : "confirmation_email_sent", r2.contact_email);
+        return json({ ok: true });
+      }
+
       default:
         return json({ error: "unknown_action", action }, 400);
     }
