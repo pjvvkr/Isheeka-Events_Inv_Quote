@@ -589,8 +589,6 @@ function renderStep4(){
   };
 }
 
-function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
-
 function fmtD(s){ try{ const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }catch(e){ return s; } }
 
 function renderSubmitted(editable){
@@ -776,4 +774,58 @@ function renderVendorForm(){
   });
   html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin:12px 2px"><span style="font-size:12px;color:var(--muted)">Your total</span><span style="font-size:16px;font-weight:700" id="vtot">₹'+vendorTotal().toLocaleString('en-IN')+'</span></div>';
   html += '<label>Anything else we should know? (optional)</label><textarea id="v_notes">'+esc(data.notes||'')+'</textarea>';
-  html += '<div class="nav"><button class="btn ghost" id="vsave">Save draft</button><button 
+  html += '<div class="nav"><button class="btn ghost" id="vsave">Save draft</button><button class="btn green" id="vsubmit">Submit bid ✓</button></div>';
+  html += '<div class="err" id="verr"></div><div class="save-hint">✓ Saved automatically</div>';
+  html += '</div>';
+  app.innerHTML = html;
+  app.querySelectorAll('[data-vi]').forEach(inp=>{
+    const i=+inp.getAttribute('data-vi'), k=inp.getAttribute('data-k');
+    if(k==='can_supply'){
+      inp.onchange=()=>{ vitems[i].can_supply = !inp.checked; renderVendorForm(); vsaveDraft(true); };
+    } else {
+      inp.oninput=()=>{ vitems[i][k]= inp.value; if(k==='unit_cost' && $('vtot')) $('vtot').textContent='₹'+vendorTotal().toLocaleString('en-IN'); };
+      inp.onblur=()=>{ if(k==='unit_cost' && vitems[i].imported){ vitems[i].imported=false; renderVendorForm(); } vsaveDraft(true); };
+    }
+  });
+  $('v_notes').onblur=()=>vsaveDraft(true);
+  if($('vattachFile')) $('vattachFile').onclick=()=>pickAndExtractCosts(false);
+  if($('vattachCam')) $('vattachCam').onclick=()=>pickAndExtractCosts(true);
+  if($('vattachPaste')) $('vattachPaste').onclick=()=>{ showPaste=true; extractMsg=''; renderVendorForm(); if($('vpasteBox')) $('vpasteBox').focus(); };
+  if($('vpasteCancel')) $('vpasteCancel').onclick=()=>{ showPaste=false; pasteText=''; renderVendorForm(); };
+  if($('vpasteBox')) $('vpasteBox').oninput=(e)=>{ pasteText=e.target.value; };
+  if($('vpasteGo')) $('vpasteGo').onclick=()=>extractCostsFromText();
+  if($('vpvApply')) $('vpvApply').onclick=()=>{ const n=applyExtractedCosts(pendingCosts||[]); pendingCosts=null; extractMsg = n+' price'+(n===1?'':'s')+' filled in — review each before submitting.'; renderVendorForm(); vsaveDraft(true); };
+  if($('vpvCancel')) $('vpvCancel').onclick=()=>{ pendingCosts=null; extractMsg=''; renderVendorForm(); };
+  app.querySelectorAll('[data-vrem]').forEach(x=>x.onclick=()=>{ const i=+x.getAttribute('data-vrem'); if(pendingCosts){ pendingCosts.splice(i,1); if(!pendingCosts.length) pendingCosts=null; renderVendorForm(); } });
+  if($('vundoImport')) $('vundoImport').onclick=()=>{ vitems.forEach(it=>{ if(it.imported){ it.unit_cost=''; it.can_supply=true; it.imported=false; it.lowConf=false; it.matchSource=''; } }); extractMsg='Imported prices cleared.'; renderVendorForm(); vsaveDraft(true); };
+  $('vsave').onclick=async()=>{ await vsaveDraft(false); };
+  $('vsubmit').onclick=async()=>{
+    $('vsubmit').textContent='Submitting…';
+    await vsaveDraft(true);
+    const r=await api('submit_rfq',{session});
+    if(r.ok) renderVendorSubmitted(true);
+    else { $('vsubmit').textContent='Submit bid ✓'; $('verr').textContent = r._http===401?'Session expired — re-enter your PIN.':'Could not submit. Please try again.'; }
+  };
+}
+
+async function vsaveDraft(silent){
+  if($('v_notes')) data.notes = $('v_notes').value.trim();
+  const payloadItems = vitems.map(it=>({ rfq_item_id: it.rfq_item_id, unit_cost: it.unit_cost, can_supply: it.can_supply, item_note: it.item_note }));
+  const r = await api('save_rfq', { session, fields:{ notes: data.notes }, items: payloadItems });
+  if(!silent){ if(r.ok) toast('Saved'); else if(r._http===401){ toast('Session expired — please re-enter your PIN'); session=null; renderUnlock(); } else toast('Could not save'); }
+  return r.ok;
+}
+
+function renderVendorSubmitted(editable){
+  app.innerHTML='<div class="pad center"><h1>Thank you!</h1>'
+    +'<div class="sub">Your pricing has been submitted to Isheeka Events.</div>'
+    +'<p style="font-size:34px">🤝</p>'
+    +(editable?'<button class="btn ghost" id="vedit" style="max-width:260px;margin:0 auto">✏️ Revise my pricing</button><div class="note">Need to change something? You can revise until pricing is finalised.</div>':'')
+    +'</div>';
+  if(editable){ const b=document.getElementById('vedit'); if(b) b.onclick=()=>{ renderVendorForm(); }; }
+}
+
+function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+</script>
+</body>
+</html>
