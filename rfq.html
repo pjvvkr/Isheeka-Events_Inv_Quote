@@ -589,6 +589,8 @@ function renderStep4(){
   };
 }
 
+function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+
 function fmtD(s){ try{ const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); }catch(e){ return s; } }
 
 function renderSubmitted(editable){
