@@ -152,10 +152,17 @@ export async function createEventFromQuote(lead, opts = {}) {
   if (approvedQuot) {
     const { data: li } = await supabase.from('quotation_line_items').select('sub_event_name,description,quantity,unit_price,sort_order').eq('quotation_id', approvedQuot.quotation_id).eq('is_deleted', false).order('sort_order');
     const names = [...new Set((li || []).map((x) => x.sub_event_name).filter((n) => n && n.trim() && n !== 'General Items'))];
+    // Fetch the RFQ's sub_events JSONB so we can copy planned_date + venue into the sub_events table rows
+    const rfqSeMap = {};
+    try {
+      const { data: rfqRow } = await supabase.from('rfqs').select('sub_events').eq('quotation_id', approvedQuot.quotation_id).eq('is_deleted', false).maybeSingle();
+      ((rfqRow && Array.isArray(rfqRow.sub_events)) ? rfqRow.sub_events : []).forEach((s) => { if (s.name) rfqSeMap[s.name] = { date: s.planned_date || null, location: s.venue || null }; });
+    } catch (e) { /* non-fatal */ }
     const nameToId = {};
     let so = 0;
     for (const name of names) {
-      const { data: seRow, error: sie } = await supabase.from('sub_events').insert({ event_id: event.event_id, name, sort_order: so++, created_at: new Date().toISOString(), is_deleted: false }).select().single(); if (sie) throw sie;
+      const rfqSe = rfqSeMap[name] || {};
+      const { data: seRow, error: sie } = await supabase.from('sub_events').insert({ event_id: event.event_id, name, date: rfqSe.date || null, location: rfqSe.location || null, sort_order: so++, created_at: new Date().toISOString(), is_deleted: false }).select().single(); if (sie) throw sie;
       if (seRow) nameToId[name] = seRow.sub_event_id;
     }
     // Copy the quote's line items onto the event so they appear under their sub-events
