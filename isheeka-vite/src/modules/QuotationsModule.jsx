@@ -90,6 +90,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:true});
   const [revHistory, setRevHistory] = React.useState([]);
   const [includeRevHistory, setIncludeRevHistory] = React.useState(true);
+  const [lineItemsOpen, setLineItemsOpen] = React.useState(true);
   const [showClose, setShowClose] = React.useState(false);
   const [closeForm, setCloseForm] = React.useState({outcome:'client',reason:'',notes:''});
   const [closing, setClosing] = React.useState(false);
@@ -422,7 +423,11 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       )}
       {/* Line items */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
-        {Object.keys(groups).map(k=>(
+        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:lineItemsOpen?10:0,cursor:'pointer'}} onClick={()=>setLineItemsOpen(o=>!o)}>
+          <span style={{fontSize:10,color:'var(--grey-400)',userSelect:'none'}}>{lineItemsOpen?'▼':'▶'}</span>
+          <span style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Line items{items.length>0?' ('+items.length+')':''}</span>
+        </div>
+        {lineItemsOpen && Object.keys(groups).map(k=>(
           <div key={k} style={{marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:700,color:'var(--pink)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:6}}>{k}</div>
             {groups[k].map((li,idx)=>{
