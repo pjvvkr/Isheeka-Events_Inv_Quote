@@ -175,6 +175,7 @@ export async function createEventFromQuote(lead, opts = {}) {
         description: it.description || '—',
         quantity: it.quantity, unit_price: it.unit_price,
         sort_order: (it.sort_order != null ? it.sort_order : idx),
+        sub_items: it.sub_items || [],
         created_at: new Date().toISOString(), is_deleted: false,
       }));
       const { error: siie } = await supabase.from('sub_event_items').insert(itemRows); if (siie) throw siie;

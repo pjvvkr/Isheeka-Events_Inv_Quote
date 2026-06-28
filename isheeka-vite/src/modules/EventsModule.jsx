@@ -870,12 +870,19 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                       <th style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-400)',fontWeight:500,width:'20%'}}>Amount</th>
                     </tr></thead>
                     <tbody>{se.items.map((item,i)=>(
-                      <tr key={i} style={{borderBottom:'1px solid var(--grey-100)'}}>
-                        <td style={{padding:'4px 8px',color:'var(--grey-800)'}}>{item.description}</td>
-                        <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)'}}>{item.quantity}</td>
-                        <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)'}}>₹{parseFloat(item.unit_price||0).toLocaleString('en-IN')}</td>
-                        <td style={{padding:'4px 8px',textAlign:'right',color:'var(--green)',fontWeight:500}}>₹{((parseFloat(item.quantity)||0)*(parseFloat(item.unit_price)||0)).toLocaleString('en-IN')}</td>
-                      </tr>
+                      <React.Fragment key={i}>
+                        <tr style={{borderBottom:(item.sub_items&&item.sub_items.length)?'none':'1px solid var(--grey-100)'}}>
+                          <td style={{padding:'4px 8px',color:'var(--grey-800)'}}>{item.description}</td>
+                          <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)'}}>{item.quantity}</td>
+                          <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)'}}>₹{parseFloat(item.unit_price||0).toLocaleString('en-IN')}</td>
+                          <td style={{padding:'4px 8px',textAlign:'right',color:'var(--green)',fontWeight:500}}>₹{((parseFloat(item.quantity)||0)*(parseFloat(item.unit_price)||0)).toLocaleString('en-IN')}</td>
+                        </tr>
+                        {(item.sub_items||[]).filter(s=>s&&s.name).map((s,si)=>(
+                          <tr key={'s'+si} style={{borderBottom:si===(item.sub_items.length-1)?'1px solid var(--grey-100)':'none'}}>
+                            <td colSpan={4} style={{padding:'1px 8px 1px 20px',fontSize:11,color:'var(--grey-400)'}}>• {String(s.name).trim()}{s.qty>0?' ×'+s.qty:''}{s.note?' ('+s.note+')':''}</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
                     ))}</tbody>
                   </table>
                 : <div style={{fontSize:12,color:'var(--grey-400)',paddingLeft:14}}>No items</div>
@@ -887,12 +894,19 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
               <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:6}}>Main event items</div>
               <table style={{width:'100%',fontSize:12,borderCollapse:'collapse'}}>
                 <tbody>{mainItemsView.map((item,i)=>(
-                  <tr key={i} style={{borderBottom:'1px solid var(--grey-100)'}}>
-                    <td style={{padding:'4px 8px',color:'var(--grey-800)'}}>{item.description}</td>
-                    <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)',width:'10%'}}>{item.quantity}</td>
-                    <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)',width:'20%'}}>₹{parseFloat(item.unit_price||0).toLocaleString('en-IN')}</td>
-                    <td style={{padding:'4px 8px',textAlign:'right',color:'var(--green)',fontWeight:500,width:'20%'}}>₹{((parseFloat(item.quantity)||0)*(parseFloat(item.unit_price)||0)).toLocaleString('en-IN')}</td>
-                  </tr>
+                  <React.Fragment key={i}>
+                    <tr style={{borderBottom:(item.sub_items&&item.sub_items.length)?'none':'1px solid var(--grey-100)'}}>
+                      <td style={{padding:'4px 8px',color:'var(--grey-800)'}}>{item.description}</td>
+                      <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)',width:'10%'}}>{item.quantity}</td>
+                      <td style={{padding:'4px 8px',textAlign:'right',color:'var(--grey-600)',width:'20%'}}>₹{parseFloat(item.unit_price||0).toLocaleString('en-IN')}</td>
+                      <td style={{padding:'4px 8px',textAlign:'right',color:'var(--green)',fontWeight:500,width:'20%'}}>₹{((parseFloat(item.quantity)||0)*(parseFloat(item.unit_price)||0)).toLocaleString('en-IN')}</td>
+                    </tr>
+                    {(item.sub_items||[]).filter(s=>s&&s.name).map((s,si)=>(
+                      <tr key={'s'+si} style={{borderBottom:si===(item.sub_items.length-1)?'1px solid var(--grey-100)':'none'}}>
+                        <td colSpan={4} style={{padding:'1px 8px 1px 20px',fontSize:11,color:'var(--grey-400)'}}>• {String(s.name).trim()}{s.qty>0?' ×'+s.qty:''}{s.note?' ('+s.note+')':''}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
                 ))}</tbody>
               </table>
             </div>
