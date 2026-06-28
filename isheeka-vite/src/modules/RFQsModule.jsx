@@ -89,7 +89,7 @@ function NewRFQForm({ prefill, onCreated, onCancel, onNavigate }) {
           <label className="field-label">Event type</label>
           <select className="field-input" value={f.event_type} onChange={(e) => set('event_type', e.target.value)}>
             <option value="">— Select —</option>
-            {eventTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            {eventTypes.map((t) => <option key={t.value} value={t.label}>{t.label}</option>)}
           </select>
         </div>
         <div><label className="field-label">Tentative date</label><input className="field-input" type="date" value={f.event_date} onChange={(e) => set('event_date', e.target.value)} /></div>
