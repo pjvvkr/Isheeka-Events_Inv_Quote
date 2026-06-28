@@ -512,10 +512,12 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
     const uid = await _currentUid();
     // Regenerate a fresh token so we have the plaintext to build the link
     const newToken = genRfqToken();
+    const newPin = (r.access_mode === 'email_otp') ? null : genRfqPin();
     const { error } = await runDb(supabase.from('rfqs').update({
       confirmation_status: 'pending',
       confirmation_requested_at: new Date().toISOString(),
       token_hash: await sha256Hex(newToken),
+      access_pin_hash: newPin ? await sha256Hex(newPin) : null,
       token_expires_at: new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('rfq_id', rfqId), 'request confirmation');
@@ -524,7 +526,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
     // Open WhatsApp with the fresh link
     const contactName = r.contact_name || 'there';
     const link = rfqLink(newToken);
-    const msg = 'Hi ' + contactName + ', we\'ve updated your event requirements (' + r.ref_number + '). Please review and confirm: ' + link;
+    const msg = 'Hi ' + contactName + ', we\'ve updated your event requirements (' + r.ref_number + '). Please review and confirm:\n' + link + (newPin ? '\n\nAccess PIN: ' + newPin : '');
     window.open(waLink(r.contact_phone, msg), '_blank');
     notify('Confirmation request sent — fresh link generated.', 'success');
     load();
