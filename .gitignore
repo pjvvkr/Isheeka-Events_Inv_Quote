@@ -8,3 +8,6 @@ tools/rfq-test.html
 # never commit DB dumps
 isheeka_*_backup_*.sql
 *.dump
+
+# Vite/Vitest config timestamp temp files
+*.timestamp-*.mjs
