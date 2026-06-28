@@ -222,7 +222,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
                           <div style={{ paddingLeft: 10, marginTop: 2 }}>
                             {r.sub_items.map((si, si_i) => (
                               <div key={si_i} style={{ fontSize: 11, color: 'var(--grey-400)', lineHeight: 1.5 }}>
-                                • {si.name} × {si.qty}{si.note ? <span> ({si.note})</span> : null}
+                                • {si.name}{si.qty > 0 ? ' × ' + si.qty : ''}{si.note ? <span> ({si.note})</span> : null}
                               </div>
                             ))}
                           </div>

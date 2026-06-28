@@ -666,13 +666,23 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
           {Object.keys(groups).map((g) => (
             <div key={g} style={{ marginBottom: 10 }}>
               {Object.keys(groups).length > 1 && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--grey-400)', textTransform: 'uppercase', letterSpacing: '.04em', margin: '6px 0' }}>{g}</div>}
-              {groups[g].map((li) => (
-                <div key={li.line_item_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--grey-50)' }}>
-                  <span style={{ flex: 1 }}>{li.description}</span>
-                  <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>{parseFloat(li.quantity || 0)} × ₹{parseFloat(li.unit_price || 0).toLocaleString('en-IN')}</span>
-                  <span style={{ fontWeight: 500, whiteSpace: 'nowrap', minWidth: 80, textAlign: 'right' }}>₹{parseFloat(li.amount || 0).toLocaleString('en-IN')}</span>
-                </div>
-              ))}
+              {groups[g].map((li) => {
+                const sis = Array.isArray(li.sub_items) ? li.sub_items.filter((s) => s && String(s.name || '').trim()) : [];
+                return (
+                  <div key={li.line_item_id} style={{ borderBottom: '1px solid var(--grey-50)', paddingBottom: sis.length ? 4 : 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13, padding: '5px 0' }}>
+                      <span style={{ flex: 1 }}>{li.description}</span>
+                      <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>{parseFloat(li.quantity || 0)} × ₹{parseFloat(li.unit_price || 0).toLocaleString('en-IN')}</span>
+                      <span style={{ fontWeight: 500, whiteSpace: 'nowrap', minWidth: 80, textAlign: 'right' }}>₹{parseFloat(li.amount || 0).toLocaleString('en-IN')}</span>
+                    </div>
+                    {sis.map((si, si_i) => (
+                      <div key={si_i} style={{ paddingLeft: 14, fontSize: 12, color: 'var(--grey-400)', lineHeight: 1.6 }}>
+                        • {String(si.name).trim()}{si.qty > 0 ? ' × ' + si.qty : ''}{si.note ? ' (' + si.note + ')' : ''}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           ))}
           <div style={{ borderTop: '1px solid var(--grey-200)', marginTop: 10, paddingTop: 10 }}>

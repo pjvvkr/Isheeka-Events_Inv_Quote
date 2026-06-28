@@ -367,6 +367,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
           {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id,label:quot.event_name||'Event'})}>Go to event →</button>}
           {!quot.event_id&&!['rejected','converted','expired','superseded'].includes(quot.status)&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={()=>{setCloseForm({outcome:'client',reason:'',notes:''});setShowClose(true);}} title="Client declined or we can't fulfil — close this quote">✕ Close — not proceeding</button>}
+          {['sent','approved','draft'].includes(quot.status)&&quot.approval_status==='pending'&&<button className="btn sm" disabled style={{color:'var(--grey-400)',borderColor:'var(--grey-200)',cursor:'not-allowed'}}>🔏 Awaiting client approval</button>}
           {['sent','approved','draft'].includes(quot.status)&&(!quot.approval_status||quot.approval_status==='declined')&&<button className="btn sm" style={{color:'var(--pink)',borderColor:'var(--pink)'}} onClick={()=>{setApprovalPin('');setApprovalLink('');setShowApprovalModal(true);}}>🔏 Request Approval</button>}
         </div>
       </div>
@@ -427,11 +428,20 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
             {groups[k].map((li,idx)=>{
               const qty=parseFloat(li.quantity)||0, up=parseFloat(li.unit_price)||0;
               const amt=(li.amount!=null&&li.amount!=='')?parseFloat(li.amount):qty*up;
+              const sis = Array.isArray(li.sub_items) ? li.sub_items.filter(s=>s&&String(s.name||'').trim()) : [];
               return (
-                <div key={idx} style={{display:'flex',justifyContent:'space-between',gap:10,padding:'6px 0',borderBottom:'1px solid var(--grey-100)',fontSize:13}}>
-                  <span style={{flex:1,color:'var(--grey-800)'}}>{li.description}</span>
-                  <span style={{color:'var(--grey-400)',width:120,textAlign:'right'}}>{qty} × ₹{up.toLocaleString('en-IN')}</span>
-                  <span style={{fontWeight:500,width:90,textAlign:'right'}}>₹{amt.toLocaleString('en-IN')}</span>
+                <div key={idx} style={{borderBottom:'1px solid var(--grey-100)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',gap:10,padding:'6px 0',fontSize:13}}>
+                    <span style={{flex:1,color:'var(--grey-800)'}}>{li.description}</span>
+                    <span style={{color:'var(--grey-400)',width:120,textAlign:'right'}}>{qty} × ₹{up.toLocaleString('en-IN')}</span>
+                    <span style={{fontWeight:500,width:90,textAlign:'right'}}>₹{amt.toLocaleString('en-IN')}</span>
+                  </div>
+                  {sis.map((si,si_i)=>(
+                    <div key={si_i} style={{display:'flex',gap:6,padding:'2px 0 2px 16px',fontSize:12,color:'var(--grey-400)'}}>
+                      <span>↳</span>
+                      <span>{String(si.name).trim()}{si.qty>0?' × '+si.qty:''}{si.note?' ('+si.note+')':''}</span>
+                    </div>
+                  ))}
                 </div>
               );
             })}

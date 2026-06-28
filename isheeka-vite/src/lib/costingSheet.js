@@ -57,7 +57,7 @@ export function buildCostingPdf(payload, opts = {}) {
 
   const head = ['Item', 'Qty', ...columns.map((c) => c.name), 'In-house', 'Chosen', 'MU %', 'MU Rs.', 'Client/u', 'Line Rs.'];
   const groups = groupByFunction(rows, schedule);
-  const body = []; const grpRows = [];
+  const body = []; const grpRows = []; const subItemPdfRows = [];
   groups.forEach((g) => {
     grpRows.push(body.length);
     body.push([{ content: g.name + '  ·  ' + fd(g.date) + (g.venue ? ('  ·  ' + g.venue) : ''), colSpan: head.length }]);
@@ -71,6 +71,14 @@ export function buildCostingPdf(payload, opts = {}) {
         r.clientUnit == null ? '—' : Math.round(r.clientUnit).toLocaleString('en-IN'),
         r.lineTotal == null ? '—' : Math.round(r.lineTotal).toLocaleString('en-IN'),
       ]);
+      // Sub-item rows (read-only label rows)
+      if (Array.isArray(r.sub_items)) {
+        r.sub_items.filter((si) => si && String(si.name || '').trim()).forEach((si) => {
+          const blank = r.bids.map(() => '');
+          body.push(['  • ' + String(si.name).trim() + (si.qty > 0 ? ' × ' + si.qty : '') + (si.note ? ' (' + si.note + ')' : ''), '', ...blank, '', '', '', '', '', '']);
+          subItemPdfRows.push(body.length - 1);
+        });
+      }
     });
   });
   doc.autoTable({
@@ -78,7 +86,7 @@ export function buildCostingPdf(payload, opts = {}) {
     theme: 'grid', styles: { fontSize: 7.5, cellPadding: 3, lineColor: LINE, lineWidth: 0.3, textColor: INK, halign: 'right' },
     headStyles: { fillColor: PINK, textColor: [255, 255, 255], fontSize: 7.5, halign: 'right' },
     columnStyles: { 0: { halign: 'left', cellWidth: 150 } },
-    didParseCell: (dd) => { if (dd.section === 'body' && grpRows.includes(dd.row.index)) { dd.cell.styles.fillColor = PSOFT; dd.cell.styles.textColor = ROSE; dd.cell.styles.fontStyle = 'bold'; dd.cell.styles.halign = 'left'; dd.cell.styles.fontSize = 7.5; } if (dd.column.index === 0 && dd.section === 'head') dd.cell.styles.halign = 'left'; },
+    didParseCell: (dd) => { if (dd.section === 'body' && grpRows.includes(dd.row.index)) { dd.cell.styles.fillColor = PSOFT; dd.cell.styles.textColor = ROSE; dd.cell.styles.fontStyle = 'bold'; dd.cell.styles.halign = 'left'; dd.cell.styles.fontSize = 7.5; } if (dd.section === 'body' && subItemPdfRows.includes(dd.row.index)) { dd.cell.styles.textColor = MUTED; dd.cell.styles.fontSize = 6.5; dd.cell.styles.halign = dd.column.index === 0 ? 'left' : 'right'; dd.cell.styles.fontStyle = 'italic'; } if (dd.column.index === 0 && dd.section === 'head') dd.cell.styles.halign = 'left'; },
   });
   let ey = doc.lastAutoTable.finalY + 14;
   doc.setDrawColor(...PINK); doc.setLineWidth(1); doc.line(W - M - 360, ey - 8, W - M, ey - 8);
@@ -104,16 +112,27 @@ export async function buildCostingXlsx(payload) {
     { label: 'MU %', width: 7, align: 'right' }, { label: 'MU Rs.', width: 12, align: 'right', fmt: 'money' },
     { label: 'Client/u', width: 12, align: 'right', fmt: 'money' }, { label: 'Line Rs.', width: 13, align: 'right', fmt: 'money' },
   ];
-  const dataRows = (rows || []).map((r) => {
+  const dataRows = [];
+  (rows || []).forEach((r) => {
     const s = sched[String(r.sub_event_name || '').toLowerCase().trim()] || {};
-    return [
+    dataRows.push([
       r.sub_event_name || 'General', s.planned_date ? fd(s.planned_date) : '', s.venue || '',
       r.description || '', Number(r.quantity) || 0,
       ...r.bids.map((b) => (b == null ? '' : Math.round(b))),
       r.inhouse == null ? '' : Math.round(r.inhouse), r.chosen == null ? '' : Math.round(r.chosen),
       Number(r.markupPct) || 0, r.markupRs == null ? '' : Math.round(r.markupRs),
       r.clientUnit == null ? '' : Math.round(r.clientUnit), r.lineTotal == null ? '' : Math.round(r.lineTotal),
-    ];
+    ]);
+    // Sub-item rows in XLSX
+    if (Array.isArray(r.sub_items)) {
+      r.sub_items.filter((si) => si && String(si.name || '').trim()).forEach((si) => {
+        dataRows.push([
+          '', '', '',
+          '  • ' + String(si.name).trim() + (si.qty > 0 ? ' × ' + si.qty : '') + (si.note ? ' (' + si.note + ')' : ''), '',
+          ...r.bids.map(() => ''), '', '', '', '', '', '',
+        ]);
+      });
+    }
   });
   const totalsRow = ['TOTALS', '', '', '', '', ...columns.map(() => ''), '', Math.round(totals.cost || 0), '', Math.round(totals.margin || 0), '', Math.round(totals.client || 0)];
   await downloadBrandedWorkbook('Isheeka_Costing_' + (rfq && rfq.ref_number || 'sheet') + '.xlsx', 'Isheeka Events', [{

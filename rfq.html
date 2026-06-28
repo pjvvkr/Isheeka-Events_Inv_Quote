@@ -387,7 +387,7 @@ function mergeExtracted(list){
     const qty=Math.max(1,Math.round(Number(ex.quantity)||1));
     // Keep every imported line as its own row (no auto-merge) — duplicates are removed in review.
     const siRaw=Array.isArray(ex.sub_items)?ex.sub_items:[];
-    const si=siRaw.map(s=>({name:String(s.name||'').trim(),qty:Math.max(1,Number(s.qty)||1),note:String(s.note||'')})).filter(s=>s.name);
+    const si=siRaw.map(s=>({name:String(s.name||'').trim(),qty:Math.max(0,Number(s.qty)||0),note:String(s.note||'')})).filter(s=>s.name);
     items.push({sub_event_name:seName,description:desc,quantity:qty,source:'attachment',sub_items:si}); added++;
   });
   return added;
@@ -460,7 +460,7 @@ function itemRow(se, desc){
     si.forEach((s,idx)=>{
       html+='<div style="display:flex;gap:4px;align-items:center;margin-top:5px">'
         +'<input data-act="si-name" data-se="'+esc(se)+'" data-d="'+esc(desc)+'" data-si="'+idx+'" placeholder="Detail (e.g. Pre-wedding shoot)" value="'+esc(s.name||'')+'" style="flex:1;font-size:12px;padding:5px 7px;border:1px solid #e0d8cf;border-radius:7px">'
-        +'<input data-act="si-qty" data-se="'+esc(se)+'" data-d="'+esc(desc)+'" data-si="'+idx+'" type="number" min="1" placeholder="Qty" value="'+esc(String(s.qty||1))+'" style="width:52px;font-size:12px;padding:5px 7px;border:1px solid #e0d8cf;border-radius:7px">'
+        +'<input data-act="si-qty" data-se="'+esc(se)+'" data-d="'+esc(desc)+'" data-si="'+idx+'" type="number" min="0" placeholder="Qty" value="'+esc(String(s.qty!=null?s.qty:0))+'" style="width:52px;font-size:12px;padding:5px 7px;border:1px solid #e0d8cf;border-radius:7px">'
         +'<input data-act="si-note" data-se="'+esc(se)+'" data-d="'+esc(desc)+'" data-si="'+idx+'" placeholder="Note" value="'+esc(s.note||'')+'" style="width:80px;font-size:12px;padding:5px 7px;border:1px solid #e0d8cf;border-radius:7px">'
         +'<span data-act="si-rm" data-se="'+esc(se)+'" data-d="'+esc(desc)+'" data-si="'+idx+'" style="cursor:pointer;color:#bbb;font-size:14px;padding:2px 4px">✕</span>'
         +'</div>';
@@ -530,7 +530,7 @@ function renderStep3(){
       else if(act==='dec' && idx>=0){ items[idx].quantity=Math.max(1,items[idx].quantity-1); renderStep3(); save(true,true); }
       else if(act==='rm' && idx>=0){ items.splice(idx,1); expandedSubItems.delete(se+'|'+d); renderStep3(); save(true,true); }
       else if(act==='togglesi'){ const k=se+'|'+d; expandedSubItems.has(k)?expandedSubItems.delete(k):expandedSubItems.add(k); renderStep3(); }
-      else if(act==='si-add' && idx>=0){ if(!items[idx].sub_items) items[idx].sub_items=[]; items[idx].sub_items.push({name:'',qty:1,note:''}); expandedSubItems.add(se+'|'+d); renderStep3(); save(true,true); }
+      else if(act==='si-add' && idx>=0){ if(!items[idx].sub_items) items[idx].sub_items=[]; items[idx].sub_items.push({name:'',qty:0,note:''}); expandedSubItems.add(se+'|'+d); renderStep3(); save(true,true); }
       else if(act==='si-rm' && idx>=0){ const si=+b.getAttribute('data-si'); if(items[idx].sub_items) items[idx].sub_items.splice(si,1); renderStep3(); save(true,true); }
     };
     if(['si-name','si-qty','si-note'].includes(act)){
@@ -539,7 +539,7 @@ function renderStep3(){
         const idx=items.findIndex(x=>x.sub_event_name===se&&x.description===d);
         if(idx>=0&&items[idx].sub_items&&items[idx].sub_items[si]!=null){
           if(act==='si-name') items[idx].sub_items[si].name=b.value;
-          else if(act==='si-qty') items[idx].sub_items[si].qty=Math.max(1,parseInt(b.value)||1);
+          else if(act==='si-qty') items[idx].sub_items[si].qty=Math.max(0,parseInt(b.value)||0);
           else if(act==='si-note') items[idx].sub_items[si].note=b.value;
         }
       };
@@ -571,7 +571,7 @@ function renderStep4(){
     body+='<div class="gold-label" style="margin-top:6px">'+esc(se.name.toUpperCase())+'</div>';
     its.forEach(it=>{
       body+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><span style="overflow-wrap:anywhere;word-break:break-word;min-width:0">'+esc(it.description)+'</span><span style="color:var(--muted);white-space:nowrap">×'+it.quantity+'</span></div>';
-      (it.sub_items||[]).forEach(s=>{ if(s.name) body+='<div style="font-size:11px;color:var(--muted);padding-left:14px;margin:1px 0">• '+esc(s.name)+' ×'+(s.qty||1)+(s.note?' ('+esc(s.note)+')':'')+'</div>'; });
+      (it.sub_items||[]).forEach(s=>{ if(s.name) body+='<div style="font-size:11px;color:var(--muted);padding-left:14px;margin:1px 0">• '+esc(s.name)+(s.qty>0?' ×'+s.qty:'')+(s.note?' ('+esc(s.note)+')':'')+'</div>'; });
     });
   });
   body+='</div>';

@@ -26,7 +26,7 @@ export async function createVendorRfqs(parentRfq, vendors, selectedItems) {
     baseItems = selectedItems;
   } else {
     const { data: parentItems } = await supabase.from('rfq_items')
-      .select('rfq_item_id,sub_event_name,description,quantity,unit,source,sort_order')
+      .select('rfq_item_id,sub_event_name,description,quantity,unit,source,sort_order,sub_items')
       .eq('rfq_id', parentRfq.rfq_id).eq('is_deleted', false).order('sort_order');
     baseItems = parentItems || [];
   }
@@ -60,6 +60,7 @@ export async function createVendorRfqs(parentRfq, vendors, selectedItems) {
         description: it.description, quantity: it.quantity ?? 1, unit: it.unit || null,
         source: it.source || 'custom', sort_order: it.sort_order ?? i,
         source_item_id: it.rfq_item_id || null,   // back-link to the client rfq_item
+        sub_items: it.sub_items || [],
         can_supply: true, is_deleted: false, created_at: now,
       }));
       await runDb(supabase.from('rfq_items').insert(rows), 'copy items to vendor RFQ');
@@ -83,13 +84,13 @@ export async function ensureSourcingAnchor(quote) {
   if (existing && existing.rfq_id) return existing.rfq_id;
 
   const { data: li } = await supabase.from('quotation_line_items')
-    .select('description,quantity,sub_event_name,sort_order').eq('quotation_id', quote.quotation_id).eq('is_deleted', false).order('sort_order');
+    .select('description,quantity,sub_event_name,sort_order,sub_items').eq('quotation_id', quote.quotation_id).eq('is_deleted', false).order('sort_order');
   if (!li || !li.length) throw new Error('Add at least one line item before sourcing vendors.');
 
   const created = await createRfq({ client_id: quote.client_id || null, lead_id: quote.lead_id || null, contact_name: quote.client_name || null, event_type: quote.event_type || null });
   const { error: ue } = await runDb(supabase.from('rfqs').update({ status: 'converted', party_type: 'client', is_sourcing_anchor: true, quotation_id: quote.quotation_id, updated_at: new Date().toISOString() }).eq('rfq_id', created.rfq_id), 'link sourcing anchor');
   if (ue) throw ue;
-  const items = li.map((x, i) => ({ rfq_id: created.rfq_id, description: x.description, quantity: x.quantity || 1, sub_event_name: x.sub_event_name || null, sort_order: (x.sort_order != null ? x.sort_order : i), source: 'quote', is_deleted: false }));
+  const items = li.map((x, i) => ({ rfq_id: created.rfq_id, description: x.description, quantity: x.quantity || 1, sub_event_name: x.sub_event_name || null, sort_order: (x.sort_order != null ? x.sort_order : i), source: 'quote', sub_items: x.sub_items || [], is_deleted: false }));
   const { error: lie } = await runDb(supabase.from('rfq_items').insert(items), 'seed sourcing items');
   if (lie) throw lie;
   return created.rfq_id;
@@ -107,7 +108,7 @@ export async function loadVendorRfqs(parentRfqId) {
 // A vendor RFQ's items + cost state (for "View bid" + the priced/can't-supply summary).
 export async function loadVendorRfqItems(rfqId) {
   const { data } = await supabase.from('rfq_items')
-    .select('rfq_item_id,sub_event_name,description,quantity,unit,unit_cost,can_supply,item_note,sort_order')
+    .select('rfq_item_id,sub_event_name,description,quantity,unit,unit_cost,can_supply,item_note,sort_order,sub_items')
     .eq('rfq_id', rfqId).eq('is_deleted', false).order('sort_order');
   return data || [];
 }

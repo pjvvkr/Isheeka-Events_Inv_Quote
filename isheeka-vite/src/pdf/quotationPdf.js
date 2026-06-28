@@ -150,7 +150,7 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
         if (!si || !String(si.name || '').trim()) return;
         const siDesc = '  • ' + String(si.name).trim() + (si.note ? ' (' + String(si.note) + ')' : '');
         const siRow = [siDesc];
-        if (showQty) siRow.push(String(si.qty || 1));
+        if (showQty) siRow.push(si.qty > 0 ? String(si.qty) : '');
         if (showPrices) { siRow.push(''); siRow.push(''); }
         subItemRows.push(body.length);
         body.push(siRow);

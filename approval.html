@@ -113,7 +113,7 @@ async function api(payload){
   app.innerHTML='<div class="spin"></div>';
   const r = await api({action:'view_quote_by_token',token});
   if(!r.ok || !r.quote){ renderMsg(r.error==='not_found'?'This approval link is invalid or has expired. Please contact Isheeka Events.':(r.error||'Could not load the quotation. Please try again.')); return; }
-  renderQuote(r.quote, r.items||[]);
+  renderQuote(r.quote, r.lines||[]);
 })();
 
 function renderMsg(text){
@@ -134,12 +134,14 @@ function renderQuote(q, items){
       +'<span class="item-desc">'+esc(li.description||'')+(qty&&showPrice?' <span style="color:var(--faint);font-size:11px">×'+qty+'</span>':'')+'</span>'
       +(showPrice?'<span class="item-amt">'+inr(amt)+'</span>':'')
     +'</div>';
-    // sub_items
+    // sub_items — stored as {name, qty, note}
     if(Array.isArray(li.sub_items)){
       li.sub_items.forEach(si=>{
-        const sUp=parseFloat(si.unit_price)||0, sQty=parseFloat(si.quantity)||1;
-        const sAmt=(si.amount!=null&&si.amount!=='')?parseFloat(si.amount):sQty*sUp;
-        itemsHtml+='<div class="sub-item"><span style="flex:1">↳ '+esc(si.description||'')+'</span>'+(sUp>0?'<span>'+inr(sAmt)+'</span>':'')+'</div>';
+        const siName=String(si.name||si.description||'').trim();
+        if(!siName) return;
+        const siQty=parseFloat(si.qty!=null?si.qty:si.quantity)||0;
+        const siNote=si.note?(' ('+esc(si.note)+')'):'';
+        itemsHtml+='<div class="sub-item"><span style="flex:1">↳ '+esc(siName)+(siQty>0?' × '+siQty:'')+siNote+'</span></div>';
       });
     }
   });

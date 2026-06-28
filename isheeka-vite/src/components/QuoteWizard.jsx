@@ -97,7 +97,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
   const [expandedSubItems, setExpandedSubItems] = React.useState({});
   const toggleSubItems = (itemId) => setExpandedSubItems(p=>({...p,[itemId]:!p[itemId]}));
   const addSubItem = (blockId, itemId) => {
-    setSubEventBlocks(bs=>bs.map(b=>b.id!==blockId?b:{...b,items:(b.items||[]).map(i=>i.id!==itemId?i:{...i,sub_items:[...(i.sub_items||[]),{id:'si-'+Date.now()+Math.random(),name:'',qty:1,note:''}]})}));
+    setSubEventBlocks(bs=>bs.map(b=>b.id!==blockId?b:{...b,items:(b.items||[]).map(i=>i.id!==itemId?i:{...i,sub_items:[...(i.sub_items||[]),{id:'si-'+Date.now()+Math.random(),name:'',qty:0,note:''}]})}));
     setExpandedSubItems(p=>({...p,[itemId]:true}));
   };
   const updateSubItem = (blockId, itemId, siId, field, val) => {
@@ -372,7 +372,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
             quotation_id:existingQuotationId,sub_event_name:seName,description:i.description,
             quantity:parseFloat(i.quantity)||1,unit_price:parseFloat(i.unit_price)||0,
             amount:(parseFloat(i.quantity)||1)*(parseFloat(i.unit_price)||0),
-            sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(1,parseInt(si.qty)||1),note:si.note||null})),
+            sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(0,parseInt(si.qty)||0),note:si.note||null})),
             sort_order:idx,created_at:new Date().toISOString(),is_deleted:false
           }));
         });
@@ -431,7 +431,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
           sub_event_name:seName,description:i.description,
           quantity:parseFloat(i.quantity)||1,unit_price:parseFloat(i.unit_price)||0,
           amount:(parseFloat(i.quantity)||1)*(parseFloat(i.unit_price)||0),
-          sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(1,parseInt(si.qty)||1),note:si.note||null})),
+          sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(0,parseInt(si.qty)||0),note:si.note||null})),
           sort_order:idx,created_at:new Date().toISOString(),is_deleted:false
         }));
       });
@@ -762,8 +762,8 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
                                   value={si.name} onChange={e=>updateSubItem(block.id,item.id,si.id,'name',e.target.value)}
                                   placeholder="Name (required)"/>
                                 <input type="number" className="field-input" style={{width:52,fontSize:11,padding:'3px 6px',textAlign:'right'}}
-                                  value={si.qty} min={1}
-                                  onChange={e=>updateSubItem(block.id,item.id,si.id,'qty',Math.max(1,parseInt(e.target.value)||1))}/>
+                                  value={si.qty??0} min={0}
+                                  onChange={e=>updateSubItem(block.id,item.id,si.id,'qty',Math.max(0,parseInt(e.target.value)||0))}/>
                                 <input className="field-input" style={{flex:2,fontSize:11,padding:'3px 6px'}}
                                   value={si.note||''} onChange={e=>updateSubItem(block.id,item.id,si.id,'note',e.target.value||null)}
                                   placeholder="Note (optional)"/>

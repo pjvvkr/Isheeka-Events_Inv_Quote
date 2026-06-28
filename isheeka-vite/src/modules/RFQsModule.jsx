@@ -463,7 +463,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const setEI = (idx, k, v) => setEditItems((arr) => arr.map((it, i) => i === idx ? { ...it, [k]: v } : it));
   // Sub-item helpers
   const setSI = (itemIdx, siIdx, k, v) => setEditItems((arr) => arr.map((it, i) => i !== itemIdx ? it : { ...it, sub_items: (it.sub_items || []).map((si, j) => j === siIdx ? { ...si, [k]: v } : si) }));
-  const addSI = (itemIdx) => setEditItems((arr) => arr.map((it, i) => i !== itemIdx ? it : { ...it, sub_items: [...(it.sub_items || []), { name: '', qty: 1, note: '' }] }));
+  const addSI = (itemIdx) => setEditItems((arr) => arr.map((it, i) => i !== itemIdx ? it : { ...it, sub_items: [...(it.sub_items || []), { name: '', qty: 0, note: '' }] }));
   const removeSI = (itemIdx, siIdx) => setEditItems((arr) => arr.map((it, i) => i !== itemIdx ? it : { ...it, sub_items: (it.sub_items || []).filter((_, j) => j !== siIdx) }));
   const moveSIUp = (itemIdx, siIdx) => { if (siIdx === 0) return; setEditItems((arr) => arr.map((it, i) => { if (i !== itemIdx) return it; const sis = [...(it.sub_items || [])]; [sis[siIdx - 1], sis[siIdx]] = [sis[siIdx], sis[siIdx - 1]]; return { ...it, sub_items: sis }; })); };
   const moveSIDown = (itemIdx, siIdx) => setEditItems((arr) => arr.map((it, i) => { if (i !== itemIdx) return it; const sis = [...(it.sub_items || [])]; if (siIdx >= sis.length - 1) return it; [sis[siIdx], sis[siIdx + 1]] = [sis[siIdx + 1], sis[siIdx]]; return { ...it, sub_items: sis }; }));
@@ -719,7 +719,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
                   <div key={siIdx} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px 3px 26px', borderTop: '1px solid var(--grey-50)', background: '#FAFAFA' }}>
                     <span style={{ color: 'var(--grey-300)', fontSize: 11, flexShrink: 0 }}>↳</span>
                     <input className="field-input" style={{ flex: 2, fontSize: 11, padding: '2px 6px' }} value={si.name || ''} placeholder="Detail name" onChange={(e) => setSI(idx, siIdx, 'name', e.target.value)} />
-                    <input className="field-input" style={{ width: 46, fontSize: 11, padding: '2px 6px' }} type="number" value={si.qty || 1} min={1} onChange={(e) => setSI(idx, siIdx, 'qty', parseFloat(e.target.value) || 1)} />
+                    <input className="field-input" style={{ width: 46, fontSize: 11, padding: '2px 6px' }} type="number" value={si.qty ?? 0} min={0} onChange={(e) => setSI(idx, siIdx, 'qty', Math.max(0, parseFloat(e.target.value) || 0))} />
                     <input className="field-input" style={{ width: 84, fontSize: 11, padding: '2px 6px' }} value={si.note || ''} placeholder="Note" onChange={(e) => setSI(idx, siIdx, 'note', e.target.value)} />
                     <select
                       title="Move to a different item"
@@ -763,7 +763,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
                     <div style={{ paddingLeft: 12, marginTop: 2 }}>
                       {it.sub_items.map((si, si_i) => (
                         <div key={si_i} style={{ fontSize: 12, color: 'var(--grey-400)', lineHeight: 1.5 }}>
-                          • {si.name} × {si.qty}{si.note ? <span> ({si.note})</span> : null}
+                          • {si.name}{si.qty > 0 ? ' × ' + si.qty : ''}{si.note ? <span> ({si.note})</span> : null}
                         </div>
                       ))}
                     </div>
