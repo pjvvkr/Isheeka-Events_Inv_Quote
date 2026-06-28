@@ -90,7 +90,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [displayOpts, setDisplayOpts] = React.useState({prices:false,qty:true,grouping:true,schedule:true,discount:false,coverPage:false,bankDetails:true});
   const [revHistory, setRevHistory] = React.useState([]);
   const [includeRevHistory, setIncludeRevHistory] = React.useState(true);
-  const [lineItemsOpen, setLineItemsOpen] = React.useState(true);
+  const [lineItemsOpen, setLineItemsOpen] = React.useState(false);
   const [showClose, setShowClose] = React.useState(false);
   const [closeForm, setCloseForm] = React.useState({outcome:'client',reason:'',notes:''});
   const [closing, setClosing] = React.useState(false);

@@ -850,6 +850,18 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         }
       </div>
 
+      {subEvents.length>0&&(
+        <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--gold)',textTransform:'uppercase',letterSpacing:'.04em',marginBottom:10}}>📅 Event schedule</div>
+          {subEvents.map(se=>(
+            <div key={se.sub_event_id} style={{display:'grid',gridTemplateColumns:'1fr auto auto',gap:16,alignItems:'center',padding:'7px 0',borderTop:'1px solid var(--grey-50)',fontSize:13}}>
+              <span style={{fontWeight:500,color:'var(--grey-800)'}}>{se.name}</span>
+              <span style={{color:'var(--grey-500)',whiteSpace:'nowrap'}}>{se.date?fmtDate(se.date,{day:'numeric',month:'short',year:'numeric'}):'TBD'}</span>
+              <span style={{color:'var(--grey-500)',whiteSpace:'nowrap'}}>{se.location?('📍 '+se.location):'—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {/* Sub-events + Checklist */}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
         <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)'}}>
@@ -861,7 +873,6 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
                 <div style={{width:8,height:8,borderRadius:'50%',background:'#e8185a',flexShrink:0}}/>
                 <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{se.name}</div>
                 {se.date&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {fmtDate(se.date,{day:'numeric',month:'short'})}</div>}{se.location&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· 📍 {se.location}</div>}
-                {se.location&&<div style={{fontSize:12,color:'var(--grey-400)'}}>· {se.location}</div>}
               </div>
               {se.items.length>0
                 ? <table style={{width:'100%',fontSize:12,borderCollapse:'collapse'}}>

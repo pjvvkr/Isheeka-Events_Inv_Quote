@@ -81,7 +81,7 @@ export async function generateQuoteFromCosting(draftQuoteId, rows) {
   const li = rows.map((r, i) => ({
     quotation_id: draftQuoteId, sub_event_name: r.sub_event_name || null, description: r.description,
     quantity: r.quantity || 1, unit_price: r.clientUnitPrice || 0, amount: (r.clientUnitPrice || 0) * (r.quantity || 1),
-    sort_order: i, is_deleted: false, created_at: now,
+    sort_order: i, sub_items: Array.isArray(r.sub_items) ? r.sub_items : [], is_deleted: false, created_at: now,
   }));
   if (li.length) { const { error } = await runDb(supabase.from('quotation_line_items').insert(li), 'price quote items'); if (error) throw error; }
   const subtotal = li.reduce((s, x) => s + (x.amount || 0), 0);
