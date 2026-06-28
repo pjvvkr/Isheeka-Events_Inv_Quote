@@ -714,7 +714,8 @@ function renderVendorPortal(r){
     quantity: Number(it.quantity)||1,
     unit_cost: (it.unit_cost!=null? String(it.unit_cost): ''),
     can_supply: it.can_supply!==false,
-    item_note: it.item_note||''
+    item_note: it.item_note||'',
+    sub_items: Array.isArray(it.sub_items) ? it.sub_items : []
   }));
   if(data.status==='converted'||data.status==='approved'){ renderVendorSubmitted(false); return; }
   if(data.status==='submitted'){ renderVendorSubmitted(true); return; }
@@ -762,8 +763,10 @@ function renderVendorForm(){
       + '</div>';
   }
   vitems.forEach((it,i)=>{
+    const siHtml = (it.sub_items||[]).filter(s=>s&&s.name).map(s=>'<div style="font-size:11px;color:var(--muted);padding-left:10px;margin:1px 0">• '+esc(String(s.name).trim())+(s.qty>0?' ×'+s.qty:'')+(s.note?' ('+esc(s.note)+')':'')+'</div>').join('');
     html += '<div class="itemrow'+(it.can_supply?'':' off')+'" style="flex-direction:column;align-items:stretch;gap:6px">'
       + '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="idesc">'+esc(it.description)+(it.imported?(it.lowConf?' <span style="font-size:9.5px;background:#FCE3E3;color:#a32d2d;border-radius:10px;padding:1px 7px;white-space:nowrap">⚡ imported · check carefully</span>':' <span style="font-size:9.5px;background:#FCEFD2;color:#9a6a12;border-radius:10px;padding:1px 7px;white-space:nowrap">⚡ imported · review</span>'):'')+'</span><span style="color:var(--muted);white-space:nowrap;font-size:12px">×'+it.quantity+'</span></div>'
+      + (siHtml ? '<div style="margin:-2px 0 2px">'+siHtml+'</div>' : '')
       + '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
         + '<div style="display:flex;align-items:center;gap:4px"><span style="font-size:13px">₹</span><input data-vi="'+i+'" data-k="unit_cost" inputmode="numeric" style="width:120px'+(it.imported?(it.lowConf?';border:1px solid #e0a0a0;background:#FDF0F0':';border:1px solid #cdbd9f;background:#FCF7EC'):'')+'" value="'+esc(it.unit_cost)+'"'+(it.can_supply?'':' disabled')+'></div>'
         + '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin:0"><input type="checkbox" data-vi="'+i+'" data-k="can_supply" style="width:auto" '+(it.can_supply?'':'checked')+'> Can’t supply</label>'

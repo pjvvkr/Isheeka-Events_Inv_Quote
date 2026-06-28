@@ -447,11 +447,11 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     if(subs && items){
       const grouped = subs.map(se=>({
         ...se, id:se.sub_event_id,
-        items:items.filter(i=>i.sub_event_id===se.sub_event_id).map(i=>({id:i.item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price}))
+        items:items.filter(i=>i.sub_event_id===se.sub_event_id).map(i=>({id:i.item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price,sub_items:Array.isArray(i.sub_items)?i.sub_items:[]}))
       }));
       setSubEvents(grouped);
       setEditSubEvents(grouped.map(se=>({...se})));
-      const mi = items.filter(i=>!i.sub_event_id).map(i=>({id:i.item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price}));
+      const mi = items.filter(i=>!i.sub_event_id).map(i=>({id:i.item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price,sub_items:Array.isArray(i.sub_items)?i.sub_items:[]}));
       setMainItemsView(mi);
       setEditMainItems(mi);
     }
@@ -503,6 +503,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
             sub_event_id:seData.sub_event_id,event_id:eventId,
             description:r.description,quantity:parseFloat(r.quantity)||1,
             unit_price:parseFloat(r.unit_price)||0,
+            sub_items:Array.isArray(r.sub_items)?r.sub_items:[],
             sort_order:i,created_at:new Date().toISOString(),is_deleted:false
           }));
           if(rows.length>0){ const {error:rie}=await supabase.from('sub_event_items').insert(rows); if(rie) throw rie; }
@@ -512,6 +513,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         sub_event_id:null,event_id:eventId,
         description:r.description,quantity:parseFloat(r.quantity)||1,
         unit_price:parseFloat(r.unit_price)||0,
+        sub_items:Array.isArray(r.sub_items)?r.sub_items:[],
         sort_order:i,created_at:new Date().toISOString(),is_deleted:false
       }));
       if(mainRows.length>0){ const {error:mrie}=await supabase.from('sub_event_items').insert(mainRows); if(mrie) throw mrie; }
@@ -1567,6 +1569,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
             sub_event_id:seData.sub_event_id, event_id:eventData.event_id,
             description:r.description, quantity:parseFloat(r.quantity)||1,
             unit_price:parseFloat(r.unit_price)||0,
+            sub_items:Array.isArray(r.sub_items)?r.sub_items:[],
             sort_order:i, created_at:new Date().toISOString(), is_deleted:false
           }));
           if(itemRows.length>0){ const {error:irie}=await supabase.from('sub_event_items').insert(itemRows); if(irie) throw irie; }
@@ -1578,6 +1581,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
         sub_event_id:null, event_id:eventData.event_id,
         description:r.description, quantity:parseFloat(r.quantity)||1,
         unit_price:parseFloat(r.unit_price)||0,
+        sub_items:Array.isArray(r.sub_items)?r.sub_items:[],
         sort_order:i, created_at:new Date().toISOString(), is_deleted:false
       }));
       if(mainRows.length>0){ const {error:wmrie}=await supabase.from('sub_event_items').insert(mainRows); if(wmrie) throw wmrie; }

@@ -447,14 +447,14 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
             })}
           </div>
         ))}
-        <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'12px 16px'}}>
+        {lineItemsOpen && <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'12px 16px'}}>
           {(()=>{const _d=parseFloat(quot.discount_amount)||0;const rows=[['Subtotal','₹'+(parseFloat(quot.subtotal)||0).toLocaleString('en-IN'),false]];if(Math.abs(_d)>0.5)rows.push(['Adjustment',(_d>0?'- ':'+ ')+'₹'+Math.abs(Math.round(_d)).toLocaleString('en-IN'),false]);rows.push(['Grand total','₹'+(parseFloat(quot.grand_total)||0).toLocaleString('en-IN'),true]);return rows;})().map(([l,v,bold],i,arr)=>(
             <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:i<arr.length-1?'1px solid var(--grey-200)':'none'}}>
               <span style={{fontSize:13,color:'var(--grey-400)'}}>{l}</span>
               <span style={{fontSize:bold?15:13,fontWeight:bold?700:400,color:bold?'var(--green)':'var(--grey-800)'}}>{v}</span>
             </div>
           ))}
-        </div>
+        </div>}
       </div>
 
       {/* Schedule + terms */}

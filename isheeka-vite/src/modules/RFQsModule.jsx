@@ -364,6 +364,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [eventClosed, setEventClosed] = React.useState(false);   // linked event completed/cancelled → sourcing/costing read-only
   // Item 6 + 7: staff edit mode
   const [editMode, setEditMode] = React.useState(false);
+  const [itemsOpen, setItemsOpen] = React.useState(true);
   const [editItems, setEditItems] = React.useState([]);
   const [editFields, setEditFields] = React.useState({});
   const [saving, setSaving] = React.useState(false);
@@ -703,12 +704,15 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
 
       {/* Requested items — with staff edit mode (Item 6A+7) */}
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', border: editMode ? '2px solid var(--pink)' : '1px solid var(--grey-100)', padding: '16px 20px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)' }}>Requested items {items.length > 0 ? ('(' + items.length + ')') : ''}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: itemsOpen ? 10 : 0, cursor: 'pointer' }} onClick={() => !editMode && setItemsOpen(o => !o)}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--grey-800)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 10, color: 'var(--grey-400)', userSelect: 'none' }}>{itemsOpen ? '▼' : '▶'}</span>
+            Requested items {items.length > 0 ? ('(' + items.length + ')') : ''}
+          </div>
           {editMode && <span style={{ fontSize: 11, color: 'var(--pink)', fontWeight: 600 }}>✏️ Edit mode — drag ⠿ to reorder</span>}
         </div>
 
-        {editMode ? (
+        {itemsOpen ? (editMode ? (
           <div>
             {/* Schedule fields */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 12px', marginBottom: 12, padding: '10px 12px', background: 'var(--grey-50)', borderRadius: 'var(--radius-md)' }}>
@@ -794,7 +798,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
               ))}
             </div>
           ))
-        )}
+        )) : null}
       </div>
 
       {/* Revision history + diff — one snapshot per client/vendor submission. */}
