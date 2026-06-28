@@ -145,6 +145,38 @@ export async function removeVendorRfq(rfqId) {
   try { await supabase.from('rfq_activity').insert({ rfq_id: rfqId, actor: uid || 'staff', action: 'withdrawn', notes: 'Removed from sourcing' }); } catch (e) { /* non-fatal */ }
 }
 
+// Re-scope a vendor RFQ to a corrected item set: replace its frozen items, clear costs,
+// reset to 'sent', mint a fresh link+PIN (old link dies), bump revision_number, log it.
+// Costing reads vendor items live, so the revised bid flows in once re-submitted.
+// Returns { token, pin, ref_number } for re-sharing.
+export async function rescopeVendorRfq(vendorRfq, parentRfq, selectedItems) {
+  if (!vendorRfq || !vendorRfq.rfq_id) throw new Error('vendor RFQ required');
+  const items = (selectedItems || []).filter((it) => it && (it.description || '').trim());
+  if (!items.length) throw new Error('Select at least one item.');
+  const uid = await _currentUid();
+  const now = new Date().toISOString();
+  await runDb(supabase.from('rfq_items').delete().eq('rfq_id', vendorRfq.rfq_id), 'clear vendor items');
+  const rows = items.map((it, i) => ({
+    rfq_id: vendorRfq.rfq_id, sub_event_name: it.sub_event_name || null,
+    description: it.description, quantity: it.quantity ?? 1, unit: it.unit || null,
+    source: it.source || 'custom', sort_order: it.sort_order ?? i,
+    source_item_id: it.rfq_item_id || null, sub_items: it.sub_items || [],
+    can_supply: true, is_deleted: false, created_at: now,
+  }));
+  await runDb(supabase.from('rfq_items').insert(rows), 'set revised vendor items');
+  const token = genRfqToken();
+  const pin = genRfqPin();
+  const { error } = await runDb(supabase.from('rfqs').update({
+    status: 'sent', token_hash: await sha256Hex(token), access_pin_hash: await sha256Hex(pin),
+    token_expires_at: new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString(),
+    client_submitted_at: null, revision_number: (vendorRfq.revision_number || 0) + 1,
+    reminder_count: 0, updated_at: now,
+  }).eq('rfq_id', vendorRfq.rfq_id), 'rescope vendor RFQ');
+  if (error) throw error;
+  try { await supabase.from('rfq_activity').insert({ rfq_id: vendorRfq.rfq_id, actor: uid || 'staff', action: 'rescoped', notes: 'Items revised — ' + items.length + ' item' + (items.length > 1 ? 's' : '') }); } catch (e) { /* non-fatal */ }
+  return { token, pin, ref_number: vendorRfq.ref_number };
+}
+
 // The vendor opens the SAME portal link; the gateway renders vendor mode by party_type.
 export function vendorRfqLink(token) { return rfqLink(token); }
 

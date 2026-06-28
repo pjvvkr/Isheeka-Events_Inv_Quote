@@ -10,7 +10,7 @@ import { RFQ_STATUS, RFQ_ACTION_LABEL } from '../lib/constants.js';
 import { useEventTypes } from '../lib/data.js';
 import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuote, findClientMatch } from '../lib/rfq.js';
 import { waLink } from '../lib/share.js';
-import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg, removeVendorRfq } from '../lib/vendorRfq.js';
+import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg, removeVendorRfq, rescopeVendorRfq } from '../lib/vendorRfq.js';
 import { CostingScreen } from './CostingScreen.jsx';
 
 function RFQShareCard({ created, contact, onDone }) {
@@ -182,11 +182,21 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
   const [allVendors, setAllVendors] = React.useState([]);
   const [picked, setPicked] = React.useState({});
   const [sending, setSending] = React.useState(false);
-  const [justSent, setJustSent] = React.useState([]);
+  const [justSent, setJustSent] = React.useState(() => { try { const sv = sessionStorage.getItem('isheeka-justsent-' + clientRfq.rfq_id); return sv ? JSON.parse(sv) : []; } catch (e) { return []; } });
   const [viewBid, setViewBid] = React.useState(null);
   const [bidItems, setBidItems] = React.useState([]);
   const [clientItems, setClientItems] = React.useState([]);
   const [selItems, setSelItems] = React.useState([]);
+  const [editVr, setEditVr] = React.useState(null);
+  const [editSel, setEditSel] = React.useState([]);
+  const [editSaving, setEditSaving] = React.useState(false);
+  const [histVr, setHistVr] = React.useState(null);
+  const [histRevs, setHistRevs] = React.useState([]);
+  const [histActs, setHistActs] = React.useState([]);
+  const [histOpenRev, setHistOpenRev] = React.useState(null);
+  const lsKey = 'isheeka-justsent-' + clientRfq.rfq_id;
+  React.useEffect(() => { try { sessionStorage.setItem(lsKey, JSON.stringify(justSent)); } catch (e) { /* noop */ } }, [justSent, lsKey]);
+  const addLinks = (entries) => setJustSent((prev) => { const ids = new Set(entries.map((e) => e.vendor_id)); return [...prev.filter((pp) => !ids.has(pp.vendor_id)), ...entries]; });
 
   const load = async () => {
     setLoading(true);
@@ -223,7 +233,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
     const selectedItems = clientItems.filter((it) => selItems.includes(it.rfq_item_id));
     if (!selectedItems.length) { notify('Select at least one item to source.', 'error'); return; }
     setSending(true);
-    try { const created = await createVendorRfqs(clientRfq, chosen, selectedItems); setJustSent((prev) => [...prev, ...created]); setShowSend(false); setPicked({}); notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + ' with ' + selectedItems.length + ' item' + (selectedItems.length > 1 ? 's' : '') + '.', 'success'); load(); }
+    try { const created = await createVendorRfqs(clientRfq, chosen, selectedItems); addLinks(created); setShowSend(false); setPicked({}); notify('Sent ' + created.length + ' vendor RFQ' + (created.length > 1 ? 's' : '') + ' with ' + selectedItems.length + ' item' + (selectedItems.length > 1 ? 's' : '') + '.', 'success'); load(); }
     catch (e) { /* toasted */ }
     setSending(false);
   };
@@ -256,6 +266,36 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
     if (!window.confirm(msg)) return;
     try { await removeVendorRfq(vr.rfq_id); notify('Vendor removed from sourcing.', 'success'); load(); }
     catch (e) { notify('Could not remove the vendor.', 'error'); }
+  };
+
+  const openEdit = async (vr) => {
+    const { data: vi } = await supabase.from('rfq_items').select('source_item_id').eq('rfq_id', vr.rfq_id).eq('is_deleted', false);
+    const srcIds = new Set((vi || []).map((x) => x.source_item_id).filter(Boolean));
+    const pre = clientItems.filter((it) => srcIds.has(it.rfq_item_id)).map((it) => it.rfq_item_id);
+    setEditSel(pre.length ? pre : clientItems.map((it) => it.rfq_item_id));
+    setEditVr(vr);
+  };
+  const doRescope = async () => {
+    if (!editVr) return;
+    const items = clientItems.filter((it) => editSel.includes(it.rfq_item_id));
+    if (!items.length) { notify('Select at least one item.', 'error'); return; }
+    if (editVr.status === 'submitted' && !window.confirm('This vendor already submitted a bid. Re-scoping replaces their item list and clears that bid — they will need to re-price. Continue?')) return;
+    setEditSaving(true);
+    try {
+      const res = await rescopeVendorRfq(editVr, clientRfq, items);
+      const vname = (vendorMap[editVr.vendor_id] || {}).name || '';
+      addLinks([{ vendor_id: editVr.vendor_id, vendor_name: vname, rfq_id: editVr.rfq_id, ref_number: res.ref_number, token: res.token, pin: res.pin }]);
+      setEditVr(null); notify('Items revised — share the fresh link below.', 'success'); load();
+    } catch (e) { notify((e && e.message) || 'Could not revise items.', 'error'); }
+    setEditSaving(false);
+  };
+  const openHistory = async (vr) => {
+    setHistVr(vr); setHistOpenRev(null); setHistRevs([]); setHistActs([]);
+    const [revRes, actRes] = await Promise.all([
+      supabase.from('rfq_revisions').select('*').eq('rfq_id', vr.rfq_id).order('revision_number', { ascending: false }),
+      supabase.from('rfq_activity').select('*').eq('rfq_id', vr.rfq_id).order('created_at', { ascending: false }),
+    ]);
+    setHistRevs(revRes.data || []); setHistActs(actRes.data || []);
   };
 
   const chip = (st) => ({ sent: { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' }, in_progress: { l: 'Opened', bg: 'var(--orange-light)', c: 'var(--orange)' }, submitted: { l: 'Submitted', bg: 'var(--green-light)', c: 'var(--green)' } }[st] || { l: 'Sent', bg: 'var(--grey-100)', c: 'var(--grey-400)' });
@@ -303,15 +343,26 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                     {vr.status === 'submitted'
                       ? <button className="btn sm" onClick={() => openBid(vr.rfq_id)}>{viewBid === vr.rfq_id ? 'Hide' : 'View bid'}</button>
                       : <button className="btn sm" onClick={() => remind(vr)} title="Send a fresh link + reminder on WhatsApp">Remind</button>}
+                    {!dealClosed && <button className="btn sm" onClick={() => openEdit(vr)} title="Revise which items this vendor bids on">Edit items</button>}
+                    <button className="btn sm" onClick={() => openHistory(vr)} title="Bid revision history">History</button>
                     {!dealClosed && <button className="btn sm" onClick={() => remove(vr)} title="Remove this vendor from sourcing" style={{ color: 'var(--red)', borderColor: 'var(--red)' }}>Remove</button>}
                   </div>
                 </div>
                 {viewBid === vr.rfq_id && (
                   <div style={{ background: 'var(--grey-50)', padding: '8px 14px' }}>
                     {bidItems.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--grey-400)' }}>No items.</div> : bidItems.map((it) => (
-                      <div key={it.rfq_item_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5, padding: '3px 0' }}>
-                        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{it.description} <span style={{ color: 'var(--grey-400)' }}>×{it.quantity}</span>{it.item_note ? <span style={{ color: 'var(--grey-400)' }}> · {it.item_note}</span> : ''}</span>
-                        <span style={{ whiteSpace: 'nowrap', color: it.can_supply === false ? 'var(--red)' : 'var(--grey-800)' }}>{it.can_supply === false ? "can't supply" : (it.unit_cost != null ? ('₹' + Number(it.unit_cost).toLocaleString('en-IN')) : '—')}</span>
+                      <div key={it.rfq_item_id} style={{ padding: '3px 0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5 }}>
+                          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{it.description} <span style={{ color: 'var(--grey-400)' }}>×{it.quantity}</span>{it.item_note ? <span style={{ color: 'var(--grey-400)' }}> · {it.item_note}</span> : ''}</span>
+                          <span style={{ whiteSpace: 'nowrap', color: it.can_supply === false ? 'var(--red)' : 'var(--grey-800)' }}>{it.can_supply === false ? "can't supply" : (it.unit_cost != null ? ('₹' + Number(it.unit_cost).toLocaleString('en-IN')) : '—')}</span>
+                        </div>
+                        {Array.isArray(it.sub_items) && it.sub_items.length > 0 && (
+                          <div style={{ paddingLeft: 10, marginTop: 1 }}>
+                            {it.sub_items.map((si, si_i) => (
+                              <div key={si_i} style={{ fontSize: 11, color: 'var(--grey-400)', lineHeight: 1.5 }}>• {si.name}{si.qty > 0 ? ' × ' + si.qty : ''}{si.note ? (' (' + si.note + ')') : ''}</div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -389,6 +440,89 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
           </div>
         </div>
       )}
+
+      {editVr && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={(e) => { if (e.target === e.currentTarget) setEditVr(null); }}>
+          <div style={{ background: 'white', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: 460 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>Edit items — {(vendorMap[editVr.vendor_id] || {}).name || 'Vendor'}</div>
+                <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>{editSel.length} of {clientItems.length} item{clientItems.length === 1 ? '' : 's'} selected</div>
+              </div>
+              <button className="btn sm" onClick={() => setEditVr(null)}>✕</button>
+            </div>
+            <div style={{ padding: '14px 20px' }}>
+              <div style={{ fontSize: 12, color: 'var(--grey-400)', marginBottom: 10 }}>Revise which items this vendor bids on. Saving issues a fresh link &amp; PIN (the old one stops working){editVr.status === 'submitted' ? ' and clears their current bid' : ''}.</div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 6 }}>
+                <button className="btn sm" onClick={() => setEditSel(clientItems.map((it) => it.rfq_item_id))}>All</button>
+                <button className="btn sm" onClick={() => setEditSel([])}>None</button>
+              </div>
+              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', padding: '4px 0' }}>
+                {Object.keys(grouped).map((grp) => (
+                  <div key={grp} style={{ padding: '2px 12px' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.04em', color: 'var(--gold)', marginTop: 4 }}>{grp.toUpperCase()}</div>
+                    {grouped[grp].map((it) => (
+                      <label key={it.rfq_item_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', cursor: 'pointer', fontSize: 12.5 }}>
+                        <input type="checkbox" checked={editSel.includes(it.rfq_item_id)} onChange={(e) => setEditSel((prev) => e.target.checked ? [...prev, it.rfq_item_id] : prev.filter((id) => id !== it.rfq_item_id))} />
+                        <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{it.description}{Array.isArray(it.sub_items) && it.sub_items.length ? <span style={{ color: 'var(--grey-400)' }}> · {it.sub_items.length} detail{it.sub_items.length > 1 ? 's' : ''}</span> : null}</span>
+                        <span style={{ color: 'var(--grey-400)', whiteSpace: 'nowrap' }}>×{it.quantity}</span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={() => setEditVr(null)}>Cancel</button>
+              <button className="btn primary" disabled={editSaving || editSel.length === 0} onClick={doRescope}>{editSaving ? 'Saving…' : 'Save & re-issue link'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {histVr && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1100, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', overflowY: 'auto' }} onClick={(e) => { if (e.target === e.currentTarget) setHistVr(null); }}>
+          <div style={{ background: 'white', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: 480 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--grey-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Bid history — {(vendorMap[histVr.vendor_id] || {}).name || 'Vendor'}</div>
+              <button className="btn sm" onClick={() => setHistVr(null)}>✕</button>
+            </div>
+            <div style={{ padding: '14px 20px', maxHeight: '70vh', overflowY: 'auto' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--grey-400)', marginBottom: 8 }}>BID REVISIONS</div>
+              {histRevs.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginBottom: 14 }}>No submitted bids yet.</div>
+                : histRevs.map((rv) => { const open = histOpenRev === rv.revision_number; const its = ((rv.snapshot || {}).items) || []; return (
+                  <div key={rv.revision_number} style={{ border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', cursor: 'pointer' }} onClick={() => setHistOpenRev(open ? null : rv.revision_number)}>
+                      <span style={{ fontSize: 12.5, fontWeight: 500 }}>{open ? '▾' : '▸'} Revision {rv.revision_number}</span>
+                      <span style={{ fontSize: 11.5, color: 'var(--grey-400)' }}>{fmtDate(rv.submitted_at || rv.created_at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    {open && (
+                      <div style={{ borderTop: '1px solid var(--grey-100)', padding: '6px 12px', background: 'var(--grey-50)' }}>
+                        {its.length === 0 ? <div style={{ fontSize: 12, color: 'var(--grey-400)' }}>No items captured.</div> : its.map((it, ii) => (
+                          <div key={ii} style={{ padding: '2px 0' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12 }}>
+                              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{it.description} <span style={{ color: 'var(--grey-400)' }}>×{it.quantity}</span></span>
+                              <span style={{ whiteSpace: 'nowrap', color: it.can_supply === false ? 'var(--red)' : 'var(--grey-800)' }}>{it.can_supply === false ? "can't supply" : (it.unit_cost != null ? ('₹' + Number(it.unit_cost).toLocaleString('en-IN')) : '—')}</span>
+                            </div>
+                            {Array.isArray(it.sub_items) && it.sub_items.length > 0 && <div style={{ paddingLeft: 10 }}>{it.sub_items.map((si, si_i) => <div key={si_i} style={{ fontSize: 10.5, color: 'var(--grey-400)' }}>• {si.name}{si.qty > 0 ? ' × ' + si.qty : ''}</div>)}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ); })}
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', color: 'var(--grey-400)', margin: '14px 0 8px' }}>ACTIVITY</div>
+              {histActs.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--grey-400)' }}>No activity yet.</div>
+                : histActs.map((a) => (
+                  <div key={a.activity_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, padding: '3px 0', borderTop: '1px solid var(--grey-50)' }}>
+                    <span style={{ color: 'var(--grey-700)' }}>{RFQ_ACTION_LABEL[a.action] || a.action}{a.notes ? <span style={{ color: 'var(--grey-400)' }}> · {a.notes}</span> : null}</span>
+                    <span style={{ whiteSpace: 'nowrap', color: 'var(--grey-400)' }}>{fmtDate(a.created_at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -409,7 +543,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [eventClosed, setEventClosed] = React.useState(false);   // linked event completed/cancelled → sourcing/costing read-only
   // Item 6 + 7: staff edit mode
   const [editMode, setEditMode] = React.useState(false);
-  const [itemsOpen, setItemsOpen] = React.useState(true);
+  const [itemsOpen, setItemsOpen] = React.useState(false);
   const [editItems, setEditItems] = React.useState([]);
   const [editFields, setEditFields] = React.useState({});
   const [saving, setSaving] = React.useState(false);
@@ -695,7 +829,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
           {editMode && <span style={{ fontSize: 11, color: 'var(--pink)', fontWeight: 600 }}>✏️ Edit mode — drag ⠿ to reorder</span>}
         </div>
 
-        {itemsOpen ? (editMode ? (
+        {(itemsOpen || editMode) ? (editMode ? (
           <div>
             {/* Schedule fields */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 12px', marginBottom: 12, padding: '10px 12px', background: 'var(--grey-50)', borderRadius: 'var(--radius-md)' }}>
