@@ -493,18 +493,30 @@ Deno.serve(async (req) => {
         if (!text) { const v = validateFiles(files); if (v) return json({ error: v }, fileErrStatus(v)); }
 
         const prompt =
-          "You are reading a customer's event-requirements list (it may be typed, printed, or handwritten, " +
-          "possibly a phone photo). Extract the requested items. Return ONLY a JSON array — no prose, no code fences — " +
-          "of objects: {\"description\": string, \"quantity\": number, \"sub_event\": string|null, \"sub_items\": [{\"name\": string, \"qty\": number, \"note\": string|null}]}. " +
-          "description = the item/service requested. quantity = the number requested (use 1 if not stated). " +
+          "You are reading a customer's event-requirements list for an Indian event. " +
+          "The list may be typed, handwritten, photographed, or copy-pasted from WhatsApp — any format. " +
+          "Return ONLY a JSON array — no prose, no code fences — of objects: " +
+          "{\"description\": string, \"quantity\": number, \"sub_event\": string|null, \"sub_items\": [{\"name\": string, \"qty\": number, \"note\": string|null}]}. " +
+          "FIELD RULES: " +
+          "description = the main item/service (concise English label). " +
+          "quantity = count requested (use 1 if not stated; \"300 magnets\" → qty 300, \"4 members\" → qty 4; keep sizes/specs in description). " +
           "sub_event = the function/section it belongs to if the list is grouped (e.g. \"Mehendi\", \"Reception\"), else null. " +
-          "sub_items = a list of sub-details or nested line items for this entry if the list specifies them " +
-          "(e.g. \"Stage setup: 8x12 backdrop, 2 steps, fairy lights\" → sub_items=[{name:\"8x12 backdrop\",qty:1,note:null},{name:\"Steps\",qty:2,note:null},{name:\"Fairy lights\",qty:1,note:null}]). " +
-          "If there are no sub-items for an entry, set sub_items=[]. " +
-          "The list may be in English, Telugu, Hindi or a mix (Hinglish/Tenglish) and may be handwritten — read it faithfully; " +
-          "give each description as a short clear label in English where the meaning is obvious, otherwise keep the original wording. " +
-          "For quantity, read counts like \"2 tubs\", \"200 chairs\", \"8x12 backdrop\" as the number (2, 200, 1) and keep any size/spec in the description. " +
-          "Ignore prices, money, totals, headings, page numbers and contact details. If you cannot read any items, return [].";
+          "sub_items = specifications, details, variants, or nested requirements of this item ([] if none). " +
+          "HIERARCHY DETECTION — use ALL of the following signals to find parent items and their sub_items: " +
+          "1. INDENTATION: indented lines (leading spaces/tabs) are sub_items of the nearest preceding flush-left line. " +
+          "2. CAPS/BOLD HEADERS: a word or phrase in ALL CAPS acting as a section label, followed by plain lines, is the parent item; plain lines below it (until the next caps header or blank line) are its sub_items. " +
+          "3. BULLETS/NUMBERS: sub-bullets (-, –, a., i., *) under a top-level bullet are sub_items of that bullet. " +
+          "4. COLON LISTS: \"Stage: backdrop, steps, lights\" → Stage is the item, the comma-separated parts are sub_items. " +
+          "5. BLANK LINE RESET: a blank line usually signals a new top-level item; lines within the same block belong to the same parent. " +
+          "6. SPECIFICATION LANGUAGE — even with NO formatting cues, if a line reads as a dimension, color, material, design note, or instruction about the item immediately above it, make it a sub_item. " +
+          "Words/phrases that almost always signal a sub_item of the line above: \"instead of\", \"as per\", \"size\", \"height\", \"width\", \"color\", \"cloth\", \"do not\", \"no \", \"with \", \"design\", \"as given by us\", \"approximately\", \"straight\", \"circular\", \"reverse\". " +
+          "7. SEMANTIC CONTEXT (most powerful — applies to all input types including photos): when a line feels like a detail, spec, or note about the service mentioned in the line above rather than a new independent service, prefer making it a sub_item over creating a new top-level item. " +
+          "EXAMPLES: " +
+          "\"Decoration\\n  4x8 frame flexi at gate\\n  Entrance Arch\" → [{description:\"Decoration\",quantity:1,sub_event:null,sub_items:[{name:\"4x8 frame flexi at gate\",qty:1,note:null},{name:\"Entrance Arch\",qty:1,note:null}]}]. " +
+          "\"MAIN STAGE\\nCream cloth, gold strips draping\\nWarm lighting\\nSize 43x20 height 2.5\" → [{description:\"Main Stage\",quantity:1,sub_event:null,sub_items:[{name:\"Cream cloth, gold strips draping\",qty:1,note:null},{name:\"Warm lighting\",qty:1,note:null},{name:\"43x20, height 2.5\",qty:1,note:null}]}]. " +
+          "\"Fridge Magnet Stall - 300 magnets, size 2x2\" → [{description:\"Fridge Magnet Stall\",quantity:300,sub_event:null,sub_items:[{name:\"Magnet size 2x2\",qty:1,note:null}]}]. " +
+          "The list may mix English, Telugu, Hindi, Hinglish or Tenglish — read faithfully, give descriptions in English where meaning is clear. " +
+          "Ignore prices, money amounts, totals, page numbers, and contact details. If no items found, return [].";
 
         const content: any[] = text
           ? [{ type: "text", text: prompt + "\n\nHere is the message / list to read:\n\n" + text }]
@@ -653,10 +665,10 @@ Deno.serve(async (req) => {
         const token = String(body.token ?? "").trim();
         const pin   = String(body.pin  ?? "").trim();
         const signer_name = String(body.signer_name ?? "").trim();
-        const act   = String(body.action ?? "").trim(); // "signed" | "declined"
+        const act   = String(body.approval_action ?? "").trim(); // "signed" | "declined"
         if (!token) return json({ error: "token_required" }, 400);
         if (!pin)   return json({ error: "pin_required" }, 400);
-        if (!signer_name) return json({ error: "signer_name_required" }, 400);
+        if (act === "signed" && !signer_name) return json({ error: "signer_name_required" }, 400);
         if (!["signed", "declined"].includes(act)) return json({ error: "invalid_action" }, 400);
 
         const token_hash = await sha256hex(token);
