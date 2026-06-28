@@ -145,12 +145,15 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
       if (showQty) row.push(String(parseFloat(li.quantity || 0)));
       if (showPrices) { row.push(money(li.unit_price)); row.push(money(li.amount)); }
       body.push(row);
-      // Sub-items: each rendered as an indented bullet row spanning all columns
+      // Sub-items: proper multi-column rows so column lines match the main item rows
       (li.sub_items || []).forEach((si) => {
         if (!si || !String(si.name || '').trim()) return;
-        const siText = '  • ' + String(si.name).trim() + ' × ' + String(si.qty || 1) + (si.note ? ' (' + String(si.note) + ')' : '');
+        const siDesc = '  • ' + String(si.name).trim() + (si.note ? ' (' + String(si.note) + ')' : '');
+        const siRow = [siDesc];
+        if (showQty) siRow.push(String(si.qty || 1));
+        if (showPrices) { siRow.push(''); siRow.push(''); }
         subItemRows.push(body.length);
-        body.push([{ content: siText, colSpan: head.length }]);
+        body.push(siRow);
       });
     });
   });
@@ -173,7 +176,7 @@ export function buildQuotationPDF(quot, lineItems, opts = {}) {
     columnStyles: colStyles,
     didParseCell: (d) => {
       if (d.section === 'body' && grpRows.includes(d.row.index)) { d.cell.styles.fillColor = PSOFT; d.cell.styles.textColor = PINK; d.cell.styles.fontStyle = 'bold'; d.cell.styles.fontSize = 8; }
-      if (d.section === 'body' && subItemRows.includes(d.row.index)) { d.cell.styles.fontSize = 8; d.cell.styles.textColor = MUTED; d.cell.styles.fillColor = [252, 252, 252]; d.cell.styles.cellPadding = { top: 2, bottom: 3, left: 16, right: 6 }; }
+      if (d.section === 'body' && subItemRows.includes(d.row.index)) { d.cell.styles.fontSize = 8; d.cell.styles.textColor = MUTED; d.cell.styles.fillColor = [252, 252, 252]; d.cell.styles.cellPadding = d.column.index === 0 ? { top: 2, bottom: 3, left: 16, right: 6 } : { top: 2, bottom: 3, left: 6, right: 6 }; }
     },
     didDrawPage: (d) => { drawFrame(); if (d.pageNumber > 1) { drawHeaderBand(); } },
   });

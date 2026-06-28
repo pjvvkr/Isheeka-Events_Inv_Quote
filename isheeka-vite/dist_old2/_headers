@@ -1,0 +1,15 @@
+# Netlify security headers — applied to the ERP at app.isheekaevents.com.
+# Safe set (no breakage risk). A Content-Security-Policy is intentionally left out
+# here because it must be tested against Supabase/PWA calls before enabling — see
+# the commented template at the bottom; add it under /* once verified.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(self)
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  Cross-Origin-Opener-Policy: same-origin
+
+# ── CSP template (TEST before enabling) ────────────────────────────────────────
+# Add these lines indented under /* above, then verify login, PDFs, uploads, push:
+#   Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://jlcssesetnxulnkbrmyp.supabase.co wss://jlcssesetnxulnkbrmyp.supabase.co; frame-ancestors 'none'; base-uri 'self'; object-src 'none'
