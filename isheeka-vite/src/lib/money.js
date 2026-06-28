@@ -207,7 +207,7 @@ export async function createInvoiceFromQuote(quotationId, opts = {}) {
     const rTax = existing.gst_applicable ? Math.round(rTaxable * (parseFloat(existing.gst_pct) || 0) / 100) : 0;
     const rGrand = rTaxable + rTax;
     await supabase.from('invoice_line_items').update({ is_deleted: true }).eq('invoice_id', existing.invoice_id);
-    if (qitems && qitems.length) { await supabase.from('invoice_line_items').insert(qitems.map((it, idx) => ({ invoice_id: existing.invoice_id, description: it.description || '—', sub_event_name: it.sub_event_name || null, quantity: it.quantity, unit_price: it.unit_price, amount: it.amount, sort_order: (it.sort_order != null ? it.sort_order : idx) }))); }
+    if (qitems && qitems.length) { await supabase.from('invoice_line_items').insert(qitems.map((it, idx) => ({ invoice_id: existing.invoice_id, description: it.description || '—', sub_event_name: it.sub_event_name || null, quantity: it.quantity, unit_price: it.unit_price, amount: it.amount, sort_order: (it.sort_order != null ? it.sort_order : idx), sub_items: it.sub_items || [] }))); }
     await supabase.from('invoice_installments').update({ is_deleted: true }).eq('invoice_id', existing.invoice_id);
     let rps = quot.payment_schedule; if (typeof rps === 'string') { try { rps = JSON.parse(rps || '[]'); } catch (e) { rps = []; } } rps = Array.isArray(rps) ? rps : [];
     if (rps.length) { await supabase.from('invoice_installments').insert(rps.map((p, idx) => { const pct = parseFloat(p.pct) || 0; const amt = (parseFloat(p.amount) > 0) ? Math.round(parseFloat(p.amount)) : Math.round(rGrand * pct / 100); return { invoice_id: existing.invoice_id, installment_number: idx + 1, percentage: pct, label: p.label || ('Installment ' + (idx + 1)), when_text: p.when || '', amount_due: amt, amount_paid: 0, balance: amt, status: 'pending' }; })); }
@@ -234,7 +234,7 @@ export async function createInvoiceFromQuote(quotationId, opts = {}) {
   }).select().single();
   if (ie || !inv) { notify('Failed to create the invoice. ' + ((ie && ie.message) || ''), 'error'); return null; }
   if (items && items.length) {
-    const liRows = items.map((it, idx) => ({ invoice_id: inv.invoice_id, description: it.description || '—', sub_event_name: it.sub_event_name || null, quantity: it.quantity, unit_price: it.unit_price, amount: it.amount, sort_order: (it.sort_order != null ? it.sort_order : idx) }));
+    const liRows = items.map((it, idx) => ({ invoice_id: inv.invoice_id, description: it.description || '—', sub_event_name: it.sub_event_name || null, quantity: it.quantity, unit_price: it.unit_price, amount: it.amount, sort_order: (it.sort_order != null ? it.sort_order : idx), sub_items: it.sub_items || [] }));
     const { error: lie } = await supabase.from('invoice_line_items').insert(liRows);
     if (lie) { await supabase.from('invoices').delete().eq('invoice_id', inv.invoice_id); notify('Failed to copy line items — invoice rolled back. ' + (lie.message || ''), 'error'); return null; }
   }

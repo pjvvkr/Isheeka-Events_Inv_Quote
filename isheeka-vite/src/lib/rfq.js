@@ -90,7 +90,7 @@ export async function approveRfqToQuote(r, items, forced) {
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(), is_deleted: false,
   }).select('quotation_id,ref_number').single(), 'create draft quote');
   if (qe || !q) throw qe || new Error('quote create failed');
-  const li = (items || []).filter((it) => (it.description || '').trim()).map((it, i) => ({ quotation_id: q.quotation_id, sub_event_name: it.sub_event_name || null, description: it.description, quantity: parseFloat(it.quantity) || 1, unit_price: 0, sort_order: i }));
+  const li = (items || []).filter((it) => (it.description || '').trim()).map((it, i) => ({ quotation_id: q.quotation_id, sub_event_name: it.sub_event_name || null, description: it.description, quantity: parseFloat(it.quantity) || 1, unit_price: 0, sort_order: i, sub_items: it.sub_items || [] }));
   if (li.length) { const { error: lie } = await runDb(supabase.from('quotation_line_items').insert(li), 'add quote items'); if (lie) throw lie; }
   const uid = await _currentUid();
   await runDb(supabase.from('rfqs').update({ status: 'converted', client_id, quotation_id: q.quotation_id, staff_approved_at: new Date().toISOString(), approved_by: uid || null, updated_at: new Date().toISOString() }).eq('rfq_id', r.rfq_id), 'approve rfq');

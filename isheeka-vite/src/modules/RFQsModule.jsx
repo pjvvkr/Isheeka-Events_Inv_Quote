@@ -461,6 +461,14 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   };
   const setEF = (k, v) => setEditFields((f) => ({ ...f, [k]: v }));
   const setEI = (idx, k, v) => setEditItems((arr) => arr.map((it, i) => i === idx ? { ...it, [k]: v } : it));
+  // Sub-item helpers
+  const setSI = (itemIdx, siIdx, k, v) => setEditItems((arr) => arr.map((it, i) => i !== itemIdx ? it : { ...it, sub_items: (it.sub_items || []).map((si, j) => j === siIdx ? { ...si, [k]: v } : si) }));
+  const addSI = (itemIdx) => setEditItems((arr) => arr.map((it, i) => i !== itemIdx ? it : { ...it, sub_items: [...(it.sub_items || []), { name: '', qty: 1, note: '' }] }));
+  const removeSI = (itemIdx, siIdx) => setEditItems((arr) => arr.map((it, i) => i !== itemIdx ? it : { ...it, sub_items: (it.sub_items || []).filter((_, j) => j !== siIdx) }));
+  const moveSIUp = (itemIdx, siIdx) => { if (siIdx === 0) return; setEditItems((arr) => arr.map((it, i) => { if (i !== itemIdx) return it; const sis = [...(it.sub_items || [])]; [sis[siIdx - 1], sis[siIdx]] = [sis[siIdx], sis[siIdx - 1]]; return { ...it, sub_items: sis }; })); };
+  const moveSIDown = (itemIdx, siIdx) => setEditItems((arr) => arr.map((it, i) => { if (i !== itemIdx) return it; const sis = [...(it.sub_items || [])]; if (siIdx >= sis.length - 1) return it; [sis[siIdx], sis[siIdx + 1]] = [sis[siIdx + 1], sis[siIdx]]; return { ...it, sub_items: sis }; }));
+  const moveSIToItem = (fromIdx, siIdx, toIdx) => setEditItems((arr) => { const r = arr.map((it) => ({ ...it, sub_items: [...(it.sub_items || [])] })); const [si] = r[fromIdx].sub_items.splice(siIdx, 1); r[toIdx].sub_items.push(si); return r; });
+  const copyItem = (itemIdx) => setEditItems((arr) => { const it = arr[itemIdx]; const cp = { ...it, _tmpId: Date.now(), sub_items: (it.sub_items || []).map((si) => ({ ...si })) }; const next = [...arr]; next.splice(itemIdx + 1, 0, cp); return next; });
 
   // Item 6A: save staff edits
   const saveEdits = async () => {
@@ -487,6 +495,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
       quantity: parseFloat(it.quantity) || 1,
       sort_order: idx,
       source: it.source || 'custom',
+      sub_items: (it.sub_items || []).filter((si) => si && String(si.name || '').trim()),
     }));
     if (newItems.length > 0) await runDb(supabase.from('rfq_items').insert(newItems), 'insert items');
     // 3. Log activity
@@ -687,22 +696,53 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
               <div><label className="field-label">Guest count</label><input className="field-input" type="number" value={editFields.guest_count || ''} onChange={(e) => setEF('guest_count', e.target.value)} /></div>
               <div style={{ gridColumn: '1 / -1' }}><label className="field-label">Notes</label><textarea className="field-input" rows={2} value={editFields.notes || ''} onChange={(e) => setEF('notes', e.target.value)} style={{ resize: 'vertical' }} /></div>
             </div>
-            {/* Item 7: draggable item rows */}
+            {/* Item 7: draggable item rows with sub-items */}
             {editItems.map((it, idx) => (
               <div key={it._tmpId !== undefined ? it._tmpId : idx}
-                draggable
-                onDragStart={() => onDragStart(idx)}
-                onDragOver={onDragOver}
-                onDrop={() => onDrop(idx)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', marginBottom: 4, border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-sm)', background: dragIdx === idx ? 'var(--grey-50)' : 'white', cursor: 'grab' }}>
-                <span style={{ fontSize: 16, color: 'var(--grey-300)', cursor: 'grab', userSelect: 'none' }}>⠿</span>
-                <input className="field-input" style={{ flex: 2, fontSize: 12, padding: '4px 8px' }} value={it.description || ''} placeholder="Description" onChange={(e) => setEI(idx, 'description', e.target.value)} />
-                <input className="field-input" style={{ width: 70, fontSize: 12, padding: '4px 8px' }} type="number" value={it.quantity || 1} min={1} onChange={(e) => setEI(idx, 'quantity', e.target.value)} />
-                <input className="field-input" style={{ width: 100, fontSize: 12, padding: '4px 8px' }} value={it.sub_event_name || ''} placeholder="Function" onChange={(e) => setEI(idx, 'sub_event_name', e.target.value)} />
-                <button className="btn sm" style={{ color: 'var(--red)', flexShrink: 0 }} onClick={() => setEditItems((arr) => arr.filter((_, i) => i !== idx))}>✕</button>
+                style={{ marginBottom: 8, border: dragIdx === idx ? '1.5px dashed var(--pink)' : '1px solid var(--grey-150)', borderRadius: 'var(--radius-sm)', background: dragIdx === idx ? 'var(--grey-50)' : 'white', overflow: 'hidden' }}>
+                {/* Item header row — draggable */}
+                <div
+                  draggable
+                  onDragStart={() => onDragStart(idx)}
+                  onDragOver={onDragOver}
+                  onDrop={() => onDrop(idx)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', cursor: 'grab' }}>
+                  <span title="Drag to reorder item (moves with all its details)" style={{ fontSize: 16, color: 'var(--grey-300)', cursor: 'grab', userSelect: 'none' }}>⠿</span>
+                  <input className="field-input" style={{ flex: 2, fontSize: 12, padding: '4px 8px' }} value={it.description || ''} placeholder="Description" onChange={(e) => setEI(idx, 'description', e.target.value)} />
+                  <input className="field-input" style={{ width: 60, fontSize: 12, padding: '4px 8px' }} type="number" value={it.quantity || 1} min={1} onChange={(e) => setEI(idx, 'quantity', e.target.value)} />
+                  <input className="field-input" style={{ width: 110, fontSize: 12, padding: '4px 8px' }} value={it.sub_event_name || ''} placeholder="Function" onChange={(e) => setEI(idx, 'sub_event_name', e.target.value)} />
+                  <button className="btn sm" title="Duplicate item with all its details" style={{ color: 'var(--grey-400)', flexShrink: 0, padding: '2px 7px', fontSize: 13 }} onClick={() => copyItem(idx)}>⧉</button>
+                  <button className="btn sm" style={{ color: 'var(--red)', flexShrink: 0 }} onClick={() => setEditItems((arr) => arr.filter((_, i) => i !== idx))}>✕</button>
+                </div>
+                {/* Sub-item rows */}
+                {(it.sub_items || []).map((si, siIdx) => (
+                  <div key={siIdx} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px 3px 26px', borderTop: '1px solid var(--grey-50)', background: '#FAFAFA' }}>
+                    <span style={{ color: 'var(--grey-300)', fontSize: 11, flexShrink: 0 }}>↳</span>
+                    <input className="field-input" style={{ flex: 2, fontSize: 11, padding: '2px 6px' }} value={si.name || ''} placeholder="Detail name" onChange={(e) => setSI(idx, siIdx, 'name', e.target.value)} />
+                    <input className="field-input" style={{ width: 46, fontSize: 11, padding: '2px 6px' }} type="number" value={si.qty || 1} min={1} onChange={(e) => setSI(idx, siIdx, 'qty', parseFloat(e.target.value) || 1)} />
+                    <input className="field-input" style={{ width: 84, fontSize: 11, padding: '2px 6px' }} value={si.note || ''} placeholder="Note" onChange={(e) => setSI(idx, siIdx, 'note', e.target.value)} />
+                    <select
+                      title="Move to a different item"
+                      style={{ fontSize: 11, padding: '2px 4px', border: '1px solid var(--grey-200)', borderRadius: 4, color: 'var(--grey-400)', background: 'white', cursor: 'pointer', flexShrink: 0 }}
+                      value=""
+                      onChange={(e) => { const toIdx = parseInt(e.target.value, 10); if (!isNaN(toIdx)) moveSIToItem(idx, siIdx, toIdx); }}>
+                      <option value="">⇄</option>
+                      {editItems.map((other, oIdx) => oIdx !== idx
+                        ? <option key={oIdx} value={oIdx}>{other.description ? other.description.substring(0, 22) : ('Item ' + (oIdx + 1))}</option>
+                        : null)}
+                    </select>
+                    <button className="btn sm" title="Move up" style={{ padding: '1px 5px', fontSize: 10, flexShrink: 0 }} onClick={() => moveSIUp(idx, siIdx)} disabled={siIdx === 0}>↑</button>
+                    <button className="btn sm" title="Move down" style={{ padding: '1px 5px', fontSize: 10, flexShrink: 0 }} onClick={() => moveSIDown(idx, siIdx)} disabled={siIdx === (it.sub_items || []).length - 1}>↓</button>
+                    <button className="btn sm" style={{ color: 'var(--red)', padding: '1px 5px', flexShrink: 0 }} onClick={() => removeSI(idx, siIdx)}>✕</button>
+                  </div>
+                ))}
+                {/* Add detail link */}
+                <div style={{ padding: '3px 8px 5px 26px', borderTop: '1px solid var(--grey-50)', background: '#FAFAFA' }}>
+                  <button style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--grey-400)', cursor: 'pointer', padding: 0 }} onClick={() => addSI(idx)}>＋ add detail</button>
+                </div>
               </div>
             ))}
-            <button className="btn sm" style={{ marginTop: 6 }} onClick={() => setEditItems((arr) => [...arr, { _tmpId: Date.now(), description: '', quantity: 1, sub_event_name: arr.length > 0 ? arr[arr.length - 1].sub_event_name : '', source: 'custom', sort_order: arr.length }])}>+ Add item</button>
+            <button className="btn sm" style={{ marginTop: 4 }} onClick={() => setEditItems((arr) => [...arr, { _tmpId: Date.now(), description: '', quantity: 1, sub_event_name: arr.length > 0 ? arr[arr.length - 1].sub_event_name : '', source: 'custom', sort_order: arr.length, sub_items: [] }])}>+ Add item</button>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button className="btn" onClick={() => { setEditMode(false); }}>Cancel</button>
               <button className="btn primary" disabled={saving} onClick={saveEdits}>{saving ? 'Saving…' : 'Save changes'}</button>
