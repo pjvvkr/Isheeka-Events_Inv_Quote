@@ -99,7 +99,7 @@ export async function loadCostingVendorSuggestion(quotationIds) {
   if (!ids.length) return [];
   const { data: sums } = await supabase.from('costing_summaries')
     .select('*').in('quotation_id', ids).eq('is_deleted', false)
-    .order('created_at', { ascending: false });
+    .order('generated_at', { ascending: false });
   const summary = (sums || [])[0];
   if (!summary || !Array.isArray(summary.lines)) return [];
   const byVendor = {};

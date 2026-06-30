@@ -981,17 +981,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
 
       {/* Workflow */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
-        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Workflow</div>
-        {/* Lead → Quote → Event → Invoice chain */}
-        <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',fontSize:12,color:'var(--grey-400)',marginBottom:14,paddingBottom:12,borderBottom:'1px solid var(--grey-100)'}}>
-          {linkedLead?<a onClick={()=>onNavigate&&onNavigate('leads',{leadId:linkedLead.lead_id,label:linkedLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {linkedLead.ref_number||'Lead'}</a>:<span>🎯 —</span>}
-          <span>→</span>
-          {quotations.length>0?<a onClick={()=>{const aq=quotations.find(q=>!['superseded','rejected','expired'].includes(q.status))||quotations[0];onNavigate&&onNavigate('quotations',{quotId:aq.quotation_id,label:aq.ref_number});}} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>📄 {quotations.length>1?(quotations.length+' quotes'):(quotations[0].ref_number)}</a>:<span>📄 —</span>}
-          <span>→</span>
-          <span style={{color:'var(--grey-700)',fontWeight:500}}>🎪 {event.ref_number} (this event)</span>
-          <span>→</span>
-          {invoices.length>0?<a onClick={()=>{const iv=(invoices.find(i=>i.status!=='cancelled')||invoices[0]);onNavigate&&onNavigate('invoices',{invoiceId:iv.invoice_id,label:iv.ref_number});}} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🧾 {invoices.length>1?(invoices.length+' invoices'):(invoices[0].ref_number)}</a>:<span>🧾 —</span>}
-        </div>
+        <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Quotations &amp; invoices</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
