@@ -130,6 +130,14 @@ Once the Netlify portals are verified end-to-end and old links have lapsed (toke
 - Disable GitHub Pages, then flip the repo to **private**.
 - Housekeeping: remove the `dist_old/` and `dist_old2/` local EPERM-workaround dirs if unused.
 
+### Pro-plan upgrade items (Free tier cannot enable these)
+- Leaked-password protection (HaveIBeenPwned) - Auth > Providers > Email; Pro-only.
+- Point-in-time recovery (PITR) backups - worth it for client + financial data; Pro-only.
+- MFA (TOTP): the capability can be enabled in the dashboard, but using it needs a small
+  in-app enrolment screen (separate build).
+- Free-tier hardening already applied instead: minimum password length raised to 8, password
+  complexity requirements enabled, require-current-password-on-change.
+
 ## Open decisions / levers
 - Mobile (Phase 3) timing: deferred per current desktop-first usage; revisit when mobile use grows.
 - Phase 1 migration style: one-time foundation refactor (recommended) vs. user-visible slices.
