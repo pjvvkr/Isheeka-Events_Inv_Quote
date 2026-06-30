@@ -10,6 +10,8 @@ import { _currentUid } from '../lib/session.js';
 import { fmtDate, eventTypeLabel, effectiveEventStatus, eventFunnel, matchesBudget, vendorInstBalance, isVendorInstOverdue, isVendorInstDueSoon, todayLocalStr, quoteStatusLabel } from '../lib/format.js';
 import { EVENT_STATUS_ORDER, EVENT_STATUS_LABELS, EVENT_STATUS_COLORS, EVENT_STAGE_COLORS, BUDGET_RANGES, VENDOR_CATS, VENDOR_MODES } from '../lib/constants.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
+import { DocFlow } from '../components/ui/DocFlow.jsx';
+import { resolveDocChain } from '../lib/docChain.js';
 import { useEventTypes } from '../lib/data.js';
 import { getNextEventRef, getNextClientRef } from '../lib/refs.js';
 import { addEventVendor, recordVendorPayment, recordVendorRefund, recordClientRefund, createInvoiceFromQuote, _ensureVendorInstallment } from '../lib/money.js';
@@ -396,6 +398,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   };
 
   React.useEffect(()=>{ loadAll(); },[eventId]);
+  const [docChain, setDocChain] = React.useState(null);
+  React.useEffect(()=>{ let live = true; if (eventId) resolveDocChain('event', eventId).then(d => { if (live) setDocChain(d); }).catch(()=>{}); return () => { live = false; }; }, [eventId]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -762,6 +766,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   // ── SHARED HEADER (always visible) ──────────────────────────────────────────
   const header = (
     <div>
+      {mode==='view' && docChain && <DocFlow chain={docChain} current="event" onNavigate={onNavigate} />}
       {showChangeClient && <ChangeClientModal currentClient={{client_id:event.client_id}} onSave={handleChangeClient} onCancel={()=>setShowChangeClient(false)}/>}
       {mode==='edit'&&<div style={{fontSize:12,color:'var(--grey-400)',marginBottom:10}}>Editing · {event.name}</div>}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'18px 24px',border:'1px solid var(--grey-100)',marginBottom:16,display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
