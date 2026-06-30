@@ -60,6 +60,7 @@ export const LEAD_STAGE_COLORS = {
   quote_confirmed: { bg: '#FAEEDA', color: '#854F0B' },
   event_triggered: { bg: '#E1F5EE', color: '#0F6E56' },
   completed: { bg: '#E1F5EE', color: '#0F6E56' },
+  lost: { bg: '#FCEBEB', color: '#A32D2D' },
 };
 export const LEAD_LOSS_REASONS = [
   { value: 'price_too_high', label: 'Price too high' },

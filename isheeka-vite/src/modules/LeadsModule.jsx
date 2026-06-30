@@ -8,6 +8,7 @@ import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid } from '../lib/session.js';
 import { fmtDate, eventTypeLabel, leadStageDisplay, getFollowUpUrgency, quoteStatusLabel } from '../lib/format.js';
 import { LEAD_STAGES, LEAD_STAGE_LABELS, LEAD_STAGE_COLORS, LEAD_SOURCES_DEFAULT, LEAD_LOSS_REASONS, URGENCY_COLORS, QUOT_STATUS_COLORS, QUOT_STATUS_LABELS } from '../lib/constants.js';
+import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { useEventTypes, fetchLeadSources } from '../lib/data.js';
 import { getNextLeadRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
@@ -495,18 +496,14 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
           <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}><ClientLink clientId={lead.client_id} name={(lead.first_name+' '+lead.last_name).trim()} onNavigate={onNavigate} title="Open client (converted lead)">{lead.first_name} {lead.last_name}</ClientLink>{lead.ref_number&&<span style={{fontSize:13,fontWeight:400,color:'var(--grey-400)',marginLeft:8}}>{lead.ref_number}</span>}</div>
           <div style={{fontSize:12,color:'var(--grey-400)',marginBottom:6}}>{lead.phone}{lead.email?' · '+lead.email:''}</div>
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-            <span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>
-              {isLost?'LOST':leadStageDisplay(lead.stage)}
-            </span>
+            <StatusBadge kind="lead" status={lead.stage} label={isLost?'LOST':leadStageDisplay(lead.stage)} />
             {lead.event_type&&<span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
             {lead.source&&<span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--grey-100)',color:'var(--grey-400)',textTransform:'capitalize'}}>{lead.source.replace('_',' ')}</span>}
           </div>
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
           {/* Stage badge — always visible */}
-          <span style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,background:sc.bg,color:sc.color}}>
-            {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
-          </span>
+          <StatusBadge kind="lead" status={lead.stage} size="md" label={isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)} />
           {lead.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:lead.client_id,label:(lead.first_name+' '+lead.last_name).trim()||'Client'})}>👤 View client →</button>}
           {!isLost&&lead.stage!=='completed'&&(()=>{ const activeRfq=leadRfqs.find(r=>!['converted','withdrawn','expired'].includes(r.status)); const tip=activeRfq?('An active RFQ ('+activeRfq.ref_number+') already exists — open it below.'):'Send a requirements link to capture event details'; return (
             <span title={tip} style={{display:'inline-flex'}}>
@@ -659,7 +656,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
                       {q.valid_until&&(' · Valid until '+fmtDate(q.valid_until,{day:'numeric',month:'short'}))}
                     </div>
                   </div>
-                  <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{statusLabel}</span>
+                  <StatusBadge kind="quote" status={q.status} label={statusLabel} />
                 </div>
               );
             };
@@ -813,9 +810,7 @@ function LeadReferenceModal({onSelect, onCancel}) {
                   <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>
                     {typeIcons[lead.event_type]||'🎪'} {lead.first_name} {lead.last_name}
                   </div>
-                  <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color,flexShrink:0,marginLeft:8}}>
-                    {isLost?'Lost':isConverted?'Converted':leadStageDisplay(lead.stage)}
-                  </span>
+                  <StatusBadge kind="lead" status={lead.stage} label={isLost?'Lost':isConverted?'Converted':leadStageDisplay(lead.stage)} style={{flexShrink:0,marginLeft:8}} />
                 </div>
                 <div style={{display:'flex',gap:12,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
                   {lead.event_type&&<span style={{textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
@@ -1059,9 +1054,7 @@ export function LeadsModule({nav, onNavigate, onBack}) {
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
                       <span style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{lead.first_name} {lead.last_name}</span>
                       {lead.ref_number&&<span style={{fontSize:11,color:'var(--grey-400)',fontWeight:400}}>{lead.ref_number}</span>}
-                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>
-                        {isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)}
-                      </span>
+                      <StatusBadge kind="lead" status={lead.stage} label={isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)} />
                       {lead.event_type&&<span style={{padding:'2px 8px',borderRadius:20,fontSize:11,background:'var(--blue-light)',color:'var(--blue)',textTransform:'capitalize'}}>{eventTypeLabel(lead.event_type)}</span>}
                     </div>
                     <div style={{display:'flex',gap:14,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
