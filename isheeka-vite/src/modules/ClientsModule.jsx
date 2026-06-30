@@ -8,6 +8,7 @@ import { getNextClientRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
 import { fmtDate, eventTypeLabel, leadStageDisplay } from '../lib/format.js';
 import { EVENT_STATUS_COLORS, EVENT_STATUS_LABELS, QUOT_STATUS_COLORS, QUOT_STATUS_LABELS } from '../lib/constants.js';
+import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { CLIENT_TEMPLATES, logEmail, sendWhatsApp } from '../lib/messaging.js';
 
 export function ClientForm({ initial = {}, onSave, onCancel, title = 'New client' }) {
@@ -438,7 +439,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
                 <div style={{ padding: '12px 16px' }}>
                   <div onClick={() => setExpanded((x) => ({ ...x, [ev.event_id]: !x[ev.event_id] }))} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: 'pointer' }}>
                     <span onClick={(e) => { e.stopPropagation(); onNavigate && onNavigate('events', { eventId: ev.event_id, label: ev.name || ev.ref_number || 'Event' }); }} style={{ fontSize: 14, fontWeight: 600, color: 'var(--grey-800)', textDecoration: 'underline', textDecorationColor: 'var(--grey-200)' }}>{ev.name || eventTypeLabel(ev.type) || 'Event'}</span>
-                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 500, background: esc.bg, color: esc.color }}>{EVENT_STATUS_LABELS[(ev.status || '').toLowerCase()] || ev.status}</span>
+                    <StatusBadge kind="event" status={(ev.status || '').toLowerCase()} />
                     {!open && <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--grey-600)' }}>{inr(ev.invoiced)}{fullyPaid ? <span style={{ color: 'var(--green)' }}> · fully paid</span> : ev.outstanding > 0 ? <span style={{ color: 'var(--red)' }}> · {inr(ev.outstanding)} due</span> : null}</span>}
                     <span style={{ marginLeft: open ? 'auto' : 0, color: 'var(--grey-400)', fontSize: 12 }}>{open ? '▾' : '▸'}</span>
                   </div>
@@ -472,7 +473,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
               <div key={o.kind + o.id} onClick={() => o.kind === 'quote' ? onNavigate && onNavigate('quotations', { quotId: o.id, label: o.ref }) : onNavigate && onNavigate('leads', { leadId: o.id, label: o.ref })} style={{ background: 'white', border: '1px dashed var(--grey-200)', borderRadius: 'var(--radius-md)', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: 'pointer', marginBottom: 8 }}>
                 {o.kind === 'quote' ? <>
                   <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--pink)' }}>{o.ref}</span>
-                  {(() => { const qc = QUOT_STATUS_COLORS[o.status] || QUOT_STATUS_COLORS.draft; return <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 500, background: qc.bg, color: qc.color }}>{QUOT_STATUS_LABELS[o.status] || o.status}</span>; })()}
+                  {(() => { const qc = QUOT_STATUS_COLORS[o.status] || QUOT_STATUS_COLORS.draft; return <StatusBadge kind="quote" status={o.status} />; })()}
                   <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--grey-400)' }}>{inr(o.amount)}</span>
                 </> : <>
                   <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold)' }}>LEAD</span>

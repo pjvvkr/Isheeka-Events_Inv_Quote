@@ -9,6 +9,7 @@ import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid } from '../lib/session.js';
 import { fmtDate, eventTypeLabel, effectiveEventStatus, eventFunnel, matchesBudget, vendorInstBalance, isVendorInstOverdue, isVendorInstDueSoon, todayLocalStr, quoteStatusLabel } from '../lib/format.js';
 import { EVENT_STATUS_ORDER, EVENT_STATUS_LABELS, EVENT_STATUS_COLORS, EVENT_STAGE_COLORS, BUDGET_RANGES, VENDOR_CATS, VENDOR_MODES } from '../lib/constants.js';
+import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { useEventTypes } from '../lib/data.js';
 import { getNextEventRef, getNextClientRef } from '../lib/refs.js';
 import { addEventVendor, recordVendorPayment, recordVendorRefund, recordClientRefund, createInvoiceFromQuote, _ensureVendorInstallment } from '../lib/money.js';
@@ -770,9 +771,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
           {mode==='view' && <>
-            <span style={{padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:500,background:sc.bg,color:sc.color}}>
-              {EVENT_STATUS_LABELS[event.status?.toLowerCase()]||event.status}
-            </span>
+            <StatusBadge kind="event" status={event.status?.toLowerCase()} size="md" />
             {!['cancelled'].includes(event.status?.toLowerCase())&&<EventFunnelBadge funnel={event.status?.toLowerCase()==='completed'?{...funnel,label:null}:funnel}/>}
             {event.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:event.client_id,label:event.client_name||'Client'})}>👤 View client →</button>}
             {!['completed','cancelled'].includes(event.status?.toLowerCase())&&(
@@ -2027,7 +2026,7 @@ export function EventsModule({nav, onNavigate, onBack}) {
                   <div style={{padding:'14px 16px'}}>
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,flexWrap:'wrap'}}>
                       <span style={{fontSize:14,fontWeight:500,color:'var(--grey-800)'}}>{e.name}</span>
-                      <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{EVENT_STATUS_LABELS[es]||es}</span>
+                      <StatusBadge kind="event" status={es} />
                       {es!=='cancelled'&&<EventFunnelBadge compact funnel={es==='completed'?{...(eventFunnels[e.event_id]||{}),label:null}:eventFunnels[e.event_id]}/>}
                     </div>
                     <div style={{display:'flex',gap:16,fontSize:12,color:'var(--grey-400)',flexWrap:'wrap'}}>
