@@ -11,6 +11,12 @@ body{font-family:'Inter',sans-serif;background:#FAF7F3;color:#1a1a1a;min-height:
   --shadow-sm:0 1px 3px rgba(232,24,90,0.08);--shadow-md:0 4px 12px rgba(232,24,90,0.12);
   --shadow-lg:0 8px 24px rgba(232,24,90,0.16);
   --radius-sm:6px;--radius-md:10px;--radius-lg:14px;--radius-xl:20px;
+  /* Typography scale */
+  --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-base:14px;--fs-lg:16px;--fs-xl:18px;--fs-2xl:22px;--fs-3xl:26px;
+  --fw-regular:400;--fw-medium:500;--fw-semibold:600;--fw-bold:700;
+  --lh-tight:1.2;--lh-normal:1.5;--lh-relaxed:1.7;
+  /* Spacing scale */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;
 }
 ::-webkit-scrollbar{width:5px}
 ::-webkit-scrollbar-track{background:var(--grey-50)}

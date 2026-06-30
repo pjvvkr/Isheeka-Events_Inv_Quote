@@ -14,6 +14,7 @@ import { fetchAsBase64 } from '../lib/storage.js';
 import { uploadInvoicePdf, buildInvoiceShareMsg, openWhatsApp, openEmail, validClientPhone } from '../lib/share.js';
 import { fmtDate, isInvoiceOverdue } from '../lib/format.js';
 import { INVOICE_STATUS_COLORS, INVOICE_STATUS_LABELS, QUOT_STATUS_LABELS, LEAD_STAGE_LABELS } from '../lib/constants.js';
+import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { ClientLink } from '../components/links.jsx';
 import { ClientForm } from './ClientsModule.jsx';
 
@@ -90,7 +91,7 @@ export function InvoicesModule({ nav, onNavigate, onBack }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                       <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--pink)' }}>{inv.ref_number}</span>
                       {inv.revision_number > 0 && <span style={{ fontSize: 11, color: 'var(--grey-400)' }}>Rev {inv.revision_number}</span>}
-                      <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color }}>{INVOICE_STATUS_LABELS[est] || est}</span>
+                      <StatusBadge kind="invoice" status={est} />
                     </div>
                     <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--grey-400)', flexWrap: 'wrap' }}>
                       {inv.client_name && <span>👤 <ClientLink clientId={inv.client_id} name={inv.client_name} onNavigate={onNavigate}>{inv.client_name}</ClientLink></span>}
@@ -218,7 +219,6 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
   if (loading) return <div style={{ padding: 60, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div>;
   if (!inv) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--grey-400)' }}>Invoice not found. <button className="btn sm" onClick={onBack}>← Back</button></div>;
 
-  const sc = INVOICE_STATUS_COLORS[inv.status] || INVOICE_STATUS_COLORS.draft;
   const subtotal = parseFloat(inv.subtotal) || 0;
   const discount = parseFloat(inv.discount_amount) || 0;
   const taxable = Math.max(0, subtotal - discount);
@@ -473,7 +473,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 20, fontWeight: 600, color: 'var(--grey-800)' }}>{inv.ref_number}</span>
               {inv.revision_number > 0 && <span style={{ fontSize: 12, color: 'var(--grey-400)' }}>Rev {inv.revision_number}</span>}
-              <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500, background: sc.bg, color: sc.color }}>{INVOICE_STATUS_LABELS[inv.status] || inv.status}</span>
+              <StatusBadge kind="invoice" status={inv.status} />
             </div>
             <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 4 }}>
               <ClientLink clientId={inv.client_id} name={inv.client_name} onNavigate={onNavigate}>{inv.client_name || '—'}</ClientLink>{inv.event_name ? ' · ' + inv.event_name : ''}{inv.doc_date ? ' · ' + fmt(inv.doc_date) : ''}
