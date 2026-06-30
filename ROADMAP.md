@@ -138,6 +138,13 @@ Once the Netlify portals are verified end-to-end and old links have lapsed (toke
 - Free-tier hardening already applied instead: minimum password length raised to 8, password
   complexity requirements enabled, require-current-password-on-change.
 
+### Dependency vulnerabilities (deferred - do NOT `--force`)
+- `npm audit` shows 11 (esbuild/vite/vitest chain + uuid-via-exceljs). All remaining fixes need
+  `npm audit fix --force`, which is unsafe here: it downgrades exceljs (breaks Excel exports) and
+  forces a Vite 8 major upgrade. The esbuild advisory is dev-server-only (no production impact);
+  uuid is a narrow transitive edge case. Clear these later as a deliberate Vite-8 upgrade slice
+  with full testing - not via `--force`.
+
 ## Open decisions / levers
 - Mobile (Phase 3) timing: deferred per current desktop-first usage; revisit when mobile use grows.
 - Phase 1 migration style: one-time foundation refactor (recommended) vs. user-visible slices.
