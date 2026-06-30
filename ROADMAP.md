@@ -74,9 +74,9 @@ No behavior change - pure systematization, migrated primitive-by-primitive with 
 - Tokenize typography + spacing (color/radius/shadow tokens already exist in styles.css).
 - Extract shared primitives: `Button`, `Field` (Input/Select/Textarea), `Modal`
   (focus-trap + ESC + body-scroll-lock + role=dialog), `Card`, `StatusBadge` (unify every
-  status chip across leads/quotes/invoices/rfqs/events), `Icon` (adopt one outline set -
-  Tabler or Lucide - retiring the emoji icons), and consolidate the duplicated autocomplete
-  dropdown (currently re-implemented 6+ times).
+  status chip across leads/quotes/invoices/rfqs/events), `Icon` (DECIDED: Phosphor, regular
+  weight, via `@phosphor-icons/react` - retiring the emoji icons), and consolidate the
+  duplicated autocomplete dropdown (currently re-implemented 6+ times).
 - Consolidate money/date formatting into single shared helpers.
 - Build primitives mobile-aware so Phase 3 is cheap later.
 
