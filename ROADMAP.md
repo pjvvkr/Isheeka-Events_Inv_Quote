@@ -82,13 +82,35 @@ No behavior change - pure systematization, migrated primitive-by-primitive with 
 
 Risk: Medium (touches many files) - mitigated by incremental, no-behavior-change migration.
 
-## Phase 2 - Document-flow component
+## Phase 2 - Document-flow lifecycle rail (DECIDED with owner)
 
-One shared pipeline stepper: `Lead -> RFQ -> Quote -> Invoice -> Event`. Completed stages
-filled and clickable (jump to record), current stage highlighted, future stages ghosted.
-Replaces the three inconsistent hand-rolled "Source:" rows (QuotationsModule, InvoicesModule,
-EventsModule) and adds it to the Lead and RFQ screens where it's currently missing. Doubles as
-breadcrumb context and shows where a lead stalled. Can start once `Button`/`Icon` exist.
+One shared lifecycle rail pinned to the TOP of every detail screen (under breadcrumb, above
+content). Agreed 9-node model:
+
+`Lead -> Client RFQ -> [Vendor RFQ -> Costing] -> Quote -> Event -> Invoice -> Receivable (AR) -> Payable (AP)`
+
+- Vendor RFQ + Costing render as a RECESSED "sourcing" sub-segment between Client RFQ and Quote.
+- "Client RFQ" = the real client-facing RFQ only (party_type='client', exclude is_sourcing_anchor);
+  vendor RFQs are the sourcing sub-steps, not the client RFQ node.
+- Node states: done (filled, clickable), in progress, not created / not reached, and "in-house /
+  not used" for the sourcing sub-steps when a deal is priced in-house. Receivable/Payable: settled
+  (green) / in progress (amber) / not triggered (grey).
+- Multiples (several quotes/invoices) -> show the active one + "N more".
+- Read-only: a `lib/docChain.js` resolver walks existing FK links (reuses the logic in the 3
+  current "Source:" rows) + reads vendor RFQ status and costing_summaries + invoice AR + event_vendors AP.
+- REPLACES the three hand-rolled "Source:" rows (Quotations/Invoices/Events) -> net less duplication;
+  adds the rail to Lead + RFQ screens too. No writes, no money/logic touched.
+- Build order: resolver + `DocFlow.jsx`, proof on the Event screen first, then roll to the other
+  four and delete the old Source rows.
+
+### Phase 2b - Entry-point enforcement (SEPARATE, audit-first - higher risk)
+Goal: make every deal start at Lead -> Client RFQ (one canonical path), by disabling (a) creating a
+quote directly from a lead (QuoteGenerationWizard direct path) and (b) the no-lead creation paths.
+CAUTION: the no-lead path is a deliberate, TESTED feature (`convert-entrypoints.test.ts`), and the
+sourcing-anchor hack exists because quotes can lack a client RFQ. Requires a thorough audit of every
+quote/event/RFQ creation path + downstream assumptions + test updates BEFORE any code. Do AFTER the
+rail (which will show how often each skip-path is actually used). Enforcing this could later let us
+delete the sourcing-anchor mechanism.
 
 Risk: Low.
 
