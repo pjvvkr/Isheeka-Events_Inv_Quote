@@ -7,6 +7,7 @@ import { _currentUid, logInvoiceActivity } from './session.js';
 import { getNextClientRef, getNextEventRef, getNextInvoiceRef } from './refs.js';
 import { defaultEventName, todayLocalStr, mapLostReason } from './format.js';
 import { REJECT_REASONS } from './constants.js';
+import { loadCostingVendorSuggestion } from './costing.js';
 
 // ── Close a quote as not-proceeding ───────────────────────────────────────────
 // quote→rejected, log the reason, and (lead-origin) mark the lead lost.
@@ -181,6 +182,15 @@ export async function createEventFromQuote(lead, opts = {}) {
       const { error: siie } = await supabase.from('sub_event_items').insert(itemRows); if (siie) throw siie;
     }
     const { error: cve } = await supabase.from('quotations').update({ status: 'converted', event_id: event.event_id, updated_at: new Date().toISOString() }).eq('quotation_id', approvedQuot.quotation_id); if (cve) throw cve;
+    // Auto-add the vendor(s) chosen during costing as the event's engaged vendors (AP), seeding
+    // the agreed amount from the costed bid. Non-fatal; the on-screen "add from costing" prompt
+    // remains as a fallback and self-hides once vendors are present. Fully editable afterwards.
+    try {
+      const sugg = await loadCostingVendorSuggestion([approvedQuot.quotation_id]);
+      for (const s of (sugg || [])) {
+        if (s && s.vendor_id) await addEventVendor({ eventId: event.event_id, vendorId: s.vendor_id, vendorName: s.name, category: 'other', service: 'Sourced via vendor RFQ', agreed: Math.round(s.amount || 0) });
+      }
+    } catch (e) { /* non-fatal */ }
     try { await createInvoiceFromQuote(approvedQuot.quotation_id, { eventId: event.event_id }); }
     catch (invErr) { console.error('[Isheeka ERP] invoice auto-create failed:', invErr); notify('Event created, but the draft invoice couldn\'t be generated automatically — use "Generate invoice" on the event.', 'error'); }
   }

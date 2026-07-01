@@ -89,7 +89,17 @@ export async function generateQuoteFromCosting(draftQuoteId, rows) {
   }));
   if (li.length) { const { error } = await runDb(supabase.from('quotation_line_items').insert(li), 'price quote items'); if (error) throw error; }
   const subtotal = li.reduce((s, x) => s + (x.amount || 0), 0);
-  const { error: qe } = await runDb(supabase.from('quotations').update({ subtotal, discount_amount: 0, grand_total: subtotal, updated_at: now }).eq('quotation_id', draftQuoteId), 'update quote total');
+  // Refresh the payment schedule amounts to the new total and re-sync the terms text, so a
+  // priced RFQ quote reads like a wizard quote. Percentages/labels/timing set via Revise are
+  // preserved; only the rupee amounts recompute. buildPaymentTermsText mirror (QuoteWizard).
+  let sched = [];
+  try { const { data: cur } = await supabase.from('quotations').select('payment_schedule').eq('quotation_id', draftQuoteId).maybeSingle(); let ps = cur && cur.payment_schedule; if (typeof ps === 'string') { try { ps = JSON.parse(ps || '[]'); } catch (e) { ps = []; } } sched = Array.isArray(ps) ? ps : []; } catch (e) { /* noop */ }
+  const filled = sched.map((p) => { const pct = parseFloat(p.pct) || 0; return { ...p, amount: Math.round(subtotal * pct / 100) }; });
+  const inr = (n) => '\u20b9' + (Math.round(parseFloat(n) || 0)).toLocaleString('en-IN');
+  const terms = filled.length ? ('Payment schedule: ' + filled.map((p, i) => { const w = (p.when || '').trim(); const wl = w ? (w.charAt(0).toLowerCase() + w.slice(1)) : '\u2014'; return inr(p.amount) + ' (' + (p.label || 'Installment ' + (i + 1)) + ') due ' + wl; }).join('; ') + '.') : '';
+  const upd = { subtotal, discount_amount: 0, grand_total: subtotal, updated_at: now };
+  if (filled.length) { upd.payment_schedule = JSON.stringify(filled); upd.payment_terms = terms; }
+  const { error: qe } = await runDb(supabase.from('quotations').update(upd).eq('quotation_id', draftQuoteId), 'update quote total');
   if (qe) throw qe;
   return { subtotal };
 }

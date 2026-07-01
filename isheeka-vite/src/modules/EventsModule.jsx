@@ -24,6 +24,26 @@ import { FastEntryTable, SubEventTplBtn } from '../components/ItemEntry.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
 import { readWorkbook } from '../lib/xlsxIO.js';
 import { ClientForm } from './ClientsModule.jsx';
+import { NewDealModal } from '../components/NewDealModal.jsx';
+import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
+
+function ReadOnlyItems({ items }) {
+  const list = Array.isArray(items) ? items.filter((it) => it && String(it.description || '').trim()) : [];
+  if (!list.length) return <div style={{ fontSize: 12, color: 'var(--grey-400)', padding: '4px 0' }}>No items.</div>;
+  return (
+    <div>
+      {list.map((it, i) => (
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '5px 0', borderTop: i ? '1px solid var(--grey-100)' : 'none', fontSize: 12.5 }}>
+          <div style={{ minWidth: 0 }}>
+            <span style={{ color: 'var(--grey-800)' }}>{it.description}</span>
+            {Array.isArray(it.sub_items) && it.sub_items.length > 0 && <span style={{ color: 'var(--grey-400)', marginLeft: 6 }}>· {it.sub_items.map((si) => (si.name || '') + (si.qty ? (' (' + si.qty + ')') : '')).join(', ')}</span>}
+          </div>
+          <span style={{ color: 'var(--grey-500)', whiteSpace: 'nowrap' }}>×{it.quantity || 1}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function SubEventNameInput({value, onChange}) {
   const [suggestions, setSuggestions] = React.useState([]);
@@ -1321,29 +1341,30 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
           <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Sub-events & items</div>
-          <button className="btn sm" style={{border:'1px dashed var(--grey-200)',color:'var(--grey-400)'}}
-            onClick={()=>setEditSubEvents(s=>[...s,{id:'new-'+Date.now(),name:'',date:'',location:'',items:[]}])}>+ Add sub-event</button>
+          {!ENFORCE_CANONICAL_PATH && <button className="btn sm" style={{border:'1px dashed var(--grey-200)',color:'var(--grey-400)'}}
+            onClick={()=>setEditSubEvents(s=>[...s,{id:'new-'+Date.now(),name:'',date:'',location:'',items:[]}])}>+ Add sub-event</button>}
+          {ENFORCE_CANONICAL_PATH && <span style={{fontSize:11,color:'var(--grey-400)'}}>Items come from the quote — revise the quote to change them</span>}
         </div>
         {editSubEvents.map((se,si)=>(
           <div key={se.id||se.sub_event_id} style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'12px',marginBottom:10,border:'1px solid var(--grey-100)'}}>
             <div style={{display:'flex',gap:8,marginBottom:8,alignItems:'center'}}>
               <div style={{width:8,height:8,borderRadius:'50%',background:'#e8185a',flexShrink:0}}/>
-              <SubEventNameInput value={se.name} onChange={v=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,name:v}:x))}/>
+              {ENFORCE_CANONICAL_PATH ? <div style={{flex:1,fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{se.name||'—'}</div> : <SubEventNameInput value={se.name} onChange={v=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,name:v}:x))}/>}
               <SubEventDateInput value={se.date} onChange={v=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,date:v}:x))}/>
               <SubEventLocInput value={se.location} onChange={v=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,location:v}:x))}/>
-              <SubEventTplBtn templates={evTemplates} onPick={tpl=>loadTemplateIntoEditSub(si,tpl)} onImport={items=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,items}:x))}/>
-              <button style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14}}
-                onClick={()=>setEditSubEvents(s=>s.filter((_,i)=>i!==si))}>🗑</button>
+              {!ENFORCE_CANONICAL_PATH && <SubEventTplBtn templates={evTemplates} onPick={tpl=>loadTemplateIntoEditSub(si,tpl)} onImport={items=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,items}:x))}/>}
+              {!ENFORCE_CANONICAL_PATH && <button style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14}}
+                onClick={()=>setEditSubEvents(s=>s.filter((_,i)=>i!==si))}>🗑</button>}
             </div>
-            <FastEntryTable key={se.id||se.sub_event_id} items={se.items||[]} onChange={items=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,items}:x))}/>
+            {ENFORCE_CANONICAL_PATH ? <ReadOnlyItems items={se.items||[]}/> : <FastEntryTable key={se.id||se.sub_event_id} items={se.items||[]} onChange={items=>setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,items}:x))}/>}
           </div>
         ))}
         <div style={{marginTop:8,paddingTop:8,borderTop:'1px dashed var(--grey-200)'}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
             <div style={{fontSize:12,color:'var(--grey-400)',flex:1}}>Main event items</div>
-            <SubEventTplBtn templates={evTemplates} onPick={tpl=>loadTemplateIntoEditMain(tpl)} onImport={items=>setEditMainItems(items)}/>
+            {!ENFORCE_CANONICAL_PATH && <SubEventTplBtn templates={evTemplates} onPick={tpl=>loadTemplateIntoEditMain(tpl)} onImport={items=>setEditMainItems(items)}/>}
           </div>
-          <FastEntryTable key="main-items" items={editMainItems} onChange={setEditMainItems}/>
+          {ENFORCE_CANONICAL_PATH ? <ReadOnlyItems items={editMainItems}/> : <FastEntryTable key="main-items" items={editMainItems} onChange={setEditMainItems}/>}
         </div>
       </div>
     </div>
@@ -1870,6 +1891,7 @@ export function EventsModule({nav, onNavigate, onBack}) {
   const [staffFilter, setStaffFilter] = useState('');
   const [budgetFilter, setBudgetFilter] = useState('');
   const [saveSuccess, setSaveSuccess] = useState('');
+  const [showNewDeal, setShowNewDeal] = useState(false);
   const [staffList, setStaffList] = useState([]);
   const [eventFunnels, setEventFunnels] = useState({});
   const [refPicker, setRefPicker] = useState(false);
@@ -1936,14 +1958,25 @@ export function EventsModule({nav, onNavigate, onBack}) {
     return matchSearch && matchStatus && matchType && matchStaff && matchBudget;
   });
 
-  if(detailId) return (
+  const handleUseReference = async (evt) => {
+    if (!ENFORCE_CANONICAL_PATH) { onNavigate('events',{mode:'new',referenceEvent:evt,label:'New event'}); return; }
+    try {
+      const { data } = await supabase.from('sub_event_items').select('*').eq('event_id', evt.event_id).eq('is_deleted', false).order('sort_order');
+      const items = (data||[]).map((it)=>({ sub_event_name: it.sub_event_name||null, description: it.description||'', quantity: it.quantity||1, sub_items: Array.isArray(it.sub_items)?it.sub_items:[] })).filter((it)=>String(it.description).trim());
+      setRefPicker(false);
+      setShowNewDeal({ items, referenceName: evt.name });
+    } catch (e) { notify('Could not load the reference event items.','error'); }
+  };
+  const newDealEl = showNewDeal ? <NewDealModal seed={showNewDeal} onClose={()=>setShowNewDeal(false)} onNavigate={onNavigate} /> : null;
+
+  if(detailId) return (<>{newDealEl}
     <EventDetail
       eventId={detailId}
       onBack={onBack}
-      onUseAsReference={(evt)=>onNavigate('events',{mode:'new',referenceEvent:evt,label:'New event'})}
+      onUseAsReference={handleUseReference}
       onNavigate={onNavigate}
     />
-  );
+  </>);
   if(isNew) return <NewEventWizard
     referenceEvent={referenceEvent}
     onSave={handleSaveNew}
@@ -1953,6 +1986,8 @@ export function EventsModule({nav, onNavigate, onBack}) {
   return (
     <div>
       {saveSuccess&&<div style={{background:'var(--green-light)',color:'var(--green)',borderRadius:'var(--radius-sm)',padding:'10px 14px',fontSize:13,marginBottom:16,border:'1px solid rgba(15,110,86,0.2)'}}>✅ {saveSuccess}</div>}
+
+      {newDealEl}
 
       {refPicker&&(
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1100,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'48px 20px',overflowY:'auto'}} onClick={e=>{if(e.target===e.currentTarget)setRefPicker(false);}}>
@@ -1966,7 +2001,7 @@ export function EventsModule({nav, onNavigate, onBack}) {
             </div>
             <div style={{overflowY:'auto',padding:'6px 0'}}>
               {(()=>{ const q=refSearch.toLowerCase(); const list=events.filter(e=>e.status?.toLowerCase()!=='cancelled').filter(e=>!q||`${e.name} ${e.client_name||''} ${e.type||''} ${e.ref_number||''} ${e.location||''}`.toLowerCase().includes(q)); if(list.length===0) return <div style={{padding:'24px 20px',textAlign:'center',fontSize:13,color:'var(--grey-400)'}}>No matching events.</div>; return list.map(e=>(
-                <div key={e.event_id} onClick={()=>{setRefPicker(false);onNavigate('events',{mode:'new',referenceEvent:e,label:'New event'});}} style={{padding:'10px 20px',cursor:'pointer',borderBottom:'1px solid var(--grey-50)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}}
+                <div key={e.event_id} onClick={()=>handleUseReference(e)} style={{padding:'10px 20px',cursor:'pointer',borderBottom:'1px solid var(--grey-50)',display:'flex',justifyContent:'space-between',alignItems:'center',gap:10}}
                   onMouseEnter={ev=>ev.currentTarget.style.background='var(--grey-50)'} onMouseLeave={ev=>ev.currentTarget.style.background='white'}>
                   <div><div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{e.name}</div><div style={{fontSize:12,color:'var(--grey-400)'}}>{e.ref_number?(e.ref_number+' · '):''}{e.type?eventTypeLabel(e.type):''}{e.client_name?(' · '+e.client_name):''}</div></div>
                   <span style={{color:'var(--pink)',fontSize:12,fontWeight:500,whiteSpace:'nowrap'}}>Use →</span>
@@ -2007,7 +2042,7 @@ export function EventsModule({nav, onNavigate, onBack}) {
           {BUDGET_RANGES.map(r=><option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
         <button className="btn" onClick={()=>{setRefSearch('');setRefPicker(true);}} title="Start a new event pre-filled from an existing one">📋 From reference</button>
-        <button className="btn primary" onClick={()=>onNavigate('events',{mode:'new',label:'New event'})}>+ New event</button>
+        <button className="btn primary" onClick={()=> ENFORCE_CANONICAL_PATH ? setShowNewDeal({}) : onNavigate('events',{mode:'new',label:'New event'})}>+ New deal</button>
       </div>
 
       {/* Events list */}
@@ -2018,7 +2053,7 @@ export function EventsModule({nav, onNavigate, onBack}) {
           <div style={{fontSize:48,marginBottom:12}}>🎪</div>
           <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>{search||statusFilter||typeFilter?'No events found':'No events yet'}</div>
           <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:16}}>{search||statusFilter||typeFilter?'Try adjusting your search or filters':'Create your first event to get started'}</div>
-          {!search&&!statusFilter&&!typeFilter&&<button className="btn primary" onClick={()=>onNavigate('events',{mode:'new',label:'New event'})}>+ Create first event</button>}
+          {!search&&!statusFilter&&!typeFilter&&<button className="btn primary" onClick={()=> ENFORCE_CANONICAL_PATH ? setShowNewDeal({}) : onNavigate('events',{mode:'new',label:'New event'})}>+ New deal</button>}
         </div>
       ) : (
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -2052,7 +2087,7 @@ export function EventsModule({nav, onNavigate, onBack}) {
                   </div>
                   <div style={{padding:'0 6px',display:'flex',alignItems:'center',gap:6}}>
                     <button className="btn sm" style={{fontSize:11,padding:'3px 8px'}}
-                      onClick={ev=>{ev.stopPropagation();onNavigate('events',{mode:'new',referenceEvent:e,label:'New event'});}}>
+                      onClick={ev=>{ev.stopPropagation();handleUseReference(e);}}>
                       📋
                     </button>
                     <span style={{color:'var(--grey-400)',fontSize:18}}>›</span>

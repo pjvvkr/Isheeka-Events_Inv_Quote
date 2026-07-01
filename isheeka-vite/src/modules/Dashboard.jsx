@@ -2,6 +2,8 @@
 import React from 'react';
 import { supabase } from '../lib/supabase';
 import { fmtDate } from '../lib/format.js';
+import { NewDealModal } from '../components/NewDealModal.jsx';
+import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
 
 const CAL_COLORS = [
   { bg: '#FBEAF0', fg: '#72243E' }, { bg: '#E1F5EE', fg: '#085041' }, { bg: '#FAEEDA', fg: '#633806' },
@@ -70,6 +72,7 @@ export function Dashboard({ user, onNavigate }) {
   const [vendorResp, setVendorResp] = React.useState([]);   // vendor bids submitted, awaiting costing
   const [loading, setLoading] = React.useState(true);
   const [calEvents, setCalEvents] = React.useState([]);
+  const [showNewDeal, setShowNewDeal] = React.useState(false);
   React.useEffect(() => { (async () => {
     setLoading(true);
     const now = new Date(), _p = (n) => String(n).padStart(2, '0'), todayStr = now.getFullYear() + '-' + _p(now.getMonth() + 1) + '-' + _p(now.getDate()), monthStr = now.getFullYear() + '-' + _p(now.getMonth() + 1);
@@ -112,7 +115,7 @@ export function Dashboard({ user, onNavigate }) {
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
         {stats.rfqReview > 0 && <div onClick={() => onNavigate && onNavigate('rfqs')} style={{ cursor: 'pointer', background: 'var(--pink-light)', color: 'var(--pink)', borderRadius: 'var(--radius-md)', padding: '10px 14px', fontSize: 13, fontWeight: 500 }}>⏳ {stats.rfqReview} client RFQ{stats.rfqReview > 1 ? 's' : ''} awaiting review — Review →</div>}
-        <button className="btn sm primary" onClick={() => onNavigate && onNavigate('rfqs', { mode: 'new', label: 'New RFQ' })}>📝 New Client RFQ</button>
+        <button className="btn sm primary" onClick={() => ENFORCE_CANONICAL_PATH ? setShowNewDeal(true) : (onNavigate && onNavigate('rfqs', { mode: 'new', label: 'New RFQ' }))}>+ New deal</button>{showNewDeal && <NewDealModal onClose={()=>setShowNewDeal(false)} onNavigate={onNavigate} />}
       </div>
       <div className="metrics-grid">
         <div className="metric-card pink" style={{ cursor: 'pointer' }} onClick={() => onNavigate && onNavigate('leads')}><div className="metric-icon">🎯</div><div className="metric-value">{stats.activeLeads}</div><div className="metric-label">Active leads</div></div>

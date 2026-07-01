@@ -81,12 +81,14 @@ export async function approveRfqToQuote(r, items, forced) {
   const { client_id, client_name } = await ensureClientForRfq(r, forced);
   const refNum = await getNextQuotRef();
   const evName = (r.event_type) ? defaultEventName(r.event_type) : ((r.event_type || 'Event') + ' Event');
+  let defaultTerms = null;
+  try { const { data: st } = await supabase.from('settings').select('default_terms').limit(1).maybeSingle(); defaultTerms = (st && st.default_terms) || null; } catch (e) { /* noop */ }
   const { data: q, error: qe } = await runDb(supabase.from('quotations').insert({
     ref_number: refNum, status: 'draft', client_id, client_name, lead_id: r.lead_id || null, event_id: null,
     event_name: evName, doc_date: new Date().toISOString().slice(0, 10), valid_until: null,
     subtotal: 0, discount_pct: 0, discount_amount: 0, grand_total: 0,
-    additional_notes: r.notes || null, payment_terms: null, additional_terms: null,
-    payment_schedule: '[]', display_options: '{}', parent_quotation_id: null, revision_number: 0,
+    additional_notes: r.notes || null, payment_terms: null, additional_terms: defaultTerms,
+    payment_schedule: JSON.stringify([{ pct: 50, amount: 0, label: 'Advance', when: 'On confirmation' }, { pct: 40, amount: 0, label: 'Pre-event', when: '7 days before event' }, { pct: 10, amount: 0, label: 'Balance', when: 'On event day' }]), display_options: JSON.stringify({ prices: false, qty: true, grouping: true, schedule: true, discount: false, coverPage: false, bankDetails: false }), parent_quotation_id: null, revision_number: 0,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(), is_deleted: false,
   }).select('quotation_id,ref_number').single(), 'create draft quote');
   if (qe || !q) throw qe || new Error('quote create failed');

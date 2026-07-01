@@ -16,6 +16,7 @@ import { getNextLeadRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
 import { ClientLink } from '../components/links.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
+import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
 
 function LossReasonModal({onSave, onCancel}) {
   const [reason, setReason] = React.useState('');
@@ -522,7 +523,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
                 <button className="btn sm" style={{background:'var(--blue-light)',color:'var(--blue)',border:'1px solid #93C5FD'}}
                   onClick={()=>handleStageChange('contacted')}>✓ Mark as contacted</button>
               )}
-              {lead.stage==='contacted'&&(
+              {!ENFORCE_CANONICAL_PATH&&lead.stage==='contacted'&&(
                 <button className="btn sm" style={{background:'#F3E5F5',color:'#6A1B9A',border:'1px solid #CE93D8'}}
                   onClick={()=>setShowQuoteWizard(true)}>📋 Generate quote</button>
               )}
