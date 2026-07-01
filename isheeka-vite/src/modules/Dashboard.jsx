@@ -1,7 +1,7 @@
 // Dashboard — greeting, KPI cards, upcoming events + outstanding invoices (ported verbatim).
 import React from 'react';
 import { supabase } from '../lib/supabase';
-import { fmtDate } from '../lib/format.js';
+import { fmtDate, eventTypeLabel } from '../lib/format.js';
 import { NewDealModal } from '../components/NewDealModal.jsx';
 import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
 
@@ -134,7 +134,7 @@ export function Dashboard({ user, onNavigate }) {
             : clientResp.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)' }}>No responses awaiting review. 🎉</div>
             : clientResp.map((r) => (
               <div key={r.rfq_id} onClick={() => onNavigate && onNavigate('rfqs', { rfqId: r.rfq_id, label: r.ref_number })} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderTop: '1px solid var(--grey-50)', cursor: 'pointer' }}>
-                <div style={{ minWidth: 0 }}><div style={{ fontSize: 12.5, color: 'var(--grey-800)' }}><span style={{ color: 'var(--pink)', fontWeight: 600 }}>{r.ref_number}</span> · {r.contact_name || '—'}{(r.revision_number || 0) > 1 && <span style={{ fontSize: 10, background: 'var(--pink-light)', color: 'var(--pink)', borderRadius: 10, padding: '0 6px', marginLeft: 6 }}>🔄 Rev {r.revision_number}</span>}</div><div style={{ fontSize: 11, color: 'var(--grey-400)' }}>{r.event_type || ''}{r.client_submitted_at ? ' · ' + ago(r.client_submitted_at) : ''}</div></div>
+                <div style={{ minWidth: 0 }}><div style={{ fontSize: 12.5, color: 'var(--grey-800)' }}><span style={{ color: 'var(--pink)', fontWeight: 600 }}>{r.ref_number}</span> · {r.contact_name || '—'}{(r.revision_number || 0) > 1 && <span style={{ fontSize: 10, background: 'var(--pink-light)', color: 'var(--pink)', borderRadius: 10, padding: '0 6px', marginLeft: 6 }}>🔄 Rev {r.revision_number}</span>}</div><div style={{ fontSize: 11, color: 'var(--grey-400)' }}>{r.event_type ? eventTypeLabel(r.event_type) : ''}{r.client_submitted_at ? ' · ' + ago(r.client_submitted_at) : ''}</div></div>
                 <span style={{ color: 'var(--grey-300)' }}>→</span>
               </div>
             ))}

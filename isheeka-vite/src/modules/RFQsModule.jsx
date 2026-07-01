@@ -5,7 +5,7 @@ import React from 'react';
 import { supabase } from '../lib/supabase';
 import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid } from '../lib/session.js';
-import { fmtDate } from '../lib/format.js';
+import { fmtDate, eventTypeLabel } from '../lib/format.js';
 import { RFQ_STATUS, RFQ_ACTION_LABEL } from '../lib/constants.js';
 import { useEventTypes } from '../lib/data.js';
 import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuote, findClientMatch } from '../lib/rfq.js';
@@ -158,7 +158,7 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
                 <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--pink)', width: 120, flexShrink: 0 }}>{r.ref_number}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--grey-800)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.contact_name || '—'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 1 }}>{r.event_type || 'Event'}{r.event_date ? (' · ' + fmtDate(r.event_date, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}</div>
+                  <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 1 }}>{r.event_type ? eventTypeLabel(r.event_type) : 'Event'}{r.event_date ? (' · ' + fmtDate(r.event_date, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}</div>
                 </div>
                 {(r.revision_number || 0) > 1 && <span title={'Client revised this ' + r.revision_number + '×'} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, fontWeight: 600, background: 'var(--orange-light)', color: 'var(--orange)' }}>🔄 Rev {r.revision_number}</span>}
                 <StatusBadge kind="rfq" status={r.status} />
@@ -820,7 +820,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>{r.ref_number} <StatusBadge kind="rfq" status={r.status} style={{ marginLeft: 6 }} />{(r.revision_number || 0) > 1 && <span title={'Revised ' + r.revision_number + '× by the ' + (r.party_type === 'vendor' ? 'vendor' : 'client')} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 600, background: 'var(--orange-light)', color: 'var(--orange)', marginLeft: 6 }}>🔄 Rev {r.revision_number}</span>}</div>
-            <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 3 }}><ClientLink clientId={r.client_id} name={r.contact_name} onNavigate={onNavigate}>{r.contact_name}</ClientLink>{r.contact_phone ? (' · ' + r.contact_phone) : ''}{r.event_type ? (' · ' + r.event_type) : ''}{r.city ? (' · ' + r.city) : ''}</div>
+            <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 3 }}><ClientLink clientId={r.client_id} name={r.contact_name} onNavigate={onNavigate}>{r.contact_name}</ClientLink>{r.contact_phone ? (' · ' + r.contact_phone) : ''}{r.event_type ? (' · ' + eventTypeLabel(r.event_type)) : ''}{r.city ? (' · ' + r.city) : ''}</div>
             {(r.secondary_contact_name || r.secondary_contact_phone) && <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>2nd contact: {r.secondary_contact_name || ''} {r.secondary_contact_phone || ''}</div>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

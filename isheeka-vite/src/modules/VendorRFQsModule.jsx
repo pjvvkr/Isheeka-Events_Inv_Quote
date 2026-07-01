@@ -8,7 +8,7 @@
 import React from 'react';
 import { supabase } from '../lib/supabase';
 import { notify } from '../lib/toast.jsx';
-import { fmtDate } from '../lib/format.js';
+import { fmtDate, eventTypeLabel } from '../lib/format.js';
 import { waLink } from '../lib/share.js';
 import { loadVendorRfqItems, regenerateVendorLink, bumpReminder, vendorRfqLink, buildVendorRfqMsg } from '../lib/vendorRfq.js';
 import { confirmDialog } from '../components/confirm.jsx';
@@ -158,7 +158,7 @@ function VendorRFQDetail({ rfqId, onBack, onNavigate }) {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>{r.ref_number} <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c, marginLeft: 6 }}>{sc.l}</span>{(r.revision_number || 0) > 1 && <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 600, background: 'var(--orange-light)', color: 'var(--orange)', marginLeft: 6 }}>🔄 Rev {r.revision_number}</span>}</div>
             <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--grey-800)', marginTop: 6 }}>{(vendor && vendor.name) || '—'}</div>
-            <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 2 }}>{(r.event_type || (parent && parent.event_type) || '—')}{r.event_date ? (' · ' + fmtDate(r.event_date, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}{r.city ? (' · ' + r.city) : ''}</div>
+            <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 2 }}>{(eventTypeLabel(r.event_type || (parent && parent.event_type)) || '—')}{r.event_date ? (' · ' + fmtDate(r.event_date, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}{r.city ? (' · ' + r.city) : ''}</div>
             <div style={{ fontSize: 12.5, color: 'var(--grey-400)', marginTop: 2 }}>Sourcing for client: <b style={{ color: 'var(--grey-600)' }}>{clientName}</b>{(vendor && vendor.phone_1) ? (' · vendor ' + vendor.phone_1) : ''}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

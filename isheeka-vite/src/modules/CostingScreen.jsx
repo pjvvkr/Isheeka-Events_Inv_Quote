@@ -3,7 +3,7 @@
 // priced draft quote + a saved costing summary. See docs/milestone-s-vendor-rfq-spec.md.
 import React from 'react';
 import { notify } from '../lib/toast.jsx';
-import { fmtDate } from '../lib/format.js';
+import { fmtDate, eventTypeLabel } from '../lib/format.js';
 import { buildCostingPdf, buildCostingXlsx } from '../lib/costingSheet.js';
 import { uploadToQuotations, signedUrl } from '../lib/storage.js';
 import { openWhatsApp } from '../lib/share.js';
@@ -153,7 +153,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>Costing &amp; markup</div>
-          <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 2 }}>{d.rfq.ref_number}{d.rfq.event_type ? (' · ' + d.rfq.event_type) : ''} · {d.columns.filter((c) => c.status === 'submitted').length}/{d.columns.length} vendor{d.columns.length === 1 ? '' : 's'} submitted · default markup {d.defaultMarkup}%</div>
+          <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 2 }}>{d.rfq.ref_number}{d.rfq.event_type ? (' · ' + eventTypeLabel(d.rfq.event_type)) : ''} · {d.columns.filter((c) => c.status === 'submitted').length}/{d.columns.length} vendor{d.columns.length === 1 ? '' : 's'} submitted · default markup {d.defaultMarkup}%</div>
         </div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 10.5, color: 'var(--grey-400)', marginRight: 2 }} title="Internal use only — contains vendor costs & margins">🔒 Internal:</span>
