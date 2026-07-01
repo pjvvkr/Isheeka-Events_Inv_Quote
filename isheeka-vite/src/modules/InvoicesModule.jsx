@@ -14,6 +14,8 @@ import { fetchAsBase64 } from '../lib/storage.js';
 import { uploadInvoicePdf, buildInvoiceShareMsg, openWhatsApp, openEmail, validClientPhone } from '../lib/share.js';
 import { fmtDate, isInvoiceOverdue } from '../lib/format.js';
 import { INVOICE_STATUS_COLORS, INVOICE_STATUS_LABELS, QUOT_STATUS_LABELS, LEAD_STAGE_LABELS } from '../lib/constants.js';
+import { DocFlow } from '../components/ui/DocFlow.jsx';
+import { resolveDocChain } from '../lib/docChain.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { ClientLink } from '../components/links.jsx';
 import { ClientForm } from './ClientsModule.jsx';
@@ -215,6 +217,8 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     setLoading(false);
   }, [invoiceId]);
   React.useEffect(() => { loadAll(); }, [loadAll]);
+  const [docChain, setDocChain] = React.useState(null);
+  React.useEffect(()=>{ let live=true; if(invoiceId) resolveDocChain('invoice', invoiceId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[invoiceId]);
 
   if (loading) return <div style={{ padding: 60, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div>;
   if (!inv) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--grey-400)' }}>Invoice not found. <button className="btn sm" onClick={onBack}>← Back</button></div>;
@@ -466,7 +470,9 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
 
   return (
     <div>
+      {docChain && <DocFlow chain={docChain} current="invoice" onNavigate={onNavigate} />}
       {/* Header card */}
+
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '16px 20px', border: '1px solid var(--grey-100)', marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
@@ -478,15 +484,6 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
             <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 4 }}>
               <ClientLink clientId={inv.client_id} name={inv.client_name} onNavigate={onNavigate}>{inv.client_name || '—'}</ClientLink>{inv.event_name ? ' · ' + inv.event_name : ''}{inv.doc_date ? ' · ' + fmt(inv.doc_date) : ''}
             </div>
-            {(srcLead || srcQuote || srcEvent || srcRfq) && <div style={{ fontSize: 12, marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', color: 'var(--grey-400)' }}>
-              <span style={{ fontWeight: 500, color: 'var(--grey-600)' }}>Source:</span>
-              {srcRfq ? <><a onClick={() => onNavigate && onNavigate('rfqs', { rfqId: srcRfq.rfq_id, label: srcRfq.ref_number || 'RFQ' })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>📝 {srcRfq.ref_number || 'RFQ'}</a><span>→</span></> : null}
-              {srcLead ? <a onClick={() => onNavigate && onNavigate('leads', { leadId: srcLead.lead_id, label: srcLead.ref_number || 'Lead' })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }} title={LEAD_STAGE_LABELS[srcLead.stage] || srcLead.stage}>🎯 {srcLead.ref_number || 'Lead'}</a> : (srcRfq ? null : <span>🎯 —</span>)}
-              {(srcLead || !srcRfq) && <span>→</span>}
-              {srcQuote ? <a onClick={() => onNavigate && onNavigate('quotations', { quotId: srcQuote.quotation_id, label: srcQuote.ref_number })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }} title={(QUOT_STATUS_LABELS[srcQuote.status] || srcQuote.status) + ' · ₹' + parseFloat(srcQuote.grand_total || 0).toLocaleString('en-IN')}>📄 {srcQuote.ref_number}</a> : <span>📄 —</span>}
-              <span>→</span>
-              {srcEvent ? <a onClick={() => onNavigate && onNavigate('events', { eventId: srcEvent.event_id, label: srcEvent.name || srcEvent.ref_number || 'Event' })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }} title={srcEvent.name || ''}>🎪 {srcEvent.ref_number || 'Event'}</a> : <span>🎪 —</span>}
-            </div>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {inv.client_id && <button className="btn sm" title="Open this client's 360" onClick={() => onNavigate && onNavigate('clients', { clientId: inv.client_id, label: inv.client_name || 'Client' })}>👤 View client →</button>}

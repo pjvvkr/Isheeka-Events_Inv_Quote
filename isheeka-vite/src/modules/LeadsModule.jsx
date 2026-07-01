@@ -9,6 +9,8 @@ import { _currentUid } from '../lib/session.js';
 import { fmtDate, eventTypeLabel, leadStageDisplay, getFollowUpUrgency, quoteStatusLabel } from '../lib/format.js';
 import { LEAD_STAGES, LEAD_STAGE_LABELS, LEAD_STAGE_COLORS, LEAD_SOURCES_DEFAULT, LEAD_LOSS_REASONS, URGENCY_COLORS, QUOT_STATUS_COLORS, QUOT_STATUS_LABELS } from '../lib/constants.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
+import { DocFlow } from '../components/ui/DocFlow.jsx';
+import { resolveDocChain } from '../lib/docChain.js';
 import { useEventTypes, fetchLeadSources } from '../lib/data.js';
 import { getNextLeadRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
@@ -265,6 +267,8 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   const [staffList, setStaffList] = React.useState([]);
 
   React.useEffect(()=>{ loadLead(); },[leadId]);
+  const [docChain, setDocChain] = React.useState(null);
+  React.useEffect(()=>{ let live=true; if(leadId) resolveDocChain('lead', leadId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[leadId]);
 
   const loadLead = async () => {
     setLoading(true); setMode('view');
@@ -465,6 +469,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
   return (
     <div>
       {showLoss&&<LossReasonModal onSave={handleLoss} onCancel={()=>setShowLoss(false)}/>}
+      {docChain && <DocFlow chain={docChain} current="lead" onNavigate={onNavigate} />}
       {showLostConfirm&&<LostLeadEditModal
         onEditAnyway={()=>{setShowLostConfirm(false);setMode('edit');}}
         onCreateFromReference={handleCreateFromLostLead}

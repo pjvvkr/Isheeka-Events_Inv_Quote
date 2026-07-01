@@ -8,6 +8,8 @@ import { notify } from '../lib/toast.jsx';
 import { fmtDate, isQuoteExpired, eventTypeLabel, quoteStatusLabel } from '../lib/format.js';
 import { QUOT_STATUS_COLORS, QUOT_STATUS_LABELS, REJECT_REASONS } from '../lib/constants.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
+import { DocFlow } from '../components/ui/DocFlow.jsx';
+import { resolveDocChain } from '../lib/docChain.js';
 import { closeQuoteNotProceeding, createEventFromQuote, createInvoiceFromQuote } from '../lib/money.js';
 import { uploadQuotePdf, buildQuoteShareMsg, openWhatsApp, openEmail, validClientPhone, waLink } from '../lib/share.js';
 import { logQuoteSend } from '../lib/session.js';
@@ -161,6 +163,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     setLoading(false);
   },[quotationId]);
   React.useEffect(()=>{ loadAll(); },[loadAll]);
+  const [docChain, setDocChain] = React.useState(null);
+  React.useEffect(()=>{ let live=true; if(quotationId) resolveDocChain('quote', quotationId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId]);
 
   const doShare = async (channel) => {
     if(sharing||!quot) return;
@@ -342,7 +346,9 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
 
   return (
     <div>
-      {showWizard&&wizardCtx&&<QuoteGenerationWizard lead={wizardCtx.lead} leadSubEvents={[]} isRevision={wizardCtx.isRevision} isContinuation={!wizardCtx.isRevision} existingQuotationId={quot.quotation_id} originEvent={wizardCtx.origin||undefined} onComplete={async(newQ)=>{ setShowWizard(false); setWizardCtx(null); if(newQ&&newQ.quotation_id&&newQ.quotation_id!==quot.quotation_id){ onNavigate&&onNavigate('quotations',{quotId:newQ.quotation_id}); } else { await loadAll(); } }} onCancel={()=>{ setShowWizard(false); setWizardCtx(null); }}/>}
+      {docChain && <DocFlow chain={docChain} current="quote" onNavigate={onNavigate} />}
+      {showWizard&&wizardCtx&&
+<QuoteGenerationWizard lead={wizardCtx.lead} leadSubEvents={[]} isRevision={wizardCtx.isRevision} isContinuation={!wizardCtx.isRevision} existingQuotationId={quot.quotation_id} originEvent={wizardCtx.origin||undefined} onComplete={async(newQ)=>{ setShowWizard(false); setWizardCtx(null); if(newQ&&newQ.quotation_id&&newQ.quotation_id!==quot.quotation_id){ onNavigate&&onNavigate('quotations',{quotId:newQ.quotation_id}); } else { await loadAll(); } }} onCancel={()=>{ setShowWizard(false); setWizardCtx(null); }}/>}
       {showConvert&&convertLead&&<ConvertLeadModal lead={convertLead} onConfirm={doConvertFromQuote} onCancel={()=>{setShowConvert(false);setConvertLead(null);}}/>}
 
 
@@ -352,13 +358,6 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           <div>
             <div style={{fontSize:18,fontWeight:600,color:'var(--grey-800)'}}>{quot.ref_number} <StatusBadge kind="quote" status={quot.status} label={statusLabel} style={{marginLeft:6}} />{isQuoteExpired(quot)&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>Expired</span>}{quot.approval_status==='pending'&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)',marginLeft:6}}>🔏 Pending approval</span>}{quot.approval_status==='signed'&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--green-light)',color:'var(--green)',marginLeft:6}}>✅ Approved by {quot.approver_name||'client'}</span>}{quot.approval_status==='declined'&&<span style={{padding:'3px 10px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--red-light)',color:'var(--red)',marginLeft:6}}>❌ Declined</span>}</div>
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}><ClientLink clientId={quot.client_id} name={quot.client_name} onNavigate={onNavigate}>{quot.client_name||'—'}</ClientLink>{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
-            {(srcLead||srcEvent||srcRfq)&&<div style={{fontSize:12,marginTop:6,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',color:'var(--grey-400)'}}>
-              <span style={{fontWeight:500,color:'var(--grey-600)'}}>Source:</span>
-              {srcRfq?<><a onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:srcRfq.rfq_id,label:srcRfq.ref_number||'RFQ'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>📝 {srcRfq.ref_number||'RFQ'}</a><span>→</span></>:null}
-              {srcLead?<><a onClick={()=>onNavigate&&onNavigate('leads',{leadId:srcLead.lead_id,label:srcLead.ref_number||'Lead'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎯 {srcLead.ref_number||'Lead'}</a><span>→</span></>:(srcRfq?null:<><span>🎯 —</span><span>→</span></>)}
-              <span style={{color:'var(--grey-600)'}}>📄 {quot.ref_number}</span>
-              {srcEvent&&<><span>→</span><a onClick={()=>onNavigate&&onNavigate('events',{eventId:srcEvent.event_id,label:srcEvent.name||srcEvent.ref_number||'Event'})} style={{color:'var(--pink)',cursor:'pointer',fontWeight:500}}>🎪 {srcEvent.ref_number||'Event'}</a></>}
-            </div>}
           </div>
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>

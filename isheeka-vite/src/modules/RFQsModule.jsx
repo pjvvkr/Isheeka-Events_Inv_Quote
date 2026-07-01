@@ -12,6 +12,8 @@ import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuot
 import { waLink } from '../lib/share.js';
 import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg, removeVendorRfq, rescopeVendorRfq } from '../lib/vendorRfq.js';
 import { CostingScreen } from './CostingScreen.jsx';
+import { DocFlow } from '../components/ui/DocFlow.jsx';
+import { resolveDocChain } from '../lib/docChain.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 
 function RFQShareCard({ created, contact, onDone }) {
@@ -581,6 +583,8 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
     setR(rfq || null); setItems(its || []); setActivity(act || []); setRevisions(revs); setLoading(false);
   };
   React.useEffect(() => { load(); }, [rfqId]);
+  const [docChain, setDocChain] = React.useState(null);
+  React.useEffect(()=>{ let live=true; if(rfqId) resolveDocChain('rfq', rfqId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[rfqId]);
   const regenerate = async () => {
     if (!window.confirm('Generate a NEW link & PIN? The previous link will stop working.')) return;
     const token = genRfqToken(), pin = (r.access_mode === 'email_otp') ? null : genRfqPin();
@@ -734,7 +738,9 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const actGroups = (() => { const asc = [...activity].reverse(); const gs = []; let buf = []; asc.forEach((a) => { buf.push(a); if (a.action === 'submitted') { gs.push({ label: (a.notes && /Revision/i.test(a.notes)) ? a.notes : 'Submitted', entries: buf }); buf = []; } }); if (buf.length) gs.push({ label: 'In progress', entries: buf }); return gs.reverse(); })();
   return (
     <div>
-      {dupe && (() => { const m = dupe.match; const mnm = ((m.first_name || '') + ' ' + (m.last_name || '')).trim(); return (
+      {docChain && <DocFlow chain={docChain} current="rfq" onNavigate={onNavigate} />}
+      {dupe && (() => {
+ const m = dupe.match; const mnm = ((m.first_name || '') + ' ' + (m.last_name || '')).trim(); return (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }} onClick={() => setDupe(null)}>
           <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', maxWidth: 440, padding: '20px 22px' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--grey-800)', marginBottom: 8 }}>An existing client matches this contact</div>
