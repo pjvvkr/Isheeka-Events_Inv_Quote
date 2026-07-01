@@ -12,6 +12,7 @@ import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuot
 import { waLink } from '../lib/share.js';
 import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg, removeVendorRfq, rescopeVendorRfq } from '../lib/vendorRfq.js';
 import { CostingScreen } from './CostingScreen.jsx';
+import { staleVendorRfqs } from '../lib/sourcingSync.js';
 import { DocFlow } from '../components/ui/DocFlow.jsx';
 import { resolveDocChain } from '../lib/docChain.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
@@ -192,6 +193,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
   const [selItems, setSelItems] = React.useState([]);
   const [editVr, setEditVr] = React.useState(null);
   const [editSel, setEditSel] = React.useState([]);
+  const [staleV, setStaleV] = React.useState([]);   // vendor rfq_ids whose items no longer match the client items
   const [editSaving, setEditSaving] = React.useState(false);
   const [histVr, setHistVr] = React.useState(null);
   const [histRevs, setHistRevs] = React.useState([]);
@@ -218,11 +220,12 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
     setSettings(setRes.data || null);
     const ids = vs.map((x) => x.rfq_id);
     if (ids.length) {
-      const { data: its } = await supabase.from('rfq_items').select('rfq_id,unit_cost,can_supply').in('rfq_id', ids).eq('is_deleted', false);
+      const { data: its } = await supabase.from('rfq_items').select('rfq_id,unit_cost,can_supply,source_item_id,description,quantity,sub_items').in('rfq_id', ids).eq('is_deleted', false);
       const s = {};
       (its || []).forEach((it) => { const e = s[it.rfq_id] || { priced: 0, cant: 0, total: 0 }; e.total++; if (it.can_supply === false) e.cant++; else if (it.unit_cost != null) e.priced++; s[it.rfq_id] = e; });
       setSumm(s);
-    } else setSumm({});
+      setStaleV(staleVendorRfqs(ciRes.data || [], its || []));
+    } else { setSumm({}); setStaleV([]); }
     setLoading(false);
   };
   React.useEffect(() => { load(); }, [clientRfq.rfq_id]);
@@ -331,6 +334,11 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
         </div>
       )}
 
+      {staleV.length > 0 && !dealClosed && (
+        <div style={{ background: 'var(--orange-light)', border: '1px solid var(--orange)', borderRadius: 'var(--radius-md)', padding: '10px 14px', marginTop: 12, fontSize: 12.5, color: 'var(--grey-700)' }}>
+          ⚠️ Client items changed since {staleV.length} vendor{staleV.length > 1 ? 's' : ''} bid — their pricing may be stale. Use <b>Edit items</b> on the flagged vendor{staleV.length > 1 ? 's' : ''} to re-send and get a fresh bid.
+        </div>
+      )}
       {loading ? <div style={{ padding: 20, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div>
         : vrfqs.length === 0 ? <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 12 }}>No vendor RFQs yet. Click “+ Send vendor RFQ” to request pricing.</div>
           : <div style={{ border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', marginTop: 12, overflow: 'hidden' }}>
@@ -342,6 +350,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                     <div style={{ fontSize: 12, color: 'var(--grey-400)' }}>{vr.status === 'submitted' ? (s.priced + ' priced' + (s.cant ? (' · ' + s.cant + " can't supply") : '')) : (s.total + ' items')}{vr.reminder_count > 0 ? (' · reminded ' + vr.reminder_count + '×') : ''}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    {staleV.includes(vr.rfq_id) && <span title="Client items changed since this vendor's bid — re-send for fresh pricing" style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: 'var(--orange-light)', color: 'var(--orange)' }}>⚠ Items changed</span>}
                     <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 500, background: sc.bg, color: sc.c }}>{sc.l}</span>
                     {vr.status === 'submitted'
                       ? <button className="btn sm" onClick={() => openBid(vr.rfq_id)}>{viewBid === vr.rfq_id ? 'Hide' : 'View bid'}</button>

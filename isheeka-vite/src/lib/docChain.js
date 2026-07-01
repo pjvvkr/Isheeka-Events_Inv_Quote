@@ -4,6 +4,7 @@
 // was found and the rail degrades gracefully. No writes, no business logic.
 import { supabase } from './supabase';
 import { computeSourcingDrift } from './sourcingDrift.js';
+import { staleVendorRfqs } from './sourcingSync.js';
 
 const num = (n) => parseFloat(n) || 0;
 
@@ -84,6 +85,15 @@ export async function resolveDocChain(kind, id) {
         ]);
         const baseline = (riRes.data || []).map((r) => ({ ...r, source_item_id: r.rfq_item_id }));
         out.sourcing.stale = computeSourcingDrift(qlRes.data || [], baseline).stale;
+        if (!out.sourcing.stale) {
+          // second layer: a vendor's frozen items no longer match the (re-sourced) client items
+          const { data: vr } = await supabase.from('rfqs').select('rfq_id').eq('parent_rfq_id', ids.rfq).eq('party_type', 'vendor').eq('is_deleted', false);
+          const vids = (vr || []).map((x) => x.rfq_id);
+          if (vids.length) {
+            const { data: vitems } = await supabase.from('rfq_items').select('rfq_id,source_item_id,description,quantity,sub_items').in('rfq_id', vids).eq('is_deleted', false);
+            out.sourcing.stale = staleVendorRfqs(riRes.data || [], vitems || []).length > 0;
+          }
+        }
       }
     } catch (e) { /* noop */ }
   }

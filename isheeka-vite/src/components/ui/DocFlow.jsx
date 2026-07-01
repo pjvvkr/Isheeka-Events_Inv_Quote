@@ -57,7 +57,7 @@ export function DocFlow({ chain, current, onNavigate }) {
   const pricedTs = c.sourcing.pricedAt ? (() => { try { return new Date(c.sourcing.pricedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } })() : '';
   const costing = c.sourcing.costingExists
     ? (c.sourcing.stale
-        ? { state: 'progress', sub: 'Re-source', onClick: openCosting, hint: 'Quote scope changed since pricing — re-source needed' + (pricedTs ? (' · last priced ' + pricedTs) : '') }
+        ? { state: 'progress', sub: 'Re-source', onClick: openCosting, hint: 'Sourcing out of date — re-source needed' + (pricedTs ? (' · last priced ' + pricedTs) : '') }
         : { state: 'done', sub: 'Priced', onClick: openCosting, hint: 'Sourcing matches the quote' + (pricedTs ? (' · last priced ' + pricedTs) : '') })
     : (vs > 0 ? { state: 'progress', sub: 'Pending' } : (vt === 0 ? { state: 'none', sub: 'In-house' } : { state: 'none', sub: '—' }));
 

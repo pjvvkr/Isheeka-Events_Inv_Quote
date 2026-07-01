@@ -19,6 +19,24 @@ const isChanged = (q, r) =>
   norm(q.sub_event_name) !== norm(r.sub_event_name) ||
   subSig(q.sub_items) !== subSig(r.sub_items);
 
+// Which vendor RFQs have gone stale — i.e. a vendor line (frozen when they were sent/bid)
+// no longer matches the client item it was copied from (by source_item_id), because the
+// client item was re-sourced (description / qty / sub-items changed) or removed. Returns the
+// list of vendor rfq_ids that need a re-send. Pure.
+export function staleVendorRfqs(clientItems, vendorItems) {
+  const cById = {};
+  (clientItems || []).forEach((c) => { if (c && c.rfq_item_id) cById[c.rfq_item_id] = c; });
+  const fp = (x) => norm(x && x.description) + '::' + norm(x && x.quantity) + '::' + subSig(x && x.sub_items);
+  const stale = new Set();
+  (vendorItems || []).forEach((v) => {
+    if (!v || !v.source_item_id) return;
+    const c = cById[v.source_item_id];
+    if (!c) stale.add(v.rfq_id);            // the client line was removed
+    else if (fp(v) !== fp(c)) stale.add(v.rfq_id);  // the client line changed
+  });
+  return [...stale];
+}
+
 export function planSourcingSync(quoteLines, rfqItems) {
   const q = quoteLines || [];
   const r = rfqItems || [];
