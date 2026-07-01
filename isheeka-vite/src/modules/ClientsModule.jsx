@@ -10,6 +10,8 @@ import { fmtDate, eventTypeLabel, leadStageDisplay } from '../lib/format.js';
 import { EVENT_STATUS_COLORS, EVENT_STATUS_LABELS, QUOT_STATUS_COLORS, QUOT_STATUS_LABELS } from '../lib/constants.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { CLIENT_TEMPLATES, logEmail, sendWhatsApp } from '../lib/messaging.js';
+import { SendMessageModal } from '../components/SendMessageModal.jsx';
+import { confirmDialog } from '../components/confirm.jsx';
 
 export function ClientForm({ initial = {}, onSave, onCancel, title = 'New client' }) {
   const empty = { first_name: '', last_name: '', phone_1: '', phone_2: '', phone_3: '',
@@ -261,7 +263,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
   };
 
   const handleDeleteAlt = async (contactId) => {
-    if (!window.confirm('Remove this alternative contact?')) return;
+    if (!await confirmDialog('Remove this alternative contact?')) return;
     const { error: ade } = await runDb(supabase.from('alternative_contacts').update({ is_deleted: true }).eq('contact_id', contactId), 'remove contact');
     if (ade) return;
     setAltContacts((ac) => ac.filter((a) => a.contact_id !== contactId));
@@ -285,15 +287,8 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
       .then(({ data }) => { setMsgLog(data || []); setMsgLogLoading(false); });
   }, [clientId]);
 
-  const openMsgModal = () => {
-    setMsgTemplate(CLIENT_TEMPLATES[0].id);
-    const tpl = CLIENT_TEMPLATES[0];
-    setMsgBody(client ? tpl.body(client) : '');
-    setMsgPhone(client ? (client.phone_1 || '') : '');
-    setMsgEmail(client ? (client.email_1 || '') : '');
-    setMsgSent(false);
-    setShowMsgModal(true);
-  };
+  const openMsgModal = () => setShowMsgModal(true);
+  const refreshMsgLog = () => supabase.from('message_log').select('*').eq('party_type', 'client').eq('party_id', clientId).order('created_at', { ascending: false }).limit(50).then(({ data }) => setMsgLog(data || []));
 
   const handleTemplateChange = (id) => {
     setMsgTemplate(id);
@@ -350,7 +345,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
       notify('Cannot delete — this client is linked to ' + summary + '. Set them Inactive instead to stop using them on new records.', 'error');
       return;
     }
-    if (!window.confirm('Delete (archive) ' + client.first_name + ' ' + client.last_name + '? They will be removed from the Clients list. This can be undone in the database if needed.')) return;
+    if (!await confirmDialog('Delete (archive) ' + client.first_name + ' ' + client.last_name + '? They will be removed from the Clients list. This can be undone in the database if needed.')) return;
     const { error: cde } = await runDb(supabase.from('clients').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('client_id', clientId), 'delete client');
     if (cde) return;
     notify('Client archived.', 'success');
@@ -582,39 +577,7 @@ function ClientDetail({ clientId, onBack, onNavigate }) {
       </div>
 
       {/* Compose modal */}
-      {showMsgModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '24px 28px', width: 480, maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,.18)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--grey-800)' }}>💬 Send Message</div>
-              <button className="btn sm" onClick={() => setShowMsgModal(false)}>✕ Close</button>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Template</label>
-              <select className="field-input" value={msgTemplate} onChange={(e) => handleTemplateChange(e.target.value)} style={{ width: '100%' }}>
-                {CLIENT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-              </select>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Message</label>
-              <textarea className="field-input" value={msgBody} onChange={(e) => setMsgBody(e.target.value)} rows={5} style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }} placeholder="Type your message…" />
-            </div>
-            <div style={{ marginBottom: 18 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Phone number (for this send)</label>
-              <input className="field-input" value={msgPhone} onChange={(e) => setMsgPhone(e.target.value)} style={{ width: '100%' }} placeholder="+91 98765 43210" />
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Email (for this send)</label>
-              <input className="field-input" value={msgEmail} onChange={(e) => setMsgEmail(e.target.value)} style={{ width: '100%' }} placeholder="client@email.com" type="email" />
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button className="btn primary" onClick={handleSendWA} disabled={!msgPhone || !msgBody}>📲 Send on WhatsApp</button>
-              <button className="btn" onClick={handleSendEmail} disabled={!msgEmail || !msgBody}>📧 Send by Email</button>
-              {msgSent && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 500 }}>✅ Sent</span>}
-            </div>
-          </div>
-        </div>
-      )}
+      {showMsgModal && <SendMessageModal party={{ type: 'client', id: clientId, first_name: client && client.first_name, last_name: client && client.last_name, phone: client && client.phone_1, email: client && client.email_1 }} onClose={() => setShowMsgModal(false)} onSent={refreshMsgLog} />}
     </div>
   );
 }

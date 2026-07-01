@@ -7,6 +7,7 @@
 import React from 'react';
 import { supabase } from '../lib/supabase';
 import { notify, runDb } from '../lib/toast.jsx';
+import { confirmDialog } from '../components/confirm.jsx';
 
 const ROLE_OPTS = [['admin', 'Admin'], ['manager', 'Manager'], ['staff', 'Staff']];
 const roleLabel = (r) => (ROLE_OPTS.find((x) => x[0] === r) || [r, r])[1];
@@ -91,7 +92,7 @@ export function UsersModule() {
 
   const del = async (u) => {
     if (isMe(u)) { notify("You can't remove your own account.", 'error'); return; }
-    if (!window.confirm('Remove ' + u.first_name + ' ' + u.last_name + ' from the staff directory? Their past activity records are preserved. (Their login, if any, must be removed separately in Supabase Studio.)')) return;
+    if (!await confirmDialog('Remove ' + u.first_name + ' ' + u.last_name + ' from the staff directory? Their past activity records are preserved. (Their login, if any, must be removed separately in Supabase Studio.)')) return;
     const { error } = await runDb(supabase.from('users').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('user_id', u.user_id), 'remove staff');
     if (!error) { notify('Staff member removed.', 'success'); load(); }
   };

@@ -18,7 +18,10 @@ import { DocFlow } from '../components/ui/DocFlow.jsx';
 import { resolveDocChain } from '../lib/docChain.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { ClientLink } from '../components/links.jsx';
+import { ClientViewControls } from '../components/ClientViewControls.jsx';
+import { SendMessageModal } from '../components/SendMessageModal.jsx';
 import { ClientForm } from './ClientsModule.jsx';
+import { confirmDialog } from '../components/confirm.jsx';
 
 export function InvoicesModule({ nav, onNavigate, onBack }) {
   const [invoices, setInvoices] = React.useState([]);
@@ -118,6 +121,7 @@ export function InvoicesModule({ nav, onNavigate, onBack }) {
 
 function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
   const [inv, setInv] = React.useState(null);
+  const [msgParty, setMsgParty] = React.useState(null);
   const [items, setItems] = React.useState([]);
   const [installments, setInstallments] = React.useState([]);
   const [settings, setSettings] = React.useState({});
@@ -176,7 +180,9 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     setPaySaving(false);
   };
 
+  const [railTick, setRailTick] = React.useState(0);
   const loadAll = React.useCallback(async () => {
+    setRailTick((t) => t + 1);
     setLoading(true);
     const [{ data: i }, { data: li }, { data: inst }, { data: s }, { data: act }, { data: us }, { data: pays }] = await Promise.all([
       supabase.from('invoices').select('*').eq('invoice_id', invoiceId).single(),
@@ -235,7 +241,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     return () => { live = false; };
   }, [inv && inv.event_id, inv && inv.quotation_id, inv && inv.status]);
   const [docChain, setDocChain] = React.useState(null);
-  React.useEffect(()=>{ let live=true; if(invoiceId) resolveDocChain('invoice', invoiceId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[invoiceId]);
+  React.useEffect(()=>{ let live=true; if(invoiceId) resolveDocChain('invoice', invoiceId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[invoiceId, railTick]);
 
   if (loading) return <div style={{ padding: 60, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div>;
   if (!inv) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--grey-400)' }}>Invoice not found. <button className="btn sm" onClick={onBack}>← Back</button></div>;
@@ -330,9 +336,9 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     await loadAll();
   };
 
-  const openRevise = () => {
+  const openRevise = async () => {
     if (inv.status === 'cancelled') return;
-    if (inv.status === 'paid' && !window.confirm('This invoice is fully paid. Revising a settled invoice is an admin action and will be logged. Continue?')) return;
+    if (inv.status === 'paid' && !await confirmDialog('This invoice is fully paid. Revising a settled invoice is an admin action and will be logged. Continue?')) return;
     setRevItems(items.map((it) => ({ description: it.description || '', quantity: parseFloat(it.quantity) || 1, unit_price: parseFloat(it.unit_price) || 0, sub_event_name: it.sub_event_name || null })));
     setRevDiscount(parseFloat(inv.discount_amount) || 0);
     const _adj = parseFloat(inv.discount_amount) || 0;
@@ -420,7 +426,6 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     const amt = parseFloat(payForm.amount) || 0;
     if (amt <= 0) { notify('Enter a valid payment amount.', 'error'); return; }
     if (!payForm.date) { notify('Pick a payment date.', 'error'); return; }
-    if (!payForm.installment_id && unpaidInstallments.length) { notify('Select which installment this payment is against.', 'error'); return; }
     setPaySaving(true);
     const uid = await _currentUid();
     let receiptUrl = null;
@@ -504,7 +509,8 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            {inv.client_id && <button className="btn sm" title="Open this client's 360" onClick={() => onNavigate && onNavigate('clients', { clientId: inv.client_id, label: inv.client_name || 'Client' })}>👤 View client →</button>}
+            {inv.client_id && <button className="btn sm" title="Open this client's 360" onClick={() => setMsgParty({ type: 'client', id: inv.client_id })}>💬 Message client</button>}
+            {msgParty && <SendMessageModal party={msgParty} onClose={() => setMsgParty(null)} />}
             {inv.event_id && <button className="btn sm" onClick={() => onNavigate && onNavigate('events', { eventId: inv.event_id, label: inv.event_name || 'Event' })}>Go to event →</button>}
             {inv.status === 'draft' && <button className="btn primary" disabled={saving} onClick={markSent}>Mark sent</button>}
             {!locked && <button className="btn sm" disabled={saving} onClick={openRevise}>✏️ Revise</button>}
@@ -554,15 +560,18 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
         <button className="btn sm primary" disabled={(evtName || '').trim() === (inv.event_name || '')} onClick={saveEventName}>Save</button>
       </div>}
       {/* PDF options */}
-      <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '10px 16px', border: '1px solid var(--grey-100)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-700)' }}>Include in PDF:</span>
-        {[['prices', 'Prices'], ['qty', 'Qty'], ['schedule', 'Schedule'], ['discount', 'Discount'], ['coverPage', 'Cover page'], ['bankDetails', 'Bank details']].map(([k, l]) => (
-          <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--grey-700)', cursor: 'pointer' }}>
-            <input type="checkbox" checked={!!pdfDisplay[k]} onChange={(e) => setPdfDisplay((o) => ({ ...o, [k]: e.target.checked }))} style={{ accentColor: 'var(--pink)' }} />{l}
-          </label>
-        ))}
-        {(inv.revision_number || 0) > 0 && <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--grey-700)', cursor: 'pointer' }}><input type="checkbox" checked={includeRevHistory} onChange={(e) => setIncludeRevHistory(e.target.checked)} style={{ accentColor: 'var(--pink)' }} />Revision history</label>}
-      </div>
+      <ClientViewControls
+        title="Include in PDF"
+        toggles={[
+          { key: 'prices', label: 'Prices', checked: !!pdfDisplay.prices, onChange: (v) => setPdfDisplay((o) => ({ ...o, prices: v })) },
+          { key: 'qty', label: 'Qty', checked: !!pdfDisplay.qty, onChange: (v) => setPdfDisplay((o) => ({ ...o, qty: v })) },
+          { key: 'schedule', label: 'Schedule', checked: !!pdfDisplay.schedule, onChange: (v) => setPdfDisplay((o) => ({ ...o, schedule: v })) },
+          { key: 'discount', label: 'Discount', checked: !!pdfDisplay.discount, onChange: (v) => setPdfDisplay((o) => ({ ...o, discount: v })) },
+          { key: 'coverPage', label: 'Cover page', checked: !!pdfDisplay.coverPage, onChange: (v) => setPdfDisplay((o) => ({ ...o, coverPage: v })) },
+          { key: 'bankDetails', label: 'Bank details', checked: !!pdfDisplay.bankDetails, onChange: (v) => setPdfDisplay((o) => ({ ...o, bankDetails: v })) },
+          ...(((inv.revision_number || 0) > 0) ? [{ key: 'revHistory', label: 'Revision history', checked: includeRevHistory, onChange: (v) => setIncludeRevHistory(v) }] : []),
+        ]}
+      />
       {/* Client details */}
       <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '16px 20px', border: '1px solid var(--grey-100)', marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -621,7 +630,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
               <div><div style={{ fontSize: 12, fontWeight: 500, color: 'var(--grey-700)', marginBottom: 4 }}>Amount (₹) <span style={{ color: 'var(--red)' }}>*</span></div><input className="field-input" type="number" value={payForm.amount} onChange={(e) => setPayForm((f) => ({ ...f, amount: e.target.value }))} /></div>
               <div><div style={{ fontSize: 12, fontWeight: 500, color: 'var(--grey-700)', marginBottom: 4 }}>Date <span style={{ color: 'var(--red)' }}>*</span></div><input className="field-input" type="date" value={payForm.date} onChange={(e) => setPayForm((f) => ({ ...f, date: e.target.value }))} /></div>
               <div><div style={{ fontSize: 12, fontWeight: 500, color: 'var(--grey-700)', marginBottom: 4 }}>Mode <span style={{ color: 'var(--red)' }}>*</span></div><select className="field-input" value={payForm.mode} onChange={(e) => setPayForm((f) => ({ ...f, mode: e.target.value }))}>{[['upi', 'UPI'], ['neft', 'Bank / NEFT'], ['cash', 'Cash'], ['cheque', 'Cheque']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
-              <div><div style={{ fontSize: 12, fontWeight: 500, color: 'var(--grey-700)', marginBottom: 4 }}>Against installment {unpaidInstallments.length > 0 && <span style={{ color: 'var(--red)' }}>*</span>}</div><select className="field-input" value={payForm.installment_id} onChange={(e) => setPayForm((f) => ({ ...f, installment_id: e.target.value }))}>{unpaidInstallments.length === 0 ? <option value="">General — against outstanding</option> : <option value="">Auto — apply in order</option>}{unpaidInstallments.map((it) => <option key={it.installment_id} value={it.installment_id}>{(it.label || ('Installment ' + it.installment_number)) + ' · bal ₹' + (parseFloat(it.balance != null ? it.balance : it.amount_due) || 0).toLocaleString('en-IN')}</option>)}</select></div>
+              <div><div style={{ fontSize: 12, fontWeight: 500, color: 'var(--grey-700)', marginBottom: 4 }}>Against installment</div><select className="field-input" value={payForm.installment_id} onChange={(e) => setPayForm((f) => ({ ...f, installment_id: e.target.value }))}>{unpaidInstallments.length === 0 ? <option value="">General — against outstanding</option> : <option value="">Auto — apply in order</option>}{unpaidInstallments.map((it) => <option key={it.installment_id} value={it.installment_id}>{(it.label || ('Installment ' + it.installment_number)) + ' · bal ₹' + (parseFloat(it.balance != null ? it.balance : it.amount_due) || 0).toLocaleString('en-IN')}</option>)}</select></div>
             </div>
             <div style={{ marginBottom: 8 }}><div style={{ fontSize: 12, fontWeight: 500, color: 'var(--grey-700)', marginBottom: 4 }}>Reference no. (optional)</div><input className="field-input" value={payForm.reference} onChange={(e) => setPayForm((f) => ({ ...f, reference: e.target.value }))} placeholder="UTR / cheque no. / txn id" /></div>
             <div style={{ marginBottom: 12 }}><div style={{ fontSize: 12, fontWeight: 500, color: 'var(--grey-700)', marginBottom: 4 }}>Notes (optional)</div><input className="field-input" value={payForm.notes} onChange={(e) => setPayForm((f) => ({ ...f, notes: e.target.value }))} /></div>
@@ -660,7 +669,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
                 <label style={{ fontSize: 13, color: 'var(--grey-600)' }}>Discount (₹) <input className="field-input" type="number" disabled={revOverrideOn} style={{ width: 120, display: 'inline-block', marginLeft: 8, ...(revOverrideOn ? { opacity: 0.5 } : {}) }} value={revDiscount} onChange={(e) => setRevDiscount(e.target.value)} /></label>
                 <label style={{ fontSize: 13, color: 'var(--grey-600)' }}>Or set total (before GST) <input className="field-input" type="number" style={{ width: 120, display: 'inline-block', marginLeft: 8 }} value={revTotalOverride}
                   onChange={(e) => setRevTotalOverride(e.target.value)}
-                  onBlur={(e) => { const v = e.target.value; if (v !== '' && !isNaN(parseFloat(v))) { const tgt = parseFloat(v); if (Math.abs(tgt - revSub) > 0.5) { const adj = revSub - tgt; if (!window.confirm('Set the total (before GST) to ₹' + Math.round(tgt).toLocaleString('en-IN') + '?\n\nLine items add up to ₹' + Math.round(revSub).toLocaleString('en-IN') + '. This applies a ' + (adj > 0 ? '−' : '+') + '₹' + Math.round(Math.abs(adj)).toLocaleString('en-IN') + ' adjustment' + (inv.gst_applicable ? ', then GST is added on top.' : '.'))) { setRevTotalOverride(''); } } } }} /></label>
+                  onBlur={async (e) => { const v = e.target.value; if (v !== '' && !isNaN(parseFloat(v))) { const tgt = parseFloat(v); if (Math.abs(tgt - revSub) > 0.5) { const adj = revSub - tgt; if (!await confirmDialog('Set the total (before GST) to ₹' + Math.round(tgt).toLocaleString('en-IN') + '?\n\nLine items add up to ₹' + Math.round(revSub).toLocaleString('en-IN') + '. This applies a ' + (adj > 0 ? '−' : '+') + '₹' + Math.round(Math.abs(adj)).toLocaleString('en-IN') + ' adjustment' + (inv.gst_applicable ? ', then GST is added on top.' : '.'))) { setRevTotalOverride(''); } } } }} /></label>
                 {revOverrideOn && <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 500, background: 'var(--orange-light)', color: 'var(--orange)', alignSelf: 'flex-start' }}>Manual total · {revEffDiscount >= 0 ? '−' : '+'}₹{Math.round(Math.abs(revEffDiscount)).toLocaleString('en-IN')} adjustment</span>}
               </div>
               <div style={{ textAlign: 'right', fontSize: 13 }}>

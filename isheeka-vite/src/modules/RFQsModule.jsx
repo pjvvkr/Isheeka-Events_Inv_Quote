@@ -9,6 +9,7 @@ import { fmtDate } from '../lib/format.js';
 import { RFQ_STATUS, RFQ_ACTION_LABEL } from '../lib/constants.js';
 import { useEventTypes } from '../lib/data.js';
 import { rfqLink, createRfq, genRfqToken, genRfqPin, sha256Hex, approveRfqToQuote, findClientMatch } from '../lib/rfq.js';
+import { confirmDialog } from '../components/confirm.jsx';
 import { waLink } from '../lib/share.js';
 import { createVendorRfqs, loadVendorRfqs, loadVendorRfqItems, bumpReminder, regenerateVendorLink, vendorRfqLink, buildVendorRfqMsg, removeVendorRfq, rescopeVendorRfq } from '../lib/vendorRfq.js';
 import { CostingScreen } from './CostingScreen.jsx';
@@ -16,6 +17,8 @@ import { staleVendorRfqs } from '../lib/sourcingSync.js';
 import { DocFlow } from '../components/ui/DocFlow.jsx';
 import { resolveDocChain } from '../lib/docChain.js';
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
+import { ClientLink } from '../components/links.jsx';
+import { SendMessageModal } from '../components/SendMessageModal.jsx';
 
 function RFQShareCard({ created, contact, onDone }) {
   const link = rfqLink(created.token);
@@ -118,6 +121,8 @@ export function RFQsModule({ nav, onNavigate, onBack }) {
   const [created, setCreated] = React.useState(null);   // {ref_number, token, pin, contact}
   const detailId = nav && nav.rfqId;
   const isNew = !!(nav && nav.mode === 'new');
+  const sharedRef = React.useRef(false);
+  React.useEffect(() => { if (!sharedRef.current && nav && nav.share && nav.share.token) { sharedRef.current = true; setCreated({ ref_number: nav.share.ref_number, token: nav.share.token, pin: nav.share.pin, contact: nav.share.contact || {} }); } }, [nav]);
 
   const load = async () => { setLoading(true); const { data } = await supabase.from('rfqs').select('rfq_id,ref_number,status,client_id,contact_name,event_type,event_date,created_at,client_submitted_at,revision_number').eq('is_deleted', false).eq('party_type', 'client').eq('is_sourcing_anchor', false).order('created_at', { ascending: false }); setRfqs(data || []); setLoading(false); };
   React.useEffect(() => { if (!detailId && !isNew && !created) load(); }, [detailId, isNew, created]);
@@ -190,6 +195,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
   const [viewBid, setViewBid] = React.useState(null);
   const [bidItems, setBidItems] = React.useState([]);
   const [clientItems, setClientItems] = React.useState([]);
+  const [pricedSourceIds, setPricedSourceIds] = React.useState(new Set());
   const [selItems, setSelItems] = React.useState([]);
   const [editVr, setEditVr] = React.useState(null);
   const [editSel, setEditSel] = React.useState([]);
@@ -225,7 +231,8 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
       (its || []).forEach((it) => { const e = s[it.rfq_id] || { priced: 0, cant: 0, total: 0 }; e.total++; if (it.can_supply === false) e.cant++; else if (it.unit_cost != null) e.priced++; s[it.rfq_id] = e; });
       setSumm(s);
       setStaleV(staleVendorRfqs(ciRes.data || [], its || []));
-    } else { setSumm({}); setStaleV([]); }
+      setPricedSourceIds(new Set((its || []).filter((it) => it.unit_cost != null && it.can_supply !== false).map((it) => it.source_item_id).filter(Boolean)));
+    } else { setSumm({}); setStaleV([]); setPricedSourceIds(new Set()); }
     setLoading(false);
   };
   React.useEffect(() => { load(); }, [clientRfq.rfq_id]);
@@ -269,7 +276,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
     const msg = vr.status === 'submitted'
       ? ((v.name || 'This vendor') + ' has already submitted a bid. Remove them from sourcing anyway? Their bid will no longer appear in costing.')
       : ('Remove ' + (v.name || 'this vendor') + ' from sourcing? Their link will stop working.');
-    if (!window.confirm(msg)) return;
+    if (!await confirmDialog(msg)) return;
     try { await removeVendorRfq(vr.rfq_id); notify('Vendor removed from sourcing.', 'success'); load(); }
     catch (e) { notify('Could not remove the vendor.', 'error'); }
   };
@@ -285,7 +292,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
     if (!editVr) return;
     const items = clientItems.filter((it) => editSel.includes(it.rfq_item_id));
     if (!items.length) { notify('Select at least one item.', 'error'); return; }
-    if (editVr.status === 'submitted' && !window.confirm('This vendor already submitted a bid. Re-scoping replaces their item list and clears that bid — they will need to re-price. Continue?')) return;
+    if (editVr.status === 'submitted' && !await confirmDialog('This vendor already submitted a bid. Re-scoping replaces their item list and clears that bid — they will need to re-price. Continue?')) return;
     setEditSaving(true);
     try {
       const res = await rescopeVendorRfq(editVr, clientRfq, items);
@@ -318,6 +325,32 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
         </div>
         {!dealClosed && <button className="btn sm primary" onClick={() => { setShowSend(true); setSelItems(clientItems.map((it) => it.rfq_item_id)); }}>+ Send vendor RFQ</button>}
       </div>
+      {vrfqs.length > 0 && (() => {
+        const sharedN = vrfqs.length;
+        const respondedN = vrfqs.filter((v) => v.status === 'submitted').length;
+        const pendingN = sharedN - respondedN;
+        const staleN = staleV.length;
+        const totalItems = clientItems.length;
+        const uncovered = clientItems.filter((it) => !pricedSourceIds.has(it.rfq_item_id));
+        const uncoveredN = uncovered.length;
+        let tone, icon, msg;
+        if (staleN > 0) {
+          tone = 'orange'; icon = '\ud83d\udd04';
+          msg = <><b>{staleN} vendor{staleN > 1 ? 's' : ''} need{staleN > 1 ? '' : 's'} re-sending</b> \u2014 client items changed since they bid. Re-send for fresh pricing before costing.</>;
+        } else if (respondedN === 0) {
+          tone = 'blue'; icon = '\u23f3';
+          msg = <><b>Sent to {sharedN} vendor{sharedN > 1 ? 's' : ''} \u2014 awaiting the first response.</b> You can cost once at least one comes in.</>;
+        } else if (uncoveredN === 0) {
+          tone = 'green'; icon = '\u2705';
+          msg = <><b>All {totalItems} item{totalItems === 1 ? '' : 's'} {totalItems === 1 ? 'has' : 'have'} a vendor price.</b> {respondedN} of {sharedN} responded{pendingN > 0 ? (' \u00b7 ' + pendingN + ' pending') : ' \u2014 nothing pending'}. Ready to cost & mark up.</>;
+        } else {
+          tone = 'amber'; icon = '\u26a0\ufe0f';
+          const names = uncovered.slice(0, 3).map((u) => u.description).join(', ') + (uncovered.length > 3 ? '\u2026' : '');
+          msg = <><b>{uncoveredN} of {totalItems} item{uncoveredN > 1 ? 's' : ''} still unpriced</b> \u2014 {names}. {respondedN} of {sharedN} responded{pendingN > 0 ? ' \u00b7 ' + pendingN + ' pending. Wait, or send more RFQs to cover them.' : '. Send more RFQs to cover them.'}</>;
+        }
+        const C = ({ green: { bg: '#eaf6ee', bd: '#bfe3ca', fg: '#1f5133' }, amber: { bg: '#fdf3e3', bd: '#f5dca8', fg: '#8a5a12' }, blue: { bg: '#e9f1fb', bd: '#c3ddf5', fg: '#1c4a80' }, orange: { bg: '#fdeee7', bd: '#f3c9b6', fg: '#8a3b1a' } })[tone];
+        return <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', background: C.bg, border: '1px solid ' + C.bd, borderRadius: 'var(--radius-md)', padding: '11px 14px', marginTop: 12 }}><span style={{ fontSize: 16, lineHeight: 1.3 }}>{icon}</span><div style={{ fontSize: 13, color: C.fg, lineHeight: 1.5 }}>{msg}</div></div>;
+      })()}
       {dealClosed && <div style={{ background: 'var(--grey-50)', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-md)', padding: '8px 12px', marginTop: 10, fontSize: 12.5, color: 'var(--grey-600)' }}>🔒 The event for this RFQ is completed or cancelled — sourcing is read-only. You can still view bids and the costing summary.</div>}
 
       {justSent.length > 0 && (
@@ -377,6 +410,8 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
                         )}
                       </div>
                     ))}
+                    {bidItems.length > 0 && (() => { const total = bidItems.reduce((sm, it) => sm + (it.can_supply === false ? 0 : (Number(it.unit_cost) || 0) * (Number(it.quantity) || 1)), 0); return <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13, fontWeight: 600, color: 'var(--grey-800)', borderTop: '1px solid var(--grey-200)', marginTop: 6, paddingTop: 6 }}><span>Bid total</span><span>{'\u20b9' + Math.round(total).toLocaleString('en-IN')}</span></div>; })()}
+                    {vr.notes && <div style={{ fontSize: 12, color: 'var(--grey-600)', marginTop: 8, background: 'white', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', overflowWrap: 'anywhere' }}><b style={{ color: 'var(--grey-700)' }}>Vendor note:</b> {vr.notes}</div>}
                   </div>
                 )}
               </div>
@@ -541,6 +576,7 @@ function SourcingPanel({ clientRfq, itemCount, onNavigate, dealClosed }) {
 
 function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [r, setR] = React.useState(null);
+  const [msgParty, setMsgParty] = React.useState(null);
   const [items, setItems] = React.useState([]);
   const [activity, setActivity] = React.useState([]);
   const [revisions, setRevisions] = React.useState([]);
@@ -561,7 +597,8 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   const [saving, setSaving] = React.useState(false);
   const [editSaved, setEditSaved] = React.useState(false);
   const [dragIdx, setDragIdx] = React.useState(null);
-  const load = async () => { setLoading(true);
+  const [railTick, setRailTick] = React.useState(0);
+  const load = async () => { setRailTick((t) => t + 1); setLoading(true);
     const [{ data: rfq }, { data: its }, { data: act }] = await Promise.all([
       supabase.from('rfqs').select('*').eq('rfq_id', rfqId).single(),
       supabase.from('rfq_items').select('*').eq('rfq_id', rfqId).eq('is_deleted', false).order('sort_order'),
@@ -593,9 +630,9 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   };
   React.useEffect(() => { load(); }, [rfqId]);
   const [docChain, setDocChain] = React.useState(null);
-  React.useEffect(()=>{ let live=true; if(rfqId) resolveDocChain('rfq', rfqId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[rfqId]);
+  React.useEffect(()=>{ let live=true; if(rfqId) resolveDocChain('rfq', rfqId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[rfqId, railTick]);
   const regenerate = async () => {
-    if (!window.confirm('Generate a NEW link & PIN? The previous link will stop working.')) return;
+    if (!await confirmDialog('Generate a NEW link & PIN? The previous link will stop working.')) return;
     const token = genRfqToken(), pin = (r.access_mode === 'email_otp') ? null : genRfqPin();
     const { error } = await runDb(supabase.from('rfqs').update({ token_hash: await sha256Hex(token), access_pin_hash: pin ? await sha256Hex(pin) : null, token_expires_at: new Date(Date.now() + 21 * 24 * 3600 * 1000).toISOString(), updated_at: new Date().toISOString() }).eq('rfq_id', rfqId), 'regenerate link');
     if (error) return;
@@ -630,12 +667,12 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
   };
   const approve = async () => {
     const basisItems = (basisRev != null) ? ((revisions.find((x) => x.revision_number === basisRev) || {}).snapshot || {}).items || items : items;
-    if (!basisItems || basisItems.length === 0) { if (!window.confirm('This RFQ has no items. Create an empty draft quote anyway?')) return; }
+    if (!basisItems || basisItems.length === 0) { if (!await confirmDialog('This RFQ has no items. Create an empty draft quote anyway?')) return; }
     if (!r.client_id) {
       const match = await findClientMatch(r);
       if (match) { setDupe({ match, items: basisItems }); return; }   // staff decides via the modal
     }
-    if (!window.confirm('Approve and create a draft quote' + (basisRev != null ? (' from revision ' + basisRev) : '') + '?\n\nThis creates the client and opens the quote for you to price.')) return;
+    if (!(await confirmDialog({ title: 'Approve → create quote?', body: (basisRev != null ? ('Quoting from revision ' + basisRev + '. ') : '') + 'This creates the client and opens the draft quote for you to price.', confirmLabel: 'Approve', cancelLabel: 'Cancel' }))) return;
     doApprove(basisItems, null);
   };
 
@@ -783,7 +820,7 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--grey-800)' }}>{r.ref_number} <StatusBadge kind="rfq" status={r.status} style={{ marginLeft: 6 }} />{(r.revision_number || 0) > 1 && <span title={'Revised ' + r.revision_number + '× by the ' + (r.party_type === 'vendor' ? 'vendor' : 'client')} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 20, fontWeight: 600, background: 'var(--orange-light)', color: 'var(--orange)', marginLeft: 6 }}>🔄 Rev {r.revision_number}</span>}</div>
-            <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 3 }}>{r.contact_name || '—'}{r.contact_phone ? (' · ' + r.contact_phone) : ''}{r.event_type ? (' · ' + r.event_type) : ''}{r.city ? (' · ' + r.city) : ''}</div>
+            <div style={{ fontSize: 13, color: 'var(--grey-400)', marginTop: 3 }}><ClientLink clientId={r.client_id} name={r.contact_name} onNavigate={onNavigate}>{r.contact_name}</ClientLink>{r.contact_phone ? (' · ' + r.contact_phone) : ''}{r.event_type ? (' · ' + r.event_type) : ''}{r.city ? (' · ' + r.city) : ''}</div>
             {(r.secondary_contact_name || r.secondary_contact_phone) && <div style={{ fontSize: 12, color: 'var(--grey-400)', marginTop: 2 }}>2nd contact: {r.secondary_contact_name || ''} {r.secondary_contact_phone || ''}</div>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -797,7 +834,8 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
             {r.status === 'submitted' && <button className="btn sm" style={{ color: 'var(--red)', borderColor: 'rgba(163,45,45,0.3)' }} onClick={requestChanges}>↩ Request changes</button>}
             {editSaved && r.status === 'submitted' && <button className="btn sm" style={{ background: 'var(--green-light)', color: 'var(--green)', borderColor: '#86EFAC' }} onClick={requestConfirmation}>📲 Request Confirmation</button>}
             {r.lead_id && <button className="btn sm" title="Open the source lead" onClick={() => onNavigate && onNavigate('leads', { leadId: r.lead_id, label: r.contact_name || 'Lead' })}>🎯 View lead →</button>}
-            {r.client_id && <button className="btn sm" title="Open the client 360" onClick={() => onNavigate && onNavigate('clients', { clientId: r.client_id, label: r.contact_name || 'Client' })}>👤 View client →</button>}
+            <button className="btn sm" title="Open the client 360" onClick={() => setMsgParty(r.client_id ? { type: 'client', id: r.client_id } : { type: 'rfq', id: r.rfq_id, first_name: r.contact_first_name, last_name: r.contact_last_name, phone: r.contact_phone, email: r.contact_email })}>💬 Message client</button>
+            {msgParty && <SendMessageModal party={msgParty} onClose={() => setMsgParty(null)} />}
             {r.quotation_id && <button className="btn sm" onClick={() => onNavigate && onNavigate('quotations', { quotId: r.quotation_id, label: 'Quote' })}>📄 Go to quote →</button>}
             {!eventClosed && !['withdrawn', 'expired'].includes(r.status) && <button className="btn sm" onClick={regenerate}>🔗 Regenerate link & PIN</button>}
           </div>

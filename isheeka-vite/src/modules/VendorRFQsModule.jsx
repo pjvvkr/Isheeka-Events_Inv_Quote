@@ -11,6 +11,7 @@ import { notify } from '../lib/toast.jsx';
 import { fmtDate } from '../lib/format.js';
 import { waLink } from '../lib/share.js';
 import { loadVendorRfqItems, regenerateVendorLink, bumpReminder, vendorRfqLink, buildVendorRfqMsg } from '../lib/vendorRfq.js';
+import { confirmDialog } from '../components/confirm.jsx';
 
 // Vendor-RFQ status chips (the vendor lifecycle: Sent → Opened → Submitted).
 const VCHIP = {
@@ -133,7 +134,7 @@ function VendorRFQDetail({ rfqId, onBack, onNavigate }) {
     } catch (e) { notify('Could not send reminder.', 'error'); }
   };
   const regenerate = async () => {
-    if (!window.confirm('Generate a NEW link & PIN for this vendor? The previous link stops working.')) return;
+    if (!await confirmDialog('Generate a NEW link & PIN for this vendor? The previous link stops working.')) return;
     try {
       const { token, pin } = await regenerateVendorLink(rfqId);
       const link = vendorRfqLink(token);

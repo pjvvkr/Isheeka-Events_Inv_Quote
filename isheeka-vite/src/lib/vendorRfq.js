@@ -100,7 +100,7 @@ export async function ensureSourcingAnchor(quote) {
 // All vendor RFQs under a client RFQ (for the Sourcing panel).
 export async function loadVendorRfqs(parentRfqId) {
   const { data } = await supabase.from('rfqs')
-    .select('rfq_id,ref_number,status,vendor_id,reminder_count,last_reminded_at,client_submitted_at,updated_at,revision_number')
+    .select('rfq_id,ref_number,status,vendor_id,reminder_count,last_reminded_at,client_submitted_at,updated_at,revision_number,notes')
     .eq('parent_rfq_id', parentRfqId).eq('party_type', 'vendor').eq('is_deleted', false)
     .order('created_at', { ascending: true });
   return data || [];

@@ -15,8 +15,10 @@ import { useEventTypes, fetchLeadSources } from '../lib/data.js';
 import { getNextLeadRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
 import { ClientLink } from '../components/links.jsx';
+import { SendMessageModal } from '../components/SendMessageModal.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
 import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
+import { confirmDialog } from '../components/confirm.jsx';
 
 function LossReasonModal({onSave, onCancel}) {
   const [reason, setReason] = React.useState('');
@@ -250,6 +252,7 @@ function LeadSELocInput({value,onChange}) {
 
 function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavigate}) {
   const [lead, setLead] = React.useState(null);
+  const [msgParty, setMsgParty] = React.useState(null);
   const [subEvents, setSubEvents] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [mode, setMode] = React.useState('view');
@@ -380,7 +383,7 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
 
   // Admin: cascade soft-delete this lead and everything attached (reversible).
   const archiveLead = async () => {
-    if(!window.confirm('Archive '+(lead.ref_number||'this lead')+' and ALL its data — RFQs, quotes, events, invoices, payments?\n\nIt hides everywhere (soft delete, reversible from the database). Use this to remove test or duplicate entries.')) return;
+    if(!await confirmDialog('Archive '+(lead.ref_number||'this lead')+' and ALL its data — RFQs, quotes, events, invoices, payments?\n\nIt hides everywhere (soft delete, reversible from the database). Use this to remove test or duplicate entries.')) return;
     const { data, error } = await supabase.rpc('archive_lead_chain', { p_lead_ref: lead.ref_number });
     if(error){ notify('Could not archive: '+(error.message||''),'error'); return; }
     if(data && data.ok===false){ notify('Archive skipped — '+(data.error||'lead not found'),'error'); return; }
@@ -510,7 +513,8 @@ function LeadDetail({leadId, onBack, onConverted, onCreateFromReference, onNavig
         <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
           {/* Stage badge — always visible */}
           <StatusBadge kind="lead" status={lead.stage} size="md" label={isLost?'LOST':isConverted?'CONVERTED':leadStageDisplay(lead.stage)} />
-          {lead.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:lead.client_id,label:(lead.first_name+' '+lead.last_name).trim()||'Client'})}>👤 View client →</button>}
+          <button className="btn sm" title="Open this client's 360" onClick={()=>setMsgParty(lead.client_id ? { type: 'client', id: lead.client_id } : { type: 'lead', id: lead.lead_id, first_name: lead.first_name, last_name: lead.last_name, phone: lead.phone, email: lead.email })}>💬 Message client</button>
+          {msgParty && <SendMessageModal party={msgParty} onClose={() => setMsgParty(null)} />}
           {!isLost&&lead.stage!=='completed'&&(()=>{ const activeRfq=leadRfqs.find(r=>!['converted','withdrawn','expired'].includes(r.status)); const tip=activeRfq?('An active RFQ ('+activeRfq.ref_number+') already exists — open it below.'):'Send a requirements link to capture event details'; return (
             <span title={tip} style={{display:'inline-flex'}}>
               <button className="btn sm" disabled={!!activeRfq} style={activeRfq?{opacity:0.5,cursor:'not-allowed',pointerEvents:'none'}:{}} onClick={()=>onNavigate&&onNavigate('rfqs',{mode:'new',label:'New RFQ',prefill:{lead_id:lead.lead_id,client_id:lead.client_id||null,contact_first_name:lead.first_name,contact_last_name:lead.last_name,contact_phone:lead.phone,contact_email:lead.email,event_type:lead.event_type,event_date:lead.tentative_date||null,guest_count:lead.guest_count||null,budget:lead.budget||null,city:lead.location||'Hyderabad',location:''}})}>📝 Send RFQ</button>

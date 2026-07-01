@@ -13,6 +13,7 @@ import { openStoredFile } from '../lib/storage.js';
 import { createNotifications } from '../lib/notifications.js';
 import { sendPush } from '../lib/push.js';
 import { resolveAudience } from '../lib/notifyPrefs.js';
+import { confirmDialog } from '../components/confirm.jsx';
 
 export function ExpensesModule({ onNavigate }) {
   const [rows, setRows] = React.useState([]);
@@ -64,8 +65,8 @@ export function ExpensesModule({ onNavigate }) {
   });
 
   const openNew = () => { setEditRow(null); setForm({ ...emptyForm }); setFile(null); setShowForm(true); };
-  const openEdit = (r) => {
-    if (r.paid_by) { const amtT = parseFloat(r.amount) || 0; const got = reimbMap[r.expense_id] || 0; if (amtT > 0 && got >= amtT && !window.confirm((r.expense_no || 'This expense') + ' is fully reimbursed (settled). Editing it can change the owner reconciliation. Edit anyway?')) return; }
+  const openEdit = async (r) => {
+    if (r.paid_by) { const amtT = parseFloat(r.amount) || 0; const got = reimbMap[r.expense_id] || 0; if (amtT > 0 && got >= amtT && !await confirmDialog((r.expense_no || 'This expense') + ' is fully reimbursed (settled). Editing it can change the owner reconciliation. Edit anyway?')) return; }
     setEditRow(r); setForm({ description: r.description || '', amount: r.amount || '', date: r.date || emptyForm.date, category: r.category || 'miscellaneous', sub_category: r.sub_category || '', event_id: r.event_id || '', payment_mode: r.payment_mode || 'upi', reference_number: r.reference_number || '', is_recurring: !!r.is_recurring, recurring_frequency: r.recurring_frequency || 'monthly', notes: r.notes || '', paid_by: r.paid_by || '', notify_wa: false, notify_email: false }); setFile(null); setCap({ busy: false, paste: false, text: '' }); setShowForm(true); };
 
   // Smart capture: receipt photo / file / pasted note → AI fills the form.
@@ -108,7 +109,7 @@ export function ExpensesModule({ onNavigate }) {
     }
     notify(editRow ? 'Expense updated.' : 'Expense recorded.', 'success'); setShowForm(false); load();
   };
-  const del = async (r) => { if (!window.confirm('Delete this expense?')) return; const { error } = await runDb(supabase.from('expenses').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('expense_id', r.expense_id), 'delete expense'); if (!error) { notify('Expense deleted.', 'success'); load(); } };
+  const del = async (r) => { if (!await confirmDialog('Delete this expense?')) return; const { error } = await runDb(supabase.from('expenses').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('expense_id', r.expense_id), 'delete expense'); if (!error) { notify('Expense deleted.', 'success'); load(); } };
 
   const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
   const reimbStatus = (r) => {
