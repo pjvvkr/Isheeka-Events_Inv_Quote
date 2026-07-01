@@ -6,8 +6,11 @@ import { supabase } from '../lib/supabase';
 import { CLIENT_TEMPLATES, VENDOR_TEMPLATES, brandFooter, sendWhatsApp, logEmail } from '../lib/messaging.js';
 
 function compose(tpl, contact, footer) {
+  // Salutation pulled from the contextual party (client first name, or vendor/company name).
+  const name = (contact && (contact.first_name || contact.name)) || '';
+  const greeting = name ? ('Dear ' + name + ',\n\n') : '';
   const base = ((tpl && tpl.body && tpl.body(contact)) || '').trim();
-  return (base ? base + '\n\n' : '') + (footer || '');
+  return greeting + (base ? base + '\n\n' : '') + (footer || '');
 }
 
 export function SendMessageModal({ party, onClose, onSent }) {

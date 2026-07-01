@@ -3,20 +3,20 @@ import { supabase } from './supabase';
 import { waLink } from './share.js';
 import { _currentUid } from './session.js';
 
-// WhatsApp message templates for clients
+// WhatsApp message templates for clients (the "Dear {name}," salutation is added by the modal from context)
 export const CLIENT_TEMPLATES = [
-  { id: 'followup', label: 'Follow-up', body: (c) => `Hi ${c.first_name}, just checking in on your event plans! Feel free to reach out if you have any questions.` },
-  { id: 'rfq_reminder', label: 'RFQ reminder', body: (c) => `Hi ${c.first_name}, a gentle reminder to fill in your event requirements: {RFQ_LINK}.` },
-  { id: 'quote_ready', label: 'Quotation ready', body: (c) => `Hi ${c.first_name}, your quotation is ready! Please review it and let us know.` },
-  { id: 'payment_reminder', label: 'Payment reminder', body: (c) => `Hi ${c.first_name}, this is a gentle reminder about an upcoming payment. Please reach out if you need any clarification.` },
+  { id: 'followup', label: 'Follow-up', body: () => `Just checking in on your event plans! Feel free to reach out if you have any questions.` },
+  { id: 'rfq_reminder', label: 'RFQ reminder', body: () => `A gentle reminder to fill in your event requirements: {RFQ_LINK}.` },
+  { id: 'quote_ready', label: 'Quotation ready', body: () => `Your quotation is ready! Please review it and let us know.` },
+  { id: 'payment_reminder', label: 'Payment reminder', body: () => `This is a gentle reminder about an upcoming payment. Please reach out if you need any clarification.` },
   { id: 'custom', label: 'Custom message', body: () => '' },
 ];
 
-// WhatsApp message templates for vendors
+// WhatsApp message templates for vendors (the "Dear {name}," salutation is added by the modal from context)
 export const VENDOR_TEMPLATES = [
-  { id: 'rfq_sent', label: 'RFQ sent', body: (v) => `Hi ${v.name}, please find the event requirements here: {RFQ_LINK}. Kindly send us your best quote.` },
-  { id: 'quote_followup', label: 'Quote follow-up', body: (v) => `Hi ${v.name}, we are waiting for your quotation. Please send it at the earliest.` },
-  { id: 'payment_confirm', label: 'Payment confirmation', body: (v) => `Hi ${v.name}, we have processed your payment. Please confirm receipt.` },
+  { id: 'rfq_sent', label: 'RFQ sent', body: () => `Please find the event requirements here: {RFQ_LINK}. Kindly send us your best quote.` },
+  { id: 'quote_followup', label: 'Quote follow-up', body: () => `We are waiting for your quotation. Please send it at the earliest.` },
+  { id: 'payment_confirm', label: 'Payment confirmation', body: () => `We have processed your payment. Please confirm receipt.` },
   { id: 'custom', label: 'Custom message', body: () => '' },
 ];
 
