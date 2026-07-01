@@ -26,6 +26,7 @@ import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
 import { readWorkbook } from '../lib/xlsxIO.js';
 import { ClientForm } from './ClientsModule.jsx';
 import { NewDealModal } from '../components/NewDealModal.jsx';
+import { ClientPicker } from '../components/ClientPicker.jsx';
 import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
 import { confirmDialog } from '../components/confirm.jsx';
 
@@ -134,23 +135,7 @@ function EvtAutoInput({label, required, value, onChange, placeholder='', table, 
 
 // ── Change Client Modal ───────────────────────────────────────────────────────
 function ChangeClientModal({currentClient, onSave, onCancel}) {
-  const [clients, setClients] = React.useState([]);
-  const [search, setSearch] = React.useState('');
   const [selected, setSelected] = React.useState(null);
-  const [loading, setLoading] = React.useState(true);
-
-  React.useEffect(()=>{
-    supabase.from('clients').select('client_id,first_name,last_name,phone_1,status')
-      .eq('is_deleted',false).neq('status','inactive').order('first_name')
-      .then(({data})=>{ if(data) setClients(data); setLoading(false); });
-  },[]);
-
-  const filtered = clients.filter(c=>{
-    const q = search.toLowerCase();
-    return !q || `${c.first_name} ${c.last_name} ${c.phone_1}`.toLowerCase().includes(q);
-  }).filter(c=>c.client_id !== currentClient?.client_id);
-
-  const statusColors = {active:{bg:'var(--green-light)',color:'var(--green)'},inactive:{bg:'var(--grey-100)',color:'var(--grey-400)'},vip:{bg:'var(--pink-light)',color:'var(--pink)'}};
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
@@ -163,29 +148,17 @@ function ChangeClientModal({currentClient, onSave, onCancel}) {
           <div style={{background:'var(--orange-light)',borderRadius:'var(--radius-md)',padding:'10px 14px',fontSize:13,color:'var(--orange)',marginBottom:16}}>
             ⚠️ Changing the client will reset the primary and secondary contacts for this event. Make sure to reassign them after.
           </div>
-          <input className="field-input" placeholder="Search clients..." value={search}
-            onChange={e=>setSearch(e.target.value)} style={{marginBottom:12}}/>
-          {loading ? <div style={{textAlign:'center',padding:20}}><div className="spinner" style={{margin:'0 auto'}}/></div> : (
-            <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:300,overflowY:'auto'}}>
-              {filtered.map(c=>{
-                const sc=statusColors[c.status?.toLowerCase()]||statusColors.active;
-                const sel=selected?.client_id===c.client_id;
-                return (
-                  <div key={c.client_id} onClick={()=>setSelected(c)}
-                    style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',border:`1px solid ${sel?'#A01044':'var(--grey-100)'}`,borderRadius:'var(--radius-md)',cursor:'pointer',background:sel?'#FCEAF1':'white'}}>
-                    <div style={{width:32,height:32,borderRadius:'50%',background:'var(--pink-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:600,color:'var(--pink)',flexShrink:0}}>
-                      {c.first_name?.charAt(0)}{c.last_name?.charAt(0)}
-                    </div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{c.first_name} {c.last_name}</div>
-                      <div style={{fontSize:12,color:'var(--grey-400)'}}>{c.phone_1}</div>
-                    </div>
-                    <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:sc.bg,color:sc.color}}>{c.status?.toUpperCase()}</span>
-                    {sel&&<span style={{color:'var(--green)',fontSize:16}}>✓</span>}
-                  </div>
-                );
-              })}
-              {filtered.length===0&&<div style={{textAlign:'center',padding:20,color:'var(--grey-400)',fontSize:13}}>No other clients found</div>}
+          <ClientPicker excludeId={currentClient?.client_id} onPick={setSelected} autoFocus placeholder="Search clients by name or phone…" />
+          {selected && (
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',marginTop:12,border:'1px solid #A01044',borderRadius:'var(--radius-md)',background:'#FCEAF1'}}>
+              <div style={{width:32,height:32,borderRadius:'50%',background:'var(--pink-light)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:600,color:'var(--pink)',flexShrink:0}}>
+                {selected.first_name?.charAt(0)}{selected.last_name?.charAt(0)}
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:500,color:'var(--grey-800)'}}>{selected.first_name} {selected.last_name}</div>
+                <div style={{fontSize:12,color:'var(--grey-400)'}}>{selected.phone_1}</div>
+              </div>
+              <span style={{color:'var(--green)',fontSize:16}}>✓</span>
             </div>
           )}
         </div>

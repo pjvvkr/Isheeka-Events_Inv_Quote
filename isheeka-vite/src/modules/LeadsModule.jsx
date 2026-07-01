@@ -12,12 +12,11 @@ import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { DocFlow } from '../components/ui/DocFlow.jsx';
 import { resolveDocChain } from '../lib/docChain.js';
 import { useEventTypes, fetchLeadSources } from '../lib/data.js';
-import { getNextLeadRef } from '../lib/refs.js';
 import { InputField, SelectField, AutocompleteInput } from '../components/fields.jsx';
 import { ClientLink } from '../components/links.jsx';
 import { SendMessageModal } from '../components/SendMessageModal.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
-import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
+import { ENFORCE_CANONICAL_PATH, createLead } from '../lib/deal.js';
 import { confirmDialog } from '../components/confirm.jsx';
 
 function LossReasonModal({onSave, onCancel}) {
@@ -908,32 +907,7 @@ export function LeadsModule({nav, onNavigate, onBack}) {
   };
 
   const handleSaveNew = async (form, subEvents) => {
-    const ref_number = await getNextLeadRef();
-    const insertPayload = {
-      ref_number,
-      first_name: form.first_name,
-      last_name: form.last_name,
-      phone: form.phone,
-      phone_2: form.phone_2||null,
-      email: form.email||null,
-      source: form.source||null,
-      event_type: form.event_type||null,
-      tentative_date: form.tentative_date||null,
-      location: form.location||null,
-      budget: form.budget?parseFloat(form.budget):null,
-      guest_count: form.guest_count?parseInt(form.guest_count):null,
-      venue_preference: form.venue_preference||null,
-      referred_by: form.referred_by||null,
-      stage: form.stage||'new',
-      assigned_to: form.assigned_to||null,
-      notes: form.notes||null,
-      follow_up_date: form.follow_up_date||null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      is_deleted: false
-    };
-    const {data,error} = await supabase.from('leads').insert(insertPayload).select().single();
-    if(error) throw error;
+    await createLead(form);
     setSaveSuccess('Lead '+form.first_name+' '+form.last_name+' added successfully!');
     setTimeout(()=>setSaveSuccess(''),4000);
     loadLeads();

@@ -833,7 +833,6 @@ function RFQDetail({ rfqId, onBack, onShare, onNavigate }) {
             {r.status === 'submitted' && !editMode && <button className="btn sm" onClick={startEdit}>✏️ Edit</button>}
             {r.status === 'submitted' && <button className="btn sm" style={{ color: 'var(--red)', borderColor: 'rgba(163,45,45,0.3)' }} onClick={requestChanges}>↩ Request changes</button>}
             {editSaved && r.status === 'submitted' && <button className="btn sm" style={{ background: 'var(--green-light)', color: 'var(--green)', borderColor: '#86EFAC' }} onClick={requestConfirmation}>📲 Request Confirmation</button>}
-            {r.lead_id && <button className="btn sm" title="Open the source lead" onClick={() => onNavigate && onNavigate('leads', { leadId: r.lead_id, label: r.contact_name || 'Lead' })}>🎯 View lead →</button>}
             <button className="btn sm" title="Open the client 360" onClick={() => setMsgParty(r.client_id ? { type: 'client', id: r.client_id } : { type: 'rfq', id: r.rfq_id, first_name: r.contact_first_name, last_name: r.contact_last_name, phone: r.contact_phone, email: r.contact_email })}>💬 Message client</button>
             {msgParty && <SendMessageModal party={msgParty} onClose={() => setMsgParty(null)} />}
             {r.quotation_id && <button className="btn sm" onClick={() => onNavigate && onNavigate('quotations', { quotId: r.quotation_id, label: 'Quote' })}>📄 Go to quote →</button>}
