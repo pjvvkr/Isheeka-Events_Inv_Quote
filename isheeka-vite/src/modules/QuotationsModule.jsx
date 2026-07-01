@@ -225,6 +225,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   };
   const doConfirmQuote = async () => {
     if(confirming||!quot) return;
+    if((parseFloat(quot.grand_total)||0)<=0){ notify('Add prices before confirming — this quote total is ₹0.','error'); return; }
     // Event-origin: just approve + create the draft invoice (event already exists).
     if(quot.event_id){
       setConfirming(true);
@@ -424,16 +425,17 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
             <div style={{fontSize:13,color:'var(--grey-400)',marginTop:4}}><ClientLink clientId={quot.client_id} name={quot.client_name} onNavigate={onNavigate}>{quot.client_name||'—'}</ClientLink>{quot.event_name?' · '+quot.event_name:''}{quot.doc_date?' · '+fmt(quot.doc_date):''}{quot.valid_until?' · valid until '+fmt(quot.valid_until):''}</div>
           </div>
         </div>
+        {quoteUnpriced && quot.status==='draft' && <div style={{fontSize:12,color:'var(--grey-600)',marginTop:12,background:'var(--grey-50)',border:'1px solid var(--grey-100)',borderRadius:'var(--radius-sm)',padding:'8px 12px'}}>💡 <b>No prices yet.</b> Use <b>Edit quotation</b> to price in-house{(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') ? <>, or <b>Source vendors →</b> to price from vendor bids</> : ''}.</div>}
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
           {quot.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:quot.client_id,label:quot.client_name||'Client'})}>👤 View client →</button>}
-          {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') && !['rejected','superseded','expired'].includes(quot.status) && !eventCancelled && !(srcEvent && (srcEvent.status||'').toLowerCase()==='completed') && <button className="btn sm" disabled={sourcing} title="Send vendor RFQs and price this quote via the costing screen" onClick={openSourcing}>{sourcing?'Starting…':'🔧 Source vendors →'}</button>}
+          {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') && !['rejected','superseded','expired'].includes(quot.status) && !eventCancelled && !(srcEvent && (srcEvent.status||'').toLowerCase()==='completed') && <button className={"btn sm"+(quoteUnpriced?' primary':'')} disabled={sourcing} title="Send vendor RFQs and price this quote via the costing screen" onClick={openSourcing}>{sourcing?'Starting…':'🔧 Source vendors →'}</button>}
           {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
-          {canConfirm&&<button className="btn sm" style={{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
+          {canConfirm&&<button className="btn sm" style={quoteUnpriced?{color:'var(--grey-400)',borderColor:'var(--grey-200)',cursor:'not-allowed'}:{color:'var(--green)',borderColor:'#86EFAC'}} disabled={confirming||quoteUnpriced} title={quoteUnpriced?'Add prices before confirming — this quote total is ₹0':''} onClick={doConfirmQuote}>{confirming?'Confirming…':(quot.event_id?'✅ Confirm & create invoice':'✅ Confirm & create event')}</button>}
           {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id,label:quot.event_name||'Event'})}>Go to event →</button>}
           {!quot.event_id&&!['rejected','converted','expired','superseded'].includes(quot.status)&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={()=>{setCloseForm({outcome:'client',reason:'',notes:''});setShowClose(true);}} title="Client declined or we can't fulfil — close this quote">✕ Close — not proceeding</button>}
           {['sent','approved','draft'].includes(quot.status)&&quot.approval_status==='pending'&&<button className="btn sm" disabled style={{color:'var(--grey-400)',borderColor:'var(--grey-200)',cursor:'not-allowed'}}>🔏 Awaiting client approval</button>}
-          {['sent','approved','draft'].includes(quot.status)&&(!quot.approval_status||quot.approval_status==='declined')&&<button className="btn sm" style={{color:'var(--pink)',borderColor:'var(--pink)'}} onClick={()=>{setApprovalPin('');setApprovalLink('');setShowApprovalModal(true);}}>🔏 Request Approval</button>}
+          {['sent','approved','draft'].includes(quot.status)&&(!quot.approval_status||quot.approval_status==='declined')&&<button className="btn sm" disabled={quoteUnpriced} title={quoteUnpriced?'Add prices before requesting approval — this quote total is ₹0':''} style={quoteUnpriced?{color:'var(--grey-400)',borderColor:'var(--grey-200)',cursor:'not-allowed'}:{color:'var(--pink)',borderColor:'var(--pink)'}} onClick={()=>{setApprovalPin('');setApprovalLink('');setShowApprovalModal(true);}}>🔏 Request Approval</button>}
         </div>
       </div>
 

@@ -112,6 +112,25 @@ quote/event/RFQ creation path + downstream assumptions + test updates BEFORE any
 rail (which will show how often each skip-path is actually used). Enforcing this could later let us
 delete the sourcing-anchor mechanism.
 
+#### Folded into 2b — RFQ-as-sourcing-workbench (was "Option 3", 2026-07-01)
+UX for the canonical flow, deferred here on purpose. Today Approve -> creates an unpriced ₹0 draft
+quote and navigates straight to it; sourcing is a somewhat hidden "Source vendors ->" button on the
+quote. The idea is to make the **converted RFQ** the sourcing workbench: after Approve, land there
+with a prominent guided path (Send vendor RFQ -> bids -> Costing & markup -> generate priced quote)
+AND an equally prominent "Price in-house" choice, plus a clear "Draft quote Q-xxx created ->" link.
+Structural constraint (verified): sourcing CANNOT precede the quote — `generateQuoteFromCosting`
+writes prices into an existing draft quote, and the sourcing panel only renders once the RFQ is
+`status='converted'`. So the sequence stays Approve -> draft quote -> source -> cost -> price; the
+workbench only makes that sequence clearer, it does not reorder it.
+Why here and not standalone: building it now would apply only to RFQ-origin deals (lead/event-origin
+quotes still price on the quote screen) and sits behind `VITE_ENABLE_VENDOR_RFQ`, creating a
+temporary split-UX + likely rework once 2b forces every deal through Lead->RFQ. Once 2b lands, the
+workbench is the UNIVERSAL pricing model and worth building once, well.
+Risks to bake in when built: keep the Quote as the canonical deal hub (avoid "two homes"); make
+Price-in-house first-class on the RFQ (most simple deals aren't sourced); always surface the hidden
+₹0 draft quote; honor the vendor-RFQ flag. Shipped as an interim clarity nudge (was "Option 1",
+2026-07-01): pricing helper + primary "Source vendors" on unpriced draft quotes.
+
 Risk: Low.
 
 ## Phase 2c - Sourcing revision loop (accept / lock / re-source on scope drift)
