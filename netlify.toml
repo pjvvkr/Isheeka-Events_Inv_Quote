@@ -1,6 +1,7 @@
 # Netlify build config for the Vite ERP (isheeka-vite/).
-# The repo root also holds the legacy HTML app + rfq.html, which stay on GitHub Pages;
-# Netlify builds and serves ONLY the new ERP from isheeka-vite/.
+# Netlify builds and serves the ERP from isheeka-vite/, including the client portals in
+# isheeka-vite/public/ (rfq.html, approval.html, vendor-onboarding.html) — the single source
+# of truth for those pages. The repo root holds only the legacy single-file app (index.html).
 
 [build]
   base = "isheeka-vite"          # run the build from here (where package.json lives)
@@ -8,7 +9,8 @@
   publish = "dist"                # publish isheeka-vite/dist
   # COST SAVER: a production deploy costs Netlify credits. Skip the build entirely when the
   # commit doesn't touch anything that affects the app bundle — i.e. docs/, supabase/,
-  # rfq.html, tests/, e2e/, PROJECT_STATUS.md changes won't trigger a (paid) build/deploy.
+  # tests/, e2e/, PROJECT_STATUS.md changes won't trigger a (paid) build/deploy.
+  # (Portals now live in isheeka-vite/public/, so editing them DOES trigger a build.)
   # Paths are relative to `base` (isheeka-vite); ../netlify.toml is the repo-root config.
   ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- src public index.html package.json package-lock.json .env.production vite.config.ts ../netlify.toml"
 
