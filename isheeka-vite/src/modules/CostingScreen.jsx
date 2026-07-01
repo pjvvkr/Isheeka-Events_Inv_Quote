@@ -64,7 +64,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
   })();
   const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
 
-  const pricedRows = () => rows.map((r) => ({ sub_event_name: r.sub_event_name, description: r.description, quantity: r.quantity, clientUnitPrice: clientUnitOf(r), clientItemId: r.clientItemId }));
+  const pricedRows = () => rows.map((r) => ({ sub_event_name: r.sub_event_name, description: r.description, quantity: r.quantity, clientUnitPrice: clientUnitOf(r), clientItemId: r.clientItemId, sub_items: Array.isArray(r.sub_items) ? r.sub_items : [] }));
   const summaryLines = () => rows.map((r) => ({
     item: r.description, sub_event: r.sub_event_name, qty: r.quantity, sub_items: Array.isArray(r.sub_items) ? r.sub_items : [], source_item_id: r.clientItemId || null,
     bids: r.bids.map((b) => ({ vendor_id: b.vendor_id, unit_cost: b.unit_cost, can_supply: b.can_supply, note: b.item_note })),
