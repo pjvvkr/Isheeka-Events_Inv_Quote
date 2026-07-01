@@ -186,5 +186,25 @@ export async function loadSourcingDrift(quotationId) {
       vendorStale = staleVendorRfqs(clientItemsRaw, vitems || []).length > 0;
     }
   } catch (e) { /* noop */ }
-  return { sourced: true, vendorStale, ...drift };
+  const costingStale = await isRepricePending(clientRfqId);
+  return { sourced: true, vendorStale, costingStale, ...drift };
+}
+
+// True if the sourcing changed (a re-source / re-scope, or a fresh vendor bid) AFTER the latest
+// costing snapshot — i.e. pricing must be regenerated before sourcing is "finalized". Keeps the
+// re-source/review indicator up from the first change all the way until you re-cost.
+export async function isRepricePending(clientRfqId) {
+  if (!clientRfqId) return false;
+  try {
+    const { data: cs } = await supabase.from('costing_summaries').select('generated_at').eq('client_rfq_id', clientRfqId).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1);
+    const pricedAt = (cs && cs[0]) ? new Date(cs[0].generated_at).getTime() : 0;
+    if (!pricedAt) return false;
+    const { data: vr } = await supabase.from('rfqs').select('rfq_id,client_submitted_at').eq('parent_rfq_id', clientRfqId).eq('party_type', 'vendor').eq('is_deleted', false);
+    let latest = 0;
+    (vr || []).forEach((v) => { if (v.client_submitted_at) latest = Math.max(latest, new Date(v.client_submitted_at).getTime()); });
+    const rfqIds = [clientRfqId, ...(vr || []).map((v) => v.rfq_id)];
+    const { data: acts } = await supabase.from('rfq_activity').select('created_at').in('rfq_id', rfqIds).eq('action', 'rescoped').order('created_at', { ascending: false }).limit(1);
+    if (acts && acts[0] && acts[0].created_at) latest = Math.max(latest, new Date(acts[0].created_at).getTime());
+    return latest > pricedAt;
+  } catch (e) { return false; }
 }

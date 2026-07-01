@@ -122,6 +122,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [revHistory, setRevHistory] = React.useState([]);
   const [includeRevHistory, setIncludeRevHistory] = React.useState(true);
   const [lineItemsOpen, setLineItemsOpen] = React.useState(false);
+  const [paySchedOpen, setPaySchedOpen] = React.useState(false);
   const [showClose, setShowClose] = React.useState(false);
   const [closeForm, setCloseForm] = React.useState({outcome:'client',reason:'',notes:''});
   const [closing, setClosing] = React.useState(false);
@@ -378,7 +379,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   return (
     <div>
       {docChain && <DocFlow chain={docChain} current="quote" onNavigate={onNavigate} />}
-      {drift && (drift.stale || drift.vendorStale) && (
+      {drift && (drift.stale || drift.vendorStale || drift.costingStale) && (
         <div style={{background:'var(--orange-light)',border:'1px solid var(--orange)',borderRadius:'var(--radius-lg)',padding:'10px 14px',marginBottom:16,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <span style={{fontSize:16}}>⚠️</span>
           <div style={{flex:1,minWidth:220}}>
@@ -386,8 +387,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
               <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Sourcing may be out of date</div>
               <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>The quote changed after vendors were priced ({driftSummary(drift.counts)}). Accepted bids may no longer cover the current items.</div>
             </>) : (<>
-              <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Vendors need to re-bid</div>
-              <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>The sourced items changed since the current vendor bids. Re-send the flagged vendors on the sourcing screen for fresh pricing.</div>
+              <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Sourcing not finalized</div>
+              <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>Vendors may need to re-bid, or the costing regenerated, to reflect the latest items. This clears once you re-cost.</div>
             </>)}
           </div>
           {drift.stale
@@ -484,14 +485,6 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           <div style={{fontSize:11,color:'var(--grey-400)',marginTop:6}}>Dates &amp; venues are set on the event; this prints on the quotation PDF.</div>
         </div>
       )}
-      {/* Sourcing & pricing history */}
-      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'14px 18px',marginBottom:16}}>
-        <div onClick={()=>setHistOpen(o=>!o)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
-          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>🧾 Sourcing &amp; pricing history{history&&history.length?(' ('+history.length+')'):''}</div>
-          <span style={{fontSize:12,color:'var(--grey-400)'}}>{histOpen?'▾ Hide':'▸ Show'}</span>
-        </div>
-        {histOpen && <div style={{marginTop:10}}><DealHistory items={history||[]} /></div>}
-      </div>
       {/* Line items */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
         <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:lineItemsOpen?10:0,cursor:'pointer'}} onClick={()=>setLineItemsOpen(o=>!o)}>
@@ -532,13 +525,24 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           ))}
         </div>}
       </div>
+      {/* Sourcing & pricing history */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'14px 18px',marginBottom:16}}>
+        <div onClick={()=>setHistOpen(o=>!o)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>🧾 Sourcing &amp; pricing history{history&&history.length?(' ('+history.length+')'):''}</div>
+          <span style={{fontSize:12,color:'var(--grey-400)'}}>{histOpen?'▾ Hide':'▸ Show'}</span>
+        </div>
+        {histOpen && <div style={{marginTop:10}}><DealHistory items={history||[]} /></div>}
+      </div>
 
       {/* Schedule + terms */}
       {(ps.length>0||quot.payment_terms||quot.additional_terms||quot.additional_notes)&&(
         <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
           {ps.length>0&&<div style={{marginBottom:12}}>
-            <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:6}}>Payment schedule <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>(edit via Revise)</span></div>
-            {ps.map((p,i)=>(
+            <div onClick={()=>setPaySchedOpen(o=>!o)} style={{display:'flex',alignItems:'center',gap:6,marginBottom:paySchedOpen?6:0,cursor:'pointer'}}>
+              <span style={{fontSize:10,color:'var(--grey-400)',userSelect:'none'}}>{paySchedOpen?'▼':'▶'}</span>
+              <span style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Payment schedule <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>(edit via Revise)</span></span>
+            </div>
+            {paySchedOpen&&ps.map((p,i)=>(
               <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:13,borderBottom:'1px solid var(--grey-100)'}}>
                 <span style={{color:'var(--grey-800)'}}>{p.label||('Installment '+(i+1))} <span style={{color:'var(--grey-400)'}}>· {p.when}</span></span>
                 <span style={{fontWeight:500}}>{parseFloat(p.amount)>0?('₹'+Math.round(p.amount).toLocaleString('en-IN')):((p.pct||0)+'%')}</span>

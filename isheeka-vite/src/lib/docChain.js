@@ -5,6 +5,7 @@
 import { supabase } from './supabase';
 import { computeSourcingDrift } from './sourcingDrift.js';
 import { staleVendorRfqs } from './sourcingSync.js';
+import { isRepricePending } from './costing.js';
 
 const num = (n) => parseFloat(n) || 0;
 
@@ -94,6 +95,7 @@ export async function resolveDocChain(kind, id) {
             out.sourcing.stale = staleVendorRfqs(riRes.data || [], vitems || []).length > 0;
           }
         }
+        if (!out.sourcing.stale) out.sourcing.stale = await isRepricePending(ids.rfq);
       }
     } catch (e) { /* noop */ }
   }
