@@ -81,7 +81,7 @@ export async function resolveDocChain(kind, id) {
       }
       out.sourcing.costingExists = !!snap;
       if (snap && Array.isArray(snap.lines) && snap.lines.length) {
-        const { data: qli } = await supabase.from('quotation_line_items').select('sub_event_name,description,quantity,sub_items').eq('quotation_id', ids.quote).eq('is_deleted', false);
+        const { data: qli } = await supabase.from('quotation_line_items').select('sub_event_name,description,quantity,sub_items,source_item_id').eq('quotation_id', ids.quote).eq('is_deleted', false);
         out.sourcing.stale = computeSourcingDrift(qli || [], snap.lines).stale;
       }
     } catch (e) { /* noop */ }

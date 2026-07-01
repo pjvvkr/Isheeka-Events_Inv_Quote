@@ -13,6 +13,8 @@ import { buildQuotationPDF } from '../pdf/quotationPdf.js';
 import { fetchAsBase64 } from '../lib/storage.js';
 import { createInvoiceFromQuote } from '../lib/money.js';
 import { FastEntryTable } from './ItemEntry.jsx';
+// Stable per-line lineage id (Phase 2c v2). Carried across revisions; minted for new lines.
+const newSrcId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null;
 import { filesToPayloads, extractItems, extractErrMsg } from '../lib/staffExtract.js';
 
 function QWSubEventNameInput({value, onChange}) {
@@ -231,7 +233,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
           const seNames=[...new Set(li.map(i=>i.sub_event_name||'General Items'))];
           setSubEventBlocks(seNames.map(name=>({
             id:'se-'+Date.now()+Math.random(), name,
-            items:li.filter(i=>(i.sub_event_name||'General Items')===name).map(i=>({id:'li-'+i.line_item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price,sub_items:Array.isArray(i.sub_items)?i.sub_items:[]}))
+            items:li.filter(i=>(i.sub_event_name||'General Items')===name).map(i=>({id:'li-'+i.line_item_id,description:i.description,quantity:i.quantity,unit_price:i.unit_price,sub_items:Array.isArray(i.sub_items)?i.sub_items:[],source_item_id:i.source_item_id||newSrcId()}))
           })));
         }
       });
@@ -369,7 +371,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
         const contItems=subEventBlocks.flatMap(b=>{
           const seName=(b.name&&b.name.trim()&&b.name.trim().toLowerCase()!=='general items')?b.name.trim():null;
           return (b.items||[]).filter(i=>i.description&&i.description.trim()).map((i,idx)=>({
-            quotation_id:existingQuotationId,sub_event_name:seName,description:i.description,
+            quotation_id:existingQuotationId,sub_event_name:seName,source_item_id:i.source_item_id||newSrcId(),description:i.description,
             quantity:parseFloat(i.quantity)||1,unit_price:parseFloat(i.unit_price)||0,
             amount:(parseFloat(i.quantity)||1)*(parseFloat(i.unit_price)||0),
             sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(0,parseInt(si.qty)||0),note:si.note||null})),
@@ -428,7 +430,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
         // Canonical sub_event_name = the block's display name (trimmed), or null for default/empty blocks
         const seName=(b.name&&b.name.trim()&&b.name.trim().toLowerCase()!=='general items')?b.name.trim():null;
         return (b.items||[]).filter(i=>i.description&&i.description.trim()).map((i,idx)=>({
-          sub_event_name:seName,description:i.description,
+          sub_event_name:seName,source_item_id:i.source_item_id||newSrcId(),description:i.description,
           quantity:parseFloat(i.quantity)||1,unit_price:parseFloat(i.unit_price)||0,
           amount:(parseFloat(i.quantity)||1)*(parseFloat(i.unit_price)||0),
           sub_items:(i.sub_items||[]).filter(si=>si.name&&si.name.trim()).map(si=>({name:si.name.trim(),qty:Math.max(0,parseInt(si.qty)||0),note:si.note||null})),

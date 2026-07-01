@@ -3,8 +3,8 @@ import { describe, it, expect } from 'vitest';
 import { computeSourcingDrift, driftSummary } from '../../src/lib/sourcingDrift.js';
 
 // quote line shape (quotation_line_items) and snapshot line shape (costing_summaries.lines)
-const qline = (desc, qty, subs, se) => ({ sub_event_name: se || '', description: desc, quantity: qty, sub_items: subs || [] });
-const bline = (desc, qty, subs, se) => { const o = { sub_event: se || '', item: desc, qty }; if (subs !== undefined) o.sub_items = subs; return o; };
+const qline = (desc, qty, subs, se, sid) => { const o = { sub_event_name: se || '', description: desc, quantity: qty, sub_items: subs || [] }; if (sid !== undefined) o.source_item_id = sid; return o; };
+const bline = (desc, qty, subs, se, sid) => { const o = { sub_event: se || '', item: desc, qty }; if (subs !== undefined) o.sub_items = subs; if (sid !== undefined) o.source_item_id = sid; return o; };
 
 describe('computeSourcingDrift', () => {
   it('no drift when the quote matches the snapshot', () => {
@@ -49,18 +49,31 @@ describe('computeSourcingDrift', () => {
     expect(d.counts.unchanged).toBe(1);
   });
 
-  it('treats a rename as add + remove (no stable id yet)', () => {
+  it('treats a rename as add + remove when there is no stable id', () => {
     const d = computeSourcingDrift([qline('DJ & sound', 1, [])], [bline('DJ', 1, [])]);
     expect(d.counts.added).toBe(1);
     expect(d.counts.removed).toBe(1);
     expect(d.stale).toBe(true);
   });
 
+  it('detects a rename as rescoped when the stable id matches (v2)', () => {
+    const base = [bline('DJ', 1, [], '', 'id-1')];
+    const quote = [qline('DJ & sound', 1, [], '', 'id-1')];
+    const d = computeSourcingDrift(quote, base);
+    expect(d.counts).toEqual({ added: 0, rescoped: 1, removed: 0, unchanged: 0 });
+  });
+
+  it('id match wins over string position (reordered + renamed lines)', () => {
+    const base = [bline('Stage', 1, [], '', 'a'), bline('Lights', 2, [], '', 'b')];
+    const quote = [qline('Lights', 2, [], '', 'b'), qline('Main stage', 1, [], '', 'a')];
+    const d = computeSourcingDrift(quote, base);
+    expect(d.counts).toEqual({ added: 0, rescoped: 1, removed: 0, unchanged: 1 });
+  });
+
   it('does not flag a sub-item order change (order-insensitive)', () => {
     const base = [bline('Decor', 1, [{ name: 'Flowers', qty: 10 }, { name: 'Drapes', qty: 5 }])];
     const quote = [qline('Decor', 1, [{ name: 'Drapes', qty: 5 }, { name: 'Flowers', qty: 10 }])];
-    const d = computeSourcingDrift(quote, base);
-    expect(d.stale).toBe(false);
+    expect(computeSourcingDrift(quote, base).stale).toBe(false);
   });
 
   it('handles empty inputs safely', () => {
