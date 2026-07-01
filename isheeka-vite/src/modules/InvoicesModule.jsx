@@ -136,6 +136,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
   const [revReason, setRevReason] = React.useState('');
   const [revSaving, setRevSaving] = React.useState(false);
   const [srcQuote, setSrcQuote] = React.useState(null);
+  const [liveQuote, setLiveQuote] = React.useState(null);   // latest non-superseded quote for the event (stale-invoice check)
   const [srcRfq, setSrcRfq] = React.useState(null);
   const [srcLead, setSrcLead] = React.useState(null);
   const [srcEvent, setSrcEvent] = React.useState(null);
@@ -217,6 +218,22 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
     setLoading(false);
   }, [invoiceId]);
   React.useEffect(() => { loadAll(); }, [loadAll]);
+  // A draft invoice can fall behind if the quote was revised but not re-confirmed. Load the
+  // current live quote for the event so we can flag that and offer a jump back to re-confirm.
+  React.useEffect(() => {
+    let live = true;
+    (async () => {
+      if (inv && inv.event_id && inv.status === 'draft') {
+        try {
+          const { data } = await supabase.from('quotations').select('quotation_id,ref_number,grand_total,revision_number,status')
+            .eq('event_id', inv.event_id).eq('is_deleted', false).neq('status', 'superseded')
+            .order('revision_number', { ascending: false }).order('created_at', { ascending: false }).limit(1);
+          if (live) setLiveQuote((data && data[0]) || null);
+        } catch (e) { if (live) setLiveQuote(null); }
+      } else if (live) setLiveQuote(null);
+    })();
+    return () => { live = false; };
+  }, [inv && inv.event_id, inv && inv.quotation_id, inv && inv.status]);
   const [docChain, setDocChain] = React.useState(null);
   React.useEffect(()=>{ let live=true; if(invoiceId) resolveDocChain('invoice', invoiceId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[invoiceId]);
 
@@ -233,6 +250,7 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
   const outstanding = parseFloat(inv.total_outstanding != null ? inv.total_outstanding : (grand - received)) || 0;
   const sourceQuoteTotal = parseFloat(inv.source_quote_total) || 0; const variance = taxable - sourceQuoteTotal;
   const locked = ['paid', 'cancelled'].includes(inv.status);
+  const invoiceStale = inv.status === 'draft' && liveQuote && (liveQuote.quotation_id !== inv.quotation_id || Math.abs((parseFloat(liveQuote.grand_total) || 0) - sourceQuoteTotal) >= 1);
 
   const toggleGst = async (on) => {
     if (saving || locked) return;
@@ -505,6 +523,12 @@ function InvoiceDetail({ invoiceId, onBack, onNavigate }) {
         )}
       </div>
 
+      {invoiceStale && (
+        <div style={{ padding: '10px 14px', marginBottom: 16, background: 'var(--orange-light)', border: '1px solid var(--orange)', borderRadius: 'var(--radius-sm)', fontSize: 12.5, color: 'var(--grey-700)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, minWidth: 240 }}>⚠️ <b>This draft invoice is out of date.</b> The quote was revised ({liveQuote.ref_number}{liveQuote.revision_number ? (' rev ' + liveQuote.revision_number) : ''}) but the invoice still shows the previous figures. Open the quote and click <b>Confirm &amp; create invoice</b> to sync.</span>
+          <button className="btn sm" onClick={() => onNavigate && onNavigate('quotations', { quotId: liveQuote.quotation_id, label: liveQuote.ref_number })}>Open quote →</button>
+        </div>
+      )}
       {inv.status === 'cancelled' && <div style={{ padding: '8px 12px', marginBottom: 16, background: 'var(--grey-50)', color: 'var(--grey-600)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>This invoice is cancelled. To raise a new one, open the event {inv.event_id && <a onClick={() => onNavigate && onNavigate('events', { eventId: inv.event_id })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>(go to event →)</a>} and click <b>+ Generate invoice</b>.</div>}
       {inv.status === 'paid' && <div style={{ padding: '8px 12px', marginBottom: 16, background: 'var(--green-light)', color: 'var(--green)', borderRadius: 'var(--radius-sm)', fontSize: 12 }}>✅ This invoice is fully paid and locked for edits. Sharing and printing remain available.</div>}
       {/* Event schedule (functions · dates · venues) */}

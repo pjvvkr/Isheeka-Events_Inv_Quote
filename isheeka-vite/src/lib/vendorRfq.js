@@ -8,6 +8,7 @@ import { runDb } from './toast.jsx';
 import { _currentUid } from './session.js';
 import { getNextRfqRef } from './refs.js';
 import { sha256Hex, genRfqToken, genRfqPin, rfqLink, createRfq } from './rfq.js';
+import { planSourcingSync } from './sourcingSync.js';
 
 // Spin up one vendor RFQ per selected vendor from an (approved) client RFQ.
 // Freezes the client RFQ's item list as the sourcing basis (copied item-for-item,
@@ -191,4 +192,41 @@ export function buildVendorRfqMsg(vendorRfq, settings, link, opts = {}) {
     + link + '\n'
     + (vendorRfq.pin ? ('Access PIN: ' + vendorRfq.pin + '\n') : '')
     + '\nThank you,\n' + company;
+}
+
+// v3 guided re-source: sync a client RFQ's items to the current quote. Keeps stable
+// rfq_item_ids for matched lines (so received vendor bids stay linked), inserts new lines
+// (reusing the quote line's source_item_id as the id when free, else relinking the quote
+// line to the generated id), and soft-deletes lines the quote no longer has. No vendor
+// messages are sent here — that stays a manual step on the sourcing screen. Returns counts.
+export async function applySourcingSync(clientRfqId, quotationId) {
+  if (!clientRfqId || !quotationId) return { added: 0, changed: 0, removed: 0, unchanged: 0 };
+  const [activeRes, allRes, qlRes] = await Promise.all([
+    supabase.from('rfq_items').select('rfq_item_id,description,quantity,sub_event_name,sub_items').eq('rfq_id', clientRfqId).eq('is_deleted', false),
+    supabase.from('rfq_items').select('rfq_item_id').eq('rfq_id', clientRfqId),
+    supabase.from('quotation_line_items').select('line_item_id,source_item_id,description,quantity,sub_event_name,sub_items,sort_order').eq('quotation_id', quotationId).eq('is_deleted', false).order('sort_order'),
+  ]);
+  const plan = planSourcingSync(qlRes.data || [], activeRes.data || []);
+  const knownIds = new Set((allRes.data || []).map((x) => x.rfq_item_id));
+  const now = new Date().toISOString();
+
+  for (const ins of plan.inserts) {
+    const useId = ins.proposedId && !knownIds.has(ins.proposedId) ? ins.proposedId : null;
+    const row = { rfq_id: clientRfqId, description: ins.description, quantity: ins.quantity || 1, sub_event_name: ins.sub_event_name || null, sort_order: ins.sort_order != null ? ins.sort_order : 0, source: 'quote', sub_items: ins.sub_items || [], is_deleted: false, created_at: now };
+    if (useId) row.rfq_item_id = useId;
+    const { data: created, error } = await runDb(supabase.from('rfq_items').insert(row).select('rfq_item_id').single(), 'add sourced item');
+    if (error || !created) continue;
+    knownIds.add(created.rfq_item_id);
+    // If we could not reuse the quote line's id, relink the quote line so future syncs match.
+    if (!useId && ins.lineItemId) {
+      await runDb(supabase.from('quotation_line_items').update({ source_item_id: created.rfq_item_id }).eq('line_item_id', ins.lineItemId), 'relink quote line');
+    }
+  }
+  for (const u of plan.updates) {
+    await runDb(supabase.from('rfq_items').update({ description: u.description, quantity: u.quantity || 1, sub_event_name: u.sub_event_name || null, sub_items: u.sub_items || [], updated_at: now }).eq('rfq_item_id', u.rfq_item_id), 'update sourced item');
+  }
+  if (plan.removes.length) {
+    await runDb(supabase.from('rfq_items').update({ is_deleted: true, updated_at: now }).in('rfq_item_id', plan.removes), 'remove sourced items');
+  }
+  return plan.counts;
 }

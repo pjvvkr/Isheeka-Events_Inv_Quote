@@ -21,7 +21,7 @@ import { sha256Hex } from '../lib/rfq.js';
 import { ClientLink } from '../components/links.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
 import { WelcomeMessageModal } from './LeadsModule.jsx';
-import { ensureSourcingAnchor } from '../lib/vendorRfq.js';
+import { ensureSourcingAnchor, applySourcingSync } from '../lib/vendorRfq.js';
 
 // ── Convert Lead Modal ────────────────────────────────────────────────────────
 function ConvertLeadModal({lead, onConfirm, onCancel}) {
@@ -81,6 +81,9 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [qActExpanded, setQActExpanded] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
   const [sourcing, setSourcing] = React.useState(false);
+  const [showResource, setShowResource] = React.useState(false);
+  const [resourceInfo, setResourceInfo] = React.useState(null);
+  const [resourcing, setResourcing] = React.useState(false);
   // Open vendor sourcing for this quote. If it has a client RFQ behind it, jump there;
   // otherwise create a hidden sourcing anchor from the quote's items, then open it.
   const openSourcing = async () => {
@@ -89,6 +92,25 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     try { const rfqId = await ensureSourcingAnchor(quot); onNavigate && onNavigate('rfqs', { rfqId, label: 'Sourcing' }); }
     catch (e) { notify((e && e.message) || 'Could not start sourcing.', 'error'); }
     setSourcing(false);
+  };
+  // v3 guided re-source: preview the delta (with AP warning) then sync sourcing to the quote.
+  const openResource = async () => {
+    let apCount = 0;
+    if (srcEvent && srcEvent.event_id) { try { const { data } = await supabase.from('event_vendors').select('event_id').eq('event_id', srcEvent.event_id).eq('is_deleted', false); apCount = (data || []).length; } catch (e) { /* noop */ } }
+    setResourceInfo({ apCount });
+    setShowResource(true);
+  };
+  const doResource = async () => {
+    setResourcing(true);
+    try {
+      const rfqId = await ensureSourcingAnchor(quot);
+      const counts = await applySourcingSync(rfqId, quot.quotation_id);
+      setShowResource(false);
+      const parts = []; if (counts.added) parts.push(counts.added + ' added'); if (counts.changed) parts.push(counts.changed + ' changed'); if (counts.removed) parts.push(counts.removed + ' removed');
+      notify(parts.length ? ('Sourcing updated — ' + parts.join(', ')) : 'Sourcing already up to date', 'success');
+      onNavigate && onNavigate('rfqs', { rfqId, label: 'Sourcing' });
+    } catch (e) { notify((e && e.message) || 'Could not re-source.', 'error'); }
+    setResourcing(false);
   };
   const [confirming, setConfirming] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -358,12 +380,27 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
             <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Sourcing may be out of date</div>
             <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>The quote changed after vendors were priced ({driftSummary(drift.counts)}). Accepted bids may no longer cover the current items.</div>
           </div>
-          {srcRfq&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('rfqs',{costingRfqId:srcRfq.rfq_id,label:'Costing'})}>Review sourcing →</button>}
+          {editable
+            ? <button className="btn sm primary" onClick={openResource}>Re-source →</button>
+            : (srcRfq&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('rfqs',{costingRfqId:srcRfq.rfq_id,label:'Costing'})}>Review sourcing →</button>)}
         </div>
       )}
       {showWizard&&wizardCtx&&
 <QuoteGenerationWizard lead={wizardCtx.lead} leadSubEvents={[]} isRevision={wizardCtx.isRevision} isContinuation={!wizardCtx.isRevision} existingQuotationId={quot.quotation_id} originEvent={wizardCtx.origin||undefined} onComplete={async(newQ)=>{ setShowWizard(false); setWizardCtx(null); if(newQ&&newQ.quotation_id&&newQ.quotation_id!==quot.quotation_id){ onNavigate&&onNavigate('quotations',{quotId:newQ.quotation_id}); } else { await loadAll(); } }} onCancel={()=>{ setShowWizard(false); setWizardCtx(null); }}/>}
       {showConvert&&convertLead&&<ConvertLeadModal lead={convertLead} onConfirm={doConvertFromQuote} onCancel={()=>{setShowConvert(false);setConvertLead(null);}}/>}
+      {showResource && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:16}} onClick={()=>!resourcing&&setShowResource(false)}>
+          <div style={{background:'white',borderRadius:'var(--radius-lg)',maxWidth:460,padding:'20px 22px'}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:15,fontWeight:600,color:'var(--grey-800)',marginBottom:8}}>Re-source this quote</div>
+            <div style={{fontSize:13,color:'var(--grey-600)',lineHeight:1.6,marginBottom:10}}>{drift&&drift.stale?('The quote changed since vendors were priced ('+driftSummary(drift.counts)+'). '):''}This updates the sourcing item list to match the current quote. Bids on unchanged items are kept; changed and new items will need fresh bids. <b>Nothing is sent to a vendor</b> until you send it on the next screen.</div>
+            {resourceInfo&&resourceInfo.apCount>0&&<div style={{fontSize:12.5,color:'var(--grey-700)',background:'var(--orange-light)',border:'1px solid var(--orange)',borderRadius:'var(--radius-sm)',padding:'8px 12px',marginBottom:12}}>⚠️ {resourceInfo.apCount} vendor{resourceInfo.apCount>1?'s are':' is'} already assigned to the event. Re-sourcing changes the sourcing basis but won't automatically reconcile booked vendor payments — review before sending.</div>}
+            <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <button className="btn" disabled={resourcing} onClick={()=>setShowResource(false)}>Cancel</button>
+              <button className="btn primary" disabled={resourcing} onClick={doResource}>{resourcing?'Syncing…':'Sync & open sourcing →'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
 
       {/* Header */}
