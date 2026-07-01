@@ -188,6 +188,35 @@ in-house fast path) rather than funneling every scope-changing edit through the 
 
 Risk: v1 Low (read-only), v3 Medium (writes to sourcing), v4 High (touches booked AP).
 
+### Phase 2c — shipped so far (2026-07-01)
+- v1 detect+warn: quote drift banner + amber "Re-source" rail node. Baseline is the **client
+  RFQ items** (not the costing snapshot — snapshots predating v2 lack sub_items and missed
+  sub-item edits). Revision-lineage aware.
+- v2: stable `source_item_id` on `quotation_line_items` (rename-safe matching).
+- v3a guided re-source: `Re-source →` on the quote syncs the client RFQ items to the quote
+  (insert/update/soft-delete, keeping matched rfq_item_ids so bids stay linked), logs to
+  `rfq_activity`, opens the sourcing screen. Quote/invoice out-of-date sync banners.
+- Vendor-side staleness: sourcing screen flags vendors whose frozen items no longer match the
+  re-sourced client items (badge + banner); rail Costing node reflects it.
+- "Sourcing & pricing history" timeline on quote + event.
+
+### Phase 2c — known refinements (from live testing, DO LATER)
+These are the rough edges left by the incremental v3a approach; all resolve cleanly under the
+accept/lock/revise sourcing-decision lifecycle:
+- **Surgical per-line re-bid.** Today "Edit items" (`rescopeVendorRfq`) re-issues the WHOLE
+  vendor RFQ — it wipes the item list, clears the vendor's bid, and they re-price everything.
+  You cannot re-open just the one changed line while keeping the other bids locked (and
+  un-checking unchanged items *removes* them from scope, not preserves them). Needs a per-line
+  bid/lock state so only drifted lines reopen.
+- **Post-rescope "sourcing settled" state.** Right after a re-send the vendor items match the
+  client items again, so the rail node can read "Priced" while the vendor's re-bid is still
+  pending and the costing snapshot references the now-cleared bid. The node should stay in a
+  "re-pricing in progress" state until all chosen vendors have re-submitted AND costing has been
+  regenerated. Requires comparing costing snapshot's chosen vendors vs current vendor statuses.
+- **Edit-items modal** shows only the sub-item COUNT ("· 1 detail"), not the names. Sub-items
+  do flow to the vendor on save (verified); consider expanding them read-only for clarity.
+- **Surgical AP awareness.** Post-event re-source (v4) still deferred — highest risk.
+
 ## Phase 3 - Responsive / mobile (deferred until mobile use is real)
 
 Not urgent today (primarily desktop use), but planned. Sidebar -> collapsible drawer,

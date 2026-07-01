@@ -7,6 +7,7 @@ import { runDb } from './toast.jsx';
 import { _currentUid } from './session.js';
 import { loadVendorRfqs } from './vendorRfq.js';
 import { computeSourcingDrift } from './sourcingDrift.js';
+import { staleVendorRfqs } from './sourcingSync.js';
 
 export const costKey = (it) => (it.sub_event_name || '') + '||' + (it.description || '');
 
@@ -164,14 +165,26 @@ export async function loadSourcingDrift(quotationId) {
   if (!costed) return { sourced: false, stale: false };
   // Baseline = the client RFQ's items (the live sourcing scope; always carry a sub_items
   // array, so sub-item changes are detected). Current = the quote's line items.
-  let baseline = [], quoteLines = [];
+  let baseline = [], quoteLines = [], clientItemsRaw = [];
   try {
     const [riRes, qlRes] = await Promise.all([
       supabase.from('rfq_items').select('rfq_item_id,description,quantity,sub_event_name,sub_items').eq('rfq_id', clientRfqId).eq('is_deleted', false),
       supabase.from('quotation_line_items').select('source_item_id,description,quantity,sub_event_name,sub_items').eq('quotation_id', quotationId).eq('is_deleted', false),
     ]);
-    baseline = (riRes.data || []).map((r) => ({ ...r, source_item_id: r.rfq_item_id }));
+    clientItemsRaw = riRes.data || [];
+    baseline = clientItemsRaw.map((r) => ({ ...r, source_item_id: r.rfq_item_id }));
     quoteLines = qlRes.data || [];
   } catch (e) { return { sourced: true, stale: false }; }
-  return { sourced: true, ...computeSourcingDrift(quoteLines, baseline) };
+  const drift = computeSourcingDrift(quoteLines, baseline);
+  // second layer: has a vendor's frozen items fallen behind the (re-sourced) client items?
+  let vendorStale = false;
+  try {
+    const { data: vr } = await supabase.from('rfqs').select('rfq_id').eq('parent_rfq_id', clientRfqId).eq('party_type', 'vendor').eq('is_deleted', false);
+    const vids = (vr || []).map((x) => x.rfq_id);
+    if (vids.length) {
+      const { data: vitems } = await supabase.from('rfq_items').select('rfq_id,source_item_id,description,quantity,sub_items').in('rfq_id', vids).eq('is_deleted', false);
+      vendorStale = staleVendorRfqs(clientItemsRaw, vitems || []).length > 0;
+    }
+  } catch (e) { /* noop */ }
+  return { sourced: true, vendorStale, ...drift };
 }

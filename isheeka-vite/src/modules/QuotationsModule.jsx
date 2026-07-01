@@ -378,16 +378,23 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   return (
     <div>
       {docChain && <DocFlow chain={docChain} current="quote" onNavigate={onNavigate} />}
-      {drift && drift.stale && (
+      {drift && (drift.stale || drift.vendorStale) && (
         <div style={{background:'var(--orange-light)',border:'1px solid var(--orange)',borderRadius:'var(--radius-lg)',padding:'10px 14px',marginBottom:16,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <span style={{fontSize:16}}>⚠️</span>
           <div style={{flex:1,minWidth:220}}>
-            <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Sourcing may be out of date</div>
-            <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>The quote changed after vendors were priced ({driftSummary(drift.counts)}). Accepted bids may no longer cover the current items.</div>
+            {drift.stale ? (<>
+              <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Sourcing may be out of date</div>
+              <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>The quote changed after vendors were priced ({driftSummary(drift.counts)}). Accepted bids may no longer cover the current items.</div>
+            </>) : (<>
+              <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Vendors need to re-bid</div>
+              <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>The sourced items changed since the current vendor bids. Re-send the flagged vendors on the sourcing screen for fresh pricing.</div>
+            </>)}
           </div>
-          {editable
-            ? <button className="btn sm primary" onClick={openResource}>Re-source →</button>
-            : (srcRfq&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('rfqs',{costingRfqId:srcRfq.rfq_id,label:'Costing'})}>Review sourcing →</button>)}
+          {drift.stale
+            ? (editable
+                ? <button className="btn sm primary" onClick={openResource}>Re-source →</button>
+                : (srcRfq&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('rfqs',{costingRfqId:srcRfq.rfq_id,label:'Costing'})}>Review sourcing →</button>))
+            : (srcRfq&&<button className="btn sm primary" onClick={()=>onNavigate&&onNavigate('rfqs',{rfqId:srcRfq.rfq_id,label:'Sourcing'})}>Review sourcing →</button>)}
         </div>
       )}
       {showWizard&&wizardCtx&&
