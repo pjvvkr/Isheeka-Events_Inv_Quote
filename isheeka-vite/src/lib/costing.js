@@ -137,10 +137,23 @@ export async function saveCostingSummary(payload) {
 // snapshot) — nothing to drift from. Never throws.
 export async function loadSourcingDrift(quotationId) {
   if (!quotationId) return { sourced: false, stale: false };
+  // Walk the revision lineage: a costing snapshot stays attached to the quote that was
+  // costed, but revising the quote mints a NEW quotation_id — so we must look up the
+  // snapshot across this quote and its ancestors (parent_quotation_id chain).
+  const lineage = [];
+  try {
+    let cur = quotationId; const seen = new Set();
+    for (let i = 0; i < 20 && cur && !seen.has(cur); i++) {
+      seen.add(cur); lineage.push(cur);
+      const { data } = await supabase.from('quotations').select('parent_quotation_id').eq('quotation_id', cur).maybeSingle();
+      cur = data ? data.parent_quotation_id : null;
+    }
+  } catch (e) { /* fall back to the single id below */ }
+  if (!lineage.length) lineage.push(quotationId);
   let snap = null;
   try {
     const { data } = await supabase.from('costing_summaries')
-      .select('lines,generated_at').eq('quotation_id', quotationId).eq('is_deleted', false)
+      .select('lines,generated_at').in('quotation_id', lineage).eq('is_deleted', false)
       .order('generated_at', { ascending: false }).limit(1);
     snap = (data || [])[0] || null;
   } catch (e) { return { sourced: false, stale: false }; }

@@ -68,8 +68,17 @@ export async function resolveDocChain(kind, id) {
   }
   if (ids.quote) {
     try {
-      const { data } = await supabase.from('costing_summaries').select('lines,generated_at').eq('quotation_id', ids.quote).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1);
-      const snap = (data || [])[0] || null;
+      // Snapshots hang off the client RFQ (shared across every revision of the quote),
+      // so look up by client_rfq_id first; fall back to this quote's id.
+      let snap = null;
+      if (ids.rfq) {
+        const { data } = await supabase.from('costing_summaries').select('lines,generated_at').eq('client_rfq_id', ids.rfq).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1);
+        snap = (data || [])[0] || null;
+      }
+      if (!snap) {
+        const { data } = await supabase.from('costing_summaries').select('lines,generated_at').eq('quotation_id', ids.quote).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1);
+        snap = (data || [])[0] || null;
+      }
       out.sourcing.costingExists = !!snap;
       if (snap && Array.isArray(snap.lines) && snap.lines.length) {
         const { data: qli } = await supabase.from('quotation_line_items').select('sub_event_name,description,quantity,sub_items').eq('quotation_id', ids.quote).eq('is_deleted', false);
