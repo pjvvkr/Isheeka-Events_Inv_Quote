@@ -114,6 +114,80 @@ delete the sourcing-anchor mechanism.
 
 Risk: Low.
 
+## Phase 2c - Sourcing revision loop (accept / lock / re-source on scope drift)
+
+DESIGNED with owner (2026-06-30). Unifies two scenarios that are really one primitive:
+(a) a vendor revises a bid after it was accepted (offline conversation), and (b) the quote
+is edited after acceptance — items or sub-items added/changed/removed — which should flow
+back into the vendor RFQs. Both need a per-line **lock state** (accepted/locked vs open) plus
+a **re-source** action that reopens specific lines and bumps the vendor RFQ revision.
+
+### The gap
+Sourcing is anchored to the **client RFQ's `rfq_items`** (vendor RFQs hang off `parent_rfq_id`;
+vendor lines carry `source_item_id` back to the client rfq_item; costing matches by
+`source_item_id` + `costKey = sub_event_name||description`). At accept, `generateQuoteFromCosting`
+rewrites the quote line items from the costing rows and snapshots everything into an append-only
+`costing_summaries` row. But the quote-edit path (wizard revision) writes **only** to
+`quotation_line_items` — never back to `rfq_items`. So the two item sets silently diverge: a new
+quote item has no vendor RFQ/bid; a changed item breaks the source link. Nothing detects it.
+
+### Detection (fingerprint, sub-item aware)
+`costKey` is main-item-level and **blind to sub-items**, so a sub-item revamp under an unchanged
+main would be missed. Detection must fingerprint each main line as a normalized hash of
+`sub_event + description + quantity + sub_items` (names/qtys), diffed against the baseline =
+the latest `costing_summaries.lines` snapshot (which already stores sub_items — no schema change
+needed for the baseline). Classify each line: unchanged / new / rescoped (main OR sub-item change)
+/ removed. Markup/client-price tweaks do NOT trigger re-source. Pricing stays main-item-level;
+sub-items only affect whether a main line's bid is still valid.
+
+### Two modes (few changes vs. major revamp)
+- **Surgical delta** (a handful of changes): reopen only affected vendor RFQ lines, keep every
+  other accepted bid locked. Regenerated vendor lines already carry updated `sub_items` (plumbing
+  exists in `createVendorRfqs`/`rescopeVendorRfq`), so the vendor re-bids on the main with the new
+  breakdown. Lock is keyed to the `(main + sub-item fingerprint)` tuple.
+- **Full re-source round** (major revamp, above a drift threshold e.g. >50% of priced lines
+  changed/new): stop offering a per-line delta; the new item set becomes the sourcing basis, all
+  lines open, history preserved (append-only costing snapshots, vendor RFQ revision bumps,
+  accumulating links). Functionally "source from scratch" with the audit trail intact.
+
+### Hard prerequisite: stable item id
+Quote line items carry **no durable link** back to the rfq_item today (the costing->quote insert
+writes description/sub_items/sort_order only). Without a stable `source_item_id` on
+`quotation_line_items`, a rename-heavy revamp is indistinguishable from "deleted all, added all",
+so the classifier over-reports drift and can't tell surgical from full-round. Add this before the
+guided re-source; it's what makes the major-vs-minor distinction reliable.
+
+### Upstream / downstream impact
+- Upstream: the wizard revision computes the diff on save and derives a `sourcing_stale` signal;
+  baseline is the existing costing snapshot; `ensureSourcingAnchor` covers quotes without a real
+  client RFQ.
+- Downstream, pre-event: clean — quote-total change already auto-refreshes the draft invoice
+  (`money.js`), and an issued invoice already locks quote edits, so re-sourcing is gated by the
+  same lock.
+- Downstream, post-event: messy — `event_vendors` may be assigned/partially paid, so rescoping
+  changes booked costs and needs AP reconciliation. v1 rule: allow scope re-sourcing only while
+  the quote is pre-event (draft/sent); once an event exists, route through a separate cost-change
+  path.
+- Rail: the DocFlow Costing/Vendor-RFQ nodes gain an amber "out of date / re-source" state
+  (resolver compares quote `updated_at` vs latest costing `generated_at`).
+
+### Phasing
+1. **Detect + warn** (low risk, read-only): diff quote vs latest costing snapshot (sub-item-aware
+   fingerprint), show a non-blocking "Sourcing out of date — N changed (new/rescoped/removed)"
+   banner + amber rail node, gated to pre-event quotes. Kills silent divergence and *measures* how
+   often it happens before building the machinery.
+2. **Stable `source_item_id`** on `quotation_line_items` (small data-flow fix; unblocks accurate
+   change detection and the revamp case).
+3. **Guided re-source**, unified with accept/lock/revise: delta -> `rfq_items` ->
+   `rescopeVendorRfq`/`createVendorRfqs`, locked bids preserved; surgical vs. full-round by drift
+   ratio; every round writes a fresh costing snapshot.
+4. **Post-event cost-change path** with AP reconciliation — deferred, rare, highest risk.
+
+Design decision (owner): quote scope edits stay **free with drift-detection** (preserves the
+in-house fast path) rather than funneling every scope-changing edit through the costing screen.
+
+Risk: v1 Low (read-only), v3 Medium (writes to sourcing), v4 High (touches booked AP).
+
 ## Phase 3 - Responsive / mobile (deferred until mobile use is real)
 
 Not urgent today (primarily desktop use), but planned. Sidebar -> collapsible drawer,
