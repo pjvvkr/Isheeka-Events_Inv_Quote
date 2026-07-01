@@ -3,13 +3,14 @@
 // Never throws: every query is wrapped, so partial/failed resolution just yields whatever
 // was found and the rail degrades gracefully. No writes, no business logic.
 import { supabase } from './supabase';
+import { computeSourcingDrift } from './sourcingDrift.js';
 
 const num = (n) => parseFloat(n) || 0;
 
 export async function resolveDocChain(kind, id) {
   const out = {
     lead: null, clientRfq: null, quote: null, event: null, invoice: null,
-    sourcing: { vendorTotal: 0, vendorSubmitted: 0, costingExists: false },
+    sourcing: { vendorTotal: 0, vendorSubmitted: 0, costingExists: false, stale: false },
     ar: null, ap: null,
   };
   if (!kind || !id) return out;
@@ -65,7 +66,17 @@ export async function resolveDocChain(kind, id) {
       out.sourcing.vendorSubmitted = (data || []).filter((v) => v.status === 'submitted').length;
     } catch (e) { /* noop */ }
   }
-  if (ids.quote) { try { const { data } = await supabase.from('costing_summaries').select('costing_summary_id').eq('quotation_id', ids.quote).eq('is_deleted', false).limit(1); out.sourcing.costingExists = !!(data && data.length); } catch (e) { /* noop */ } }
+  if (ids.quote) {
+    try {
+      const { data } = await supabase.from('costing_summaries').select('lines,generated_at').eq('quotation_id', ids.quote).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1);
+      const snap = (data || [])[0] || null;
+      out.sourcing.costingExists = !!snap;
+      if (snap && Array.isArray(snap.lines) && snap.lines.length) {
+        const { data: qli } = await supabase.from('quotation_line_items').select('sub_event_name,description,quantity,sub_items').eq('quotation_id', ids.quote).eq('is_deleted', false);
+        out.sourcing.stale = computeSourcingDrift(qli || [], snap.lines).stale;
+      }
+    } catch (e) { /* noop */ }
+  }
 
   // ── AR (from the active invoice) + AP (vendor dues on the event) ──
   if (out.invoice) {

@@ -6,6 +6,7 @@ import { supabase } from './supabase';
 import { runDb } from './toast.jsx';
 import { _currentUid } from './session.js';
 import { loadVendorRfqs } from './vendorRfq.js';
+import { computeSourcingDrift } from './sourcingDrift.js';
 
 export const costKey = (it) => (it.sub_event_name || '') + '||' + (it.description || '');
 
@@ -129,4 +130,26 @@ export async function saveCostingSummary(payload) {
   }), 'save costing summary');
   if (error) throw error;
   return true;
+}
+
+// READ-ONLY: has this quote drifted from the sourcing basis captured in its latest
+// costing snapshot? Returns { sourced:false } when the quote was never sourced (no
+// snapshot) — nothing to drift from. Never throws.
+export async function loadSourcingDrift(quotationId) {
+  if (!quotationId) return { sourced: false, stale: false };
+  let snap = null;
+  try {
+    const { data } = await supabase.from('costing_summaries')
+      .select('lines,generated_at').eq('quotation_id', quotationId).eq('is_deleted', false)
+      .order('generated_at', { ascending: false }).limit(1);
+    snap = (data || [])[0] || null;
+  } catch (e) { return { sourced: false, stale: false }; }
+  if (!snap || !Array.isArray(snap.lines) || !snap.lines.length) return { sourced: false, stale: false };
+  let quoteLines = [];
+  try {
+    const { data } = await supabase.from('quotation_line_items')
+      .select('sub_event_name,description,quantity,sub_items').eq('quotation_id', quotationId).eq('is_deleted', false);
+    quoteLines = data || [];
+  } catch (e) { quoteLines = []; }
+  return { sourced: true, generatedAt: snap.generated_at, ...computeSourcingDrift(quoteLines, snap.lines) };
 }

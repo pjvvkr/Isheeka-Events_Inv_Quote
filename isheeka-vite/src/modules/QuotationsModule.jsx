@@ -10,6 +10,8 @@ import { QUOT_STATUS_COLORS, QUOT_STATUS_LABELS, REJECT_REASONS } from '../lib/c
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { DocFlow } from '../components/ui/DocFlow.jsx';
 import { resolveDocChain } from '../lib/docChain.js';
+import { loadSourcingDrift } from '../lib/costing.js';
+import { driftSummary } from '../lib/sourcingDrift.js';
 import { closeQuoteNotProceeding, createEventFromQuote, createInvoiceFromQuote } from '../lib/money.js';
 import { uploadQuotePdf, buildQuoteShareMsg, openWhatsApp, openEmail, validClientPhone, waLink } from '../lib/share.js';
 import { logQuoteSend } from '../lib/session.js';
@@ -165,6 +167,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   React.useEffect(()=>{ loadAll(); },[loadAll]);
   const [docChain, setDocChain] = React.useState(null);
   React.useEffect(()=>{ let live=true; if(quotationId) resolveDocChain('quote', quotationId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId]);
+  const [drift, setDrift] = React.useState(null);
+  React.useEffect(()=>{ let live=true; if(quotationId) loadSourcingDrift(quotationId).then(d=>{ if(live) setDrift(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId, quot && quot.updated_at]);
 
   const doShare = async (channel) => {
     if(sharing||!quot) return;
@@ -347,6 +351,16 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   return (
     <div>
       {docChain && <DocFlow chain={docChain} current="quote" onNavigate={onNavigate} />}
+      {drift && drift.stale && (
+        <div style={{background:'var(--orange-light)',border:'1px solid var(--orange)',borderRadius:'var(--radius-lg)',padding:'10px 14px',marginBottom:16,display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <span style={{fontSize:16}}>⚠️</span>
+          <div style={{flex:1,minWidth:220}}>
+            <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>Sourcing may be out of date</div>
+            <div style={{fontSize:12,color:'var(--grey-600)',marginTop:2}}>The quote changed after vendors were priced ({driftSummary(drift.counts)}). Accepted bids may no longer cover the current items.</div>
+          </div>
+          {srcRfq&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('rfqs',{costingRfqId:srcRfq.rfq_id,label:'Costing'})}>Review sourcing →</button>}
+        </div>
+      )}
       {showWizard&&wizardCtx&&
 <QuoteGenerationWizard lead={wizardCtx.lead} leadSubEvents={[]} isRevision={wizardCtx.isRevision} isContinuation={!wizardCtx.isRevision} existingQuotationId={quot.quotation_id} originEvent={wizardCtx.origin||undefined} onComplete={async(newQ)=>{ setShowWizard(false); setWizardCtx(null); if(newQ&&newQ.quotation_id&&newQ.quotation_id!==quot.quotation_id){ onNavigate&&onNavigate('quotations',{quotId:newQ.quotation_id}); } else { await loadAll(); } }} onCancel={()=>{ setShowWizard(false); setWizardCtx(null); }}/>}
       {showConvert&&convertLead&&<ConvertLeadModal lead={convertLead} onConfirm={doConvertFromQuote} onCancel={()=>{setShowConvert(false);setConvertLead(null);}}/>}

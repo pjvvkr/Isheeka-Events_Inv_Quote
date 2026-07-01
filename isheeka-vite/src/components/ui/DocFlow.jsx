@@ -53,7 +53,9 @@ export function DocFlow({ chain, current, onNavigate }) {
   const vt = c.sourcing.vendorTotal, vs = c.sourcing.vendorSubmitted;
   const vendor = vt === 0 ? { state: 'none', sub: 'In-house' }
     : { state: vs > 0 ? 'done' : 'progress', sub: vs > 0 ? (vs + ' bid' + (vs > 1 ? 's' : '')) : (vt + ' sent'), onClick: () => c.clientRfq && nav('rfqs', { rfqId: c.clientRfq.rfq_id, label: c.clientRfq.ref_number }) };
-  const costing = c.sourcing.costingExists ? { state: 'done', sub: 'Priced', onClick: () => c.clientRfq && nav('rfqs', { costingRfqId: c.clientRfq.rfq_id, label: 'Costing' }) }
+  const openCosting = () => c.clientRfq && nav('rfqs', { costingRfqId: c.clientRfq.rfq_id, label: 'Costing' });
+  const costing = c.sourcing.costingExists
+    ? (c.sourcing.stale ? { state: 'progress', sub: 'Re-source', onClick: openCosting } : { state: 'done', sub: 'Priced', onClick: openCosting })
     : (vs > 0 ? { state: 'progress', sub: 'Pending' } : (vt === 0 ? { state: 'none', sub: 'In-house' } : { state: 'none', sub: '—' }));
 
   const quote = c.quote ? { state: isCur('quote') ? 'current' : 'done', sub: c.quote.ref_number || 'Quote', onClick: () => nav('quotations', { quotId: c.quote.quotation_id, label: c.quote.ref_number }) }

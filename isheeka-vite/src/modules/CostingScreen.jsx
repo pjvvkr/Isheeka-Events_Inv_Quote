@@ -66,7 +66,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
 
   const pricedRows = () => rows.map((r) => ({ sub_event_name: r.sub_event_name, description: r.description, quantity: r.quantity, clientUnitPrice: clientUnitOf(r) }));
   const summaryLines = () => rows.map((r) => ({
-    item: r.description, sub_event: r.sub_event_name, qty: r.quantity,
+    item: r.description, sub_event: r.sub_event_name, qty: r.quantity, sub_items: Array.isArray(r.sub_items) ? r.sub_items : [],
     bids: r.bids.map((b) => ({ vendor_id: b.vendor_id, unit_cost: b.unit_cost, can_supply: b.can_supply, note: b.item_note })),
     in_house: r.inHouse, in_house_cost: r.inHouse ? (r.inHouseCost === '' ? null : Number(r.inHouseCost)) : null,
     chosen: r.inHouse ? 'in-house' : r.chosen, chosen_cost: chosenCostOf(r), markup_pct: Number(r.markup) || 0, client_unit_price: clientUnitOf(r),
