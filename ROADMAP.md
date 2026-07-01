@@ -236,6 +236,62 @@ accept/lock/revise sourcing-decision lifecycle:
   do flow to the vendor on save (verified); consider expanding them read-only for clarity.
 - **Surgical AP awareness.** Post-event re-source (v4) still deferred — highest risk.
 
+## Phase 2b companion — Next-step coach (guided assistance, DESIGNED 2026-07-01)
+
+A single, context-aware "Next step" card that sits directly UNDER the lifecycle rail on every
+detail screen. The rail shows WHERE the deal is; the coach translates that into plain business
+language: a one-line "so far" recap + the single highest-priority next action, with a button that
+does it. Pairs with 2b — 2b enforces the canonical path, the coach walks the user down it — and it
+quietly solves the "sourcing is hidden" concern (on an unpriced quote it explicitly says "price
+in-house or source vendors") without restructuring screens.
+
+### The "intelligence" is deterministic — no AI, no cost
+A pure resolver `nextBestActions(dealState)` reads the state we ALREADY compute — `resolveDocChain`
+(lead → RFQ → quote → event → invoice + AR/AP) plus the flags built in Phase 2c (priced?, drift /
+`vendorStale` / `costingStale` / reprice-pending?, approval status, invoice-out-of-date,
+`pendingRevisionConfirm`) — and maps it to a next action via ordered rules following the spine.
+Instant, always correct, free. It respects the ₹0 / permission guards (never suggests "confirm" on
+an unpriced quote). No new queries, no schema.
+
+### Rule table (deal state → what the coach says)
+- Lead, no RFQ → "Capture what they need — send the client a requirements link." [Send RFQ]
+- RFQ submitted, not approved → "Client sent requirements — review and approve." [Approve]
+- Quote created, ₹0 → "Not priced yet — price in-house, or source vendors." [Edit] [Source vendors]
+- Vendor RFQs out, no bids → "Waiting on vendor prices — remind them if it's been a while."
+- Bids in, not costed → "Bids are in — set your markup and generate the priced quote." [Costing]
+- Sourcing stale / reprice pending → "Changed since vendors priced it — re-source." [Re-source]
+- Quote priced, not sent → "Ready — send it or request the client's approval." [Send] [Approval]
+- Approved, no event → "Client approved — confirm to book the event and raise the invoice." [Confirm]
+- Event booked, draft invoice → "Booked — issue the invoice when ready to bill." [Invoice]
+- Invoice issued, ₹ due → "₹X due — record client payments as they arrive." [Record payment]
+- Vendors owed → "₹Y owed to vendors — record vendor payments." [Record vendor payment]
+- Revised, not re-confirmed → "You revised the quote — confirm to update the invoice." [Confirm]
+- Fully paid + vendors settled → "Settled — nothing left to do." (done state)
+
+### Renders on (5 detail screens, under the rail)
+Lead · Client RFQ · Quote · Event · Invoice. NOT on list screens / Dashboard / Vendors / Clients /
+Reports / Settings (no single deal in context). A portfolio version on the Dashboard ("3 deals
+waiting on you") is a later, separate add.
+
+### Phasing
+- **Phase A (build first):** pure `nextBestActions` engine + the card, on the Quote screen first
+  (decisions cluster there). Read-only, low risk.
+- **Phase B:** roll the card to the other four screens; add the plain-language "so far" recap
+  (reuse the DealHistory data); CONSOLIDATE the scattered banners (₹0 helper, drift, re-source,
+  "event created") into the coach so we reduce banner sprawl instead of adding to it.
+- **Phase C (PARKED — cost):** AI chatbot for free-form Q&A + guidance. Deferred on the owner's
+  call due to per-token cost + client-data privacy. When built, it REUSES this coach engine as a
+  read-only tool so its answers match the on-screen coach (one source of truth). Architecture if
+  revived: a Supabase edge function proxy holding the model key, RLS-scoped read-only tools,
+  numbers only from queries (never model-invented), no autonomous writes (deep-link to actions).
+
+### Guardrails
+Deterministic only (A/B); one primary + ≤2 secondary suggestions (guide, don't nag); respect
+module permissions (never suggest an action the user can't do); graceful "no single next step" for
+ambiguous states.
+
+Risk: A/B Low (read-only, reuses existing state). C parked.
+
 ## Phase 3 - Responsive / mobile (deferred until mobile use is real)
 
 Not urgent today (primarily desktop use), but planned. Sidebar -> collapsible drawer,
