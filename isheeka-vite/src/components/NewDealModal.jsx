@@ -3,49 +3,24 @@
 // Quick lands staff on the RFQ to fill items + approve. No manual (quote-less) events.
 // Client can be searched (link to existing, no duplicate) or entered new (saved at approval).
 import React from 'react';
-import { supabase } from '../lib/supabase';
 import { startDeal } from '../lib/deal.js';
 import { notify } from '../lib/toast.jsx';
 import { useEventTypes } from '../lib/data.js';
+import { ClientPicker } from './ClientPicker.jsx';
 
 export function NewDealModal({ onClose, onNavigate, seed }) {
   const items = (seed && seed.items) || [];
   const referenceName = seed && seed.referenceName;
   const [f, setF] = React.useState({ first_name: '', last_name: '', phone: '', email: '', event_type: '' });
   const [busy, setBusy] = React.useState('');
-  const [q, setQ] = React.useState('');
-  const [results, setResults] = React.useState([]);
-  const [searching, setSearching] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
   const eventTypes = useEventTypes();
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const busyAny = !!busy;
 
-  React.useEffect(() => {
-    if (selected) { setResults([]); return; }
-    const term = q.trim().replace(/[%,]/g, '');
-    if (term.length < 2) { setResults([]); return; }
-    let live = true;
-    setSearching(true);
-    const t = setTimeout(async () => {
-      try {
-        const like = '%' + term + '%';
-        const { data } = await supabase.from('clients')
-          .select('client_id,first_name,last_name,phone_1,email_1')
-          .eq('is_deleted', false)
-          .or(`first_name.ilike.${like},last_name.ilike.${like},phone_1.ilike.${like}`)
-          .limit(8);
-        if (live) setResults(data || []);
-      } catch (e) { if (live) setResults([]); }
-      if (live) setSearching(false);
-    }, 250);
-    return () => { live = false; clearTimeout(t); };
-  }, [q, selected]);
-
   const pick = (c) => {
     setSelected(c);
     setF((s) => ({ ...s, first_name: c.first_name || '', last_name: c.last_name || '', phone: c.phone_1 || '', email: c.email_1 || '' }));
-    setResults([]); setQ('');
   };
   const clearSelected = () => { setSelected(null); setF({ first_name: '', last_name: '', phone: '', email: '', event_type: f.event_type }); };
 
@@ -92,21 +67,9 @@ export function NewDealModal({ onClose, onNavigate, seed }) {
             <button className="btn sm" onClick={clearSelected} disabled={busyAny}>Change</button>
           </div>
         ) : (
-          <div style={{ marginBottom: 12, position: 'relative' }}>
+          <div style={{ marginBottom: 12 }}>
             <label className="field-label">Find existing client</label>
-            <input className="field-input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or phone…" />
-            {(results.length > 0 || (searching && q.trim().length >= 2)) && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--grey-100)', borderRadius: 'var(--radius-sm)', boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 5, maxHeight: 200, overflowY: 'auto', marginTop: 2 }}>
-                {searching && !results.length ? <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--grey-400)' }}>Searching…</div> :
-                  results.map((c) => (
-                    <div key={c.client_id} onClick={() => pick(c)} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderTop: '1px solid var(--grey-50)' }}
-                      onMouseEnter={(ev) => { ev.currentTarget.style.background = 'var(--grey-50)'; }} onMouseLeave={(ev) => { ev.currentTarget.style.background = '#fff'; }}>
-                      <div style={{ color: 'var(--grey-800)', fontWeight: 500 }}>{((c.first_name || '') + ' ' + (c.last_name || '')).trim() || '—'}</div>
-                      <div style={{ color: 'var(--grey-400)', fontSize: 11 }}>{c.phone_1 || ''}{c.email_1 ? (' · ' + c.email_1) : ''}</div>
-                    </div>
-                  ))}
-              </div>
-            )}
+            <ClientPicker onPick={pick} />
             <div style={{ fontSize: 11, color: 'var(--grey-400)', marginTop: 4 }}>…or enter a new client below — it'll be saved to your Clients list.</div>
           </div>
         )}
