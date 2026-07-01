@@ -10,7 +10,7 @@ const num = (n) => parseFloat(n) || 0;
 export async function resolveDocChain(kind, id) {
   const out = {
     lead: null, clientRfq: null, quote: null, event: null, invoice: null,
-    sourcing: { vendorTotal: 0, vendorSubmitted: 0, costingExists: false, stale: false },
+    sourcing: { vendorTotal: 0, vendorSubmitted: 0, costingExists: false, stale: false, pricedAt: null },
     ar: null, ap: null,
   };
   if (!kind || !id) return out;
@@ -68,21 +68,22 @@ export async function resolveDocChain(kind, id) {
   }
   if (ids.quote) {
     try {
-      // Snapshots hang off the client RFQ (shared across every revision of the quote),
-      // so look up by client_rfq_id first; fall back to this quote's id.
-      let snap = null;
-      if (ids.rfq) {
-        const { data } = await supabase.from('costing_summaries').select('lines,generated_at').eq('client_rfq_id', ids.rfq).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1);
-        snap = (data || [])[0] || null;
-      }
-      if (!snap) {
-        const { data } = await supabase.from('costing_summaries').select('lines,generated_at').eq('quotation_id', ids.quote).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1);
-        snap = (data || [])[0] || null;
-      }
-      out.sourcing.costingExists = !!snap;
-      if (snap && Array.isArray(snap.lines) && snap.lines.length) {
-        const { data: qli } = await supabase.from('quotation_line_items').select('sub_event_name,description,quantity,sub_items,source_item_id').eq('quotation_id', ids.quote).eq('is_deleted', false);
-        out.sourcing.stale = computeSourcingDrift(qli || [], snap.lines).stale;
+      // costingExists ("Priced"): was pricing done? Snapshots hang off the client RFQ
+      // (shared across revisions); fall back to this quote's id.
+      let costed = false;
+      if (ids.rfq) { const { data } = await supabase.from('costing_summaries').select('generated_at').eq('client_rfq_id', ids.rfq).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1); if (data && data.length) { costed = true; out.sourcing.pricedAt = data[0].generated_at; } }
+      if (!costed) { const { data } = await supabase.from('costing_summaries').select('generated_at').eq('quotation_id', ids.quote).eq('is_deleted', false).order('generated_at', { ascending: false }).limit(1); if (data && data.length) { costed = true; out.sourcing.pricedAt = data[0].generated_at; } }
+      out.sourcing.costingExists = costed;
+      // stale ("Re-source"): does the quote scope differ from the client RFQ's item list
+      // (the live sourcing basis)? rfq_items always carry a sub_items array, so sub-item
+      // edits are detected — unlike older costing snapshots that predate sub_items.
+      if (costed && ids.rfq) {
+        const [riRes, qlRes] = await Promise.all([
+          supabase.from('rfq_items').select('rfq_item_id,description,quantity,sub_event_name,sub_items').eq('rfq_id', ids.rfq).eq('is_deleted', false),
+          supabase.from('quotation_line_items').select('source_item_id,description,quantity,sub_event_name,sub_items').eq('quotation_id', ids.quote).eq('is_deleted', false),
+        ]);
+        const baseline = (riRes.data || []).map((r) => ({ ...r, source_item_id: r.rfq_item_id }));
+        out.sourcing.stale = computeSourcingDrift(qlRes.data || [], baseline).stale;
       }
     } catch (e) { /* noop */ }
   }

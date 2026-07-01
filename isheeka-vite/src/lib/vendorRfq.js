@@ -228,5 +228,13 @@ export async function applySourcingSync(clientRfqId, quotationId) {
   if (plan.removes.length) {
     await runDb(supabase.from('rfq_items').update({ is_deleted: true, updated_at: now }).in('rfq_item_id', plan.removes), 'remove sourced items');
   }
+  const changed = plan.counts.added + plan.counts.changed + plan.counts.removed;
+  if (changed > 0) {
+    try {
+      const bits = [plan.counts.added ? (plan.counts.added + ' added') : null, plan.counts.changed ? (plan.counts.changed + ' changed') : null, plan.counts.removed ? (plan.counts.removed + ' removed') : null].filter(Boolean).join(', ');
+      const uid = await _currentUid();
+      await supabase.from('rfq_activity').insert({ rfq_id: clientRfqId, actor: uid || 'staff', action: 'rescoped', notes: 'Re-sourced from quote: ' + bits });
+    } catch (e) { /* non-fatal */ }
+  }
   return plan.counts;
 }

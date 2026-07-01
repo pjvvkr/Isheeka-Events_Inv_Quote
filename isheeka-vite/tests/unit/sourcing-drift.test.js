@@ -41,6 +41,14 @@ describe('computeSourcingDrift', () => {
     expect(d.stale).toBe(true);
   });
 
+  it('flags a sub-item added to a line whose baseline had an empty array (not legacy undefined)', () => {
+    const base = [bline('Stage Lighting', 1, [])];
+    const quote = [qline('Stage Lighting', 1, [{ name: 'Extra par cans', qty: 20 }])];
+    const d = computeSourcingDrift(quote, base);
+    expect(d.counts.rescoped).toBe(1);
+    expect(d.stale).toBe(true);
+  });
+
   it('ignores sub-items when the baseline predates sub_items (no false positive)', () => {
     const base = [bline('Catering', 1, undefined)]; // legacy snapshot: no sub_items key
     const quote = [qline('Catering', 1, [{ name: 'Veg', qty: 50 }])];

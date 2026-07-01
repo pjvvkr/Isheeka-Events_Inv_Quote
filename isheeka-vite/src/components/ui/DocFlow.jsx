@@ -23,10 +23,10 @@ function subColor(state) {
   return 'var(--grey-300)';
 }
 
-function Node({ icon, label, sub, state, small, onClick }) {
+function Node({ icon, label, sub, state, small, onClick, hint }) {
   const clickable = onClick && ['done', 'progress', 'settled', 'current'].includes(state);
   return (
-    <div onClick={clickable ? onClick : undefined} title={clickable ? ('Open ' + (sub || label)) : undefined}
+    <div onClick={clickable ? onClick : undefined} title={hint || (clickable ? ('Open ' + (sub || label)) : undefined)}
       style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: small ? 4 : 5, width: small ? 74 : 80, flexShrink: 0, textAlign: 'center', cursor: clickable ? 'pointer' : 'default' }}>
       <div style={circleStyle(state, small)}>{icon}</div>
       <div style={{ fontSize: 11, fontWeight: 500, color: (state === 'none') ? 'var(--grey-400)' : 'var(--grey-800)' }}>{label}</div>
@@ -54,8 +54,11 @@ export function DocFlow({ chain, current, onNavigate }) {
   const vendor = vt === 0 ? { state: 'none', sub: 'In-house' }
     : { state: vs > 0 ? 'done' : 'progress', sub: vs > 0 ? (vs + ' bid' + (vs > 1 ? 's' : '')) : (vt + ' sent'), onClick: () => c.clientRfq && nav('rfqs', { rfqId: c.clientRfq.rfq_id, label: c.clientRfq.ref_number }) };
   const openCosting = () => c.clientRfq && nav('rfqs', { costingRfqId: c.clientRfq.rfq_id, label: 'Costing' });
+  const pricedTs = c.sourcing.pricedAt ? (() => { try { return new Date(c.sourcing.pricedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } })() : '';
   const costing = c.sourcing.costingExists
-    ? (c.sourcing.stale ? { state: 'progress', sub: 'Re-source', onClick: openCosting } : { state: 'done', sub: 'Priced', onClick: openCosting })
+    ? (c.sourcing.stale
+        ? { state: 'progress', sub: 'Re-source', onClick: openCosting, hint: 'Quote scope changed since pricing — re-source needed' + (pricedTs ? (' · last priced ' + pricedTs) : '') }
+        : { state: 'done', sub: 'Priced', onClick: openCosting, hint: 'Sourcing matches the quote' + (pricedTs ? (' · last priced ' + pricedTs) : '') })
     : (vs > 0 ? { state: 'progress', sub: 'Pending' } : (vt === 0 ? { state: 'none', sub: 'In-house' } : { state: 'none', sub: '—' }));
 
   const quote = c.quote ? { state: isCur('quote') ? 'current' : 'done', sub: c.quote.ref_number || 'Quote', onClick: () => nav('quotations', { quotId: c.quote.quotation_id, label: c.quote.ref_number }) }

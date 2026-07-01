@@ -137,9 +137,8 @@ export async function saveCostingSummary(payload) {
 // snapshot) — nothing to drift from. Never throws.
 export async function loadSourcingDrift(quotationId) {
   if (!quotationId) return { sourced: false, stale: false };
-  // Walk the revision lineage: a costing snapshot stays attached to the quote that was
-  // costed, but revising the quote mints a NEW quotation_id — so we must look up the
-  // snapshot across this quote and its ancestors (parent_quotation_id chain).
+  // Walk the revision lineage: the client RFQ + costing snapshots can hang off an earlier
+  // revision (revising mints a new quotation_id), so resolve across the parent chain.
   const lineage = [];
   try {
     let cur = quotationId; const seen = new Set();
@@ -150,19 +149,29 @@ export async function loadSourcingDrift(quotationId) {
     }
   } catch (e) { /* fall back to the single id below */ }
   if (!lineage.length) lineage.push(quotationId);
-  let snap = null;
+  // The client RFQ is the sourcing basis (shared across revisions).
+  let clientRfqId = null;
   try {
-    const { data } = await supabase.from('costing_summaries')
-      .select('lines,generated_at').in('quotation_id', lineage).eq('is_deleted', false)
-      .order('generated_at', { ascending: false }).limit(1);
-    snap = (data || [])[0] || null;
+    const { data } = await supabase.from('rfqs').select('rfq_id').eq('party_type', 'client').eq('is_deleted', false)
+      .in('quotation_id', lineage).order('created_at', { ascending: false }).limit(1);
+    clientRfqId = (data && data[0] && data[0].rfq_id) || null;
   } catch (e) { return { sourced: false, stale: false }; }
-  if (!snap || !Array.isArray(snap.lines) || !snap.lines.length) return { sourced: false, stale: false };
-  let quoteLines = [];
+  if (!clientRfqId) return { sourced: false, stale: false };
+  // Only flag drift once pricing has happened (a costing snapshot exists); otherwise the
+  // Vendor RFQ / Costing nodes already show the in-progress state.
+  let costed = false;
+  try { const { data } = await supabase.from('costing_summaries').select('costing_summary_id').eq('client_rfq_id', clientRfqId).eq('is_deleted', false).limit(1); costed = !!(data && data.length); } catch (e) { costed = false; }
+  if (!costed) return { sourced: false, stale: false };
+  // Baseline = the client RFQ's items (the live sourcing scope; always carry a sub_items
+  // array, so sub-item changes are detected). Current = the quote's line items.
+  let baseline = [], quoteLines = [];
   try {
-    const { data } = await supabase.from('quotation_line_items')
-      .select('sub_event_name,description,quantity,sub_items,source_item_id').eq('quotation_id', quotationId).eq('is_deleted', false);
-    quoteLines = data || [];
-  } catch (e) { quoteLines = []; }
-  return { sourced: true, generatedAt: snap.generated_at, ...computeSourcingDrift(quoteLines, snap.lines) };
+    const [riRes, qlRes] = await Promise.all([
+      supabase.from('rfq_items').select('rfq_item_id,description,quantity,sub_event_name,sub_items').eq('rfq_id', clientRfqId).eq('is_deleted', false),
+      supabase.from('quotation_line_items').select('source_item_id,description,quantity,sub_event_name,sub_items').eq('quotation_id', quotationId).eq('is_deleted', false),
+    ]);
+    baseline = (riRes.data || []).map((r) => ({ ...r, source_item_id: r.rfq_item_id }));
+    quoteLines = qlRes.data || [];
+  } catch (e) { return { sourced: true, stale: false }; }
+  return { sourced: true, ...computeSourcingDrift(quoteLines, baseline) };
 }

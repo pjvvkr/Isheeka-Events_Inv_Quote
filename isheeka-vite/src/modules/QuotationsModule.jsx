@@ -12,6 +12,8 @@ import { DocFlow } from '../components/ui/DocFlow.jsx';
 import { resolveDocChain } from '../lib/docChain.js';
 import { loadSourcingDrift } from '../lib/costing.js';
 import { driftSummary } from '../lib/sourcingDrift.js';
+import { DealHistory } from '../components/ui/DealHistory.jsx';
+import { loadDealHistory } from '../lib/dealHistory.js';
 import { closeQuoteNotProceeding, createEventFromQuote, createInvoiceFromQuote } from '../lib/money.js';
 import { uploadQuotePdf, buildQuoteShareMsg, openWhatsApp, openEmail, validClientPhone, waLink } from '../lib/share.js';
 import { logQuoteSend } from '../lib/session.js';
@@ -79,6 +81,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [srcRfq, setSrcRfq] = React.useState(null);
   const [invoiceIssued, setInvoiceIssued] = React.useState(false);
   const [qActExpanded, setQActExpanded] = React.useState(false);
+  const [history, setHistory] = React.useState(null);
+  const [histOpen, setHistOpen] = React.useState(false);
   const [sharing, setSharing] = React.useState(false);
   const [sourcing, setSourcing] = React.useState(false);
   const [showResource, setShowResource] = React.useState(false);
@@ -191,6 +195,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   React.useEffect(()=>{ let live=true; if(quotationId) resolveDocChain('quote', quotationId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId]);
   const [drift, setDrift] = React.useState(null);
   React.useEffect(()=>{ let live=true; if(quotationId) loadSourcingDrift(quotationId).then(d=>{ if(live) setDrift(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId, quot && quot.updated_at]);
+  React.useEffect(()=>{ let live=true; if(quotationId) loadDealHistory(quotationId).then(h=>{ if(live) setHistory(h); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId, quot && quot.updated_at]);
 
   const doShare = async (channel) => {
     if(sharing||!quot) return;
@@ -472,6 +477,14 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           <div style={{fontSize:11,color:'var(--grey-400)',marginTop:6}}>Dates &amp; venues are set on the event; this prints on the quotation PDF.</div>
         </div>
       )}
+      {/* Sourcing & pricing history */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'14px 18px',marginBottom:16}}>
+        <div onClick={()=>setHistOpen(o=>!o)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>🧾 Sourcing &amp; pricing history{history&&history.length?(' ('+history.length+')'):''}</div>
+          <span style={{fontSize:12,color:'var(--grey-400)'}}>{histOpen?'▾ Hide':'▸ Show'}</span>
+        </div>
+        {histOpen && <div style={{marginTop:10}}><DealHistory items={history||[]} /></div>}
+      </div>
       {/* Line items */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'16px 20px',marginBottom:16}}>
         <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:lineItemsOpen?10:0,cursor:'pointer'}} onClick={()=>setLineItemsOpen(o=>!o)}>

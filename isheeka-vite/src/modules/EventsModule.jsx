@@ -12,6 +12,8 @@ import { EVENT_STATUS_ORDER, EVENT_STATUS_LABELS, EVENT_STATUS_COLORS, EVENT_STA
 import { StatusBadge } from '../components/ui/StatusBadge.jsx';
 import { DocFlow } from '../components/ui/DocFlow.jsx';
 import { resolveDocChain } from '../lib/docChain.js';
+import { DealHistory } from '../components/ui/DealHistory.jsx';
+import { loadDealHistory } from '../lib/dealHistory.js';
 import { useEventTypes } from '../lib/data.js';
 import { getNextEventRef, getNextClientRef } from '../lib/refs.js';
 import { addEventVendor, recordVendorPayment, recordVendorRefund, recordClientRefund, createInvoiceFromQuote, _ensureVendorInstallment } from '../lib/money.js';
@@ -399,7 +401,10 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
 
   React.useEffect(()=>{ loadAll(); },[eventId]);
   const [docChain, setDocChain] = React.useState(null);
+  const [history, setHistory] = React.useState(null);
+  const [histOpen, setHistOpen] = React.useState(false);
   React.useEffect(()=>{ let live = true; if (eventId) resolveDocChain('event', eventId).then(d => { if (live) setDocChain(d); }).catch(()=>{}); return () => { live = false; }; }, [eventId]);
+  React.useEffect(()=>{ let live=true; const q=(quotations||[]).find(x=>x.status!=='superseded')||(quotations||[])[0]; if(q&&q.quotation_id) loadDealHistory(q.quotation_id).then(h=>{ if(live) setHistory(h); }).catch(()=>{}); else if(live) setHistory([]); return ()=>{ live=false; }; }, [quotations]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -979,6 +984,14 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
         </div>
       </div>
 
+      {/* Sourcing & pricing history */}
+      <div style={{background:'white',borderRadius:'var(--radius-lg)',border:'1px solid var(--grey-100)',padding:'14px 20px',marginBottom:16}}>
+        <div onClick={()=>setHistOpen(o=>!o)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)'}}>🧾 Sourcing &amp; pricing history{history&&history.length?(' ('+history.length+')'):''}</div>
+          <span style={{fontSize:12,color:'var(--grey-400)'}}>{histOpen?'▾ Hide':'▸ Show'}</span>
+        </div>
+        {histOpen && <div style={{marginTop:10}}><DealHistory items={history||[]} /></div>}
+      </div>
       {/* Workflow */}
       <div style={{background:'white',borderRadius:'var(--radius-lg)',padding:'16px 20px',border:'1px solid var(--grey-100)',marginBottom:16}}>
         <div style={{fontSize:13,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>Quotations &amp; invoices</div>
