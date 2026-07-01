@@ -223,10 +223,10 @@ export async function applySourcingSync(clientRfqId, quotationId) {
     }
   }
   for (const u of plan.updates) {
-    await runDb(supabase.from('rfq_items').update({ description: u.description, quantity: u.quantity || 1, sub_event_name: u.sub_event_name || null, sub_items: u.sub_items || [], updated_at: now }).eq('rfq_item_id', u.rfq_item_id), 'update sourced item');
+    await runDb(supabase.from('rfq_items').update({ description: u.description, quantity: u.quantity || 1, sub_event_name: u.sub_event_name || null, sub_items: u.sub_items || [] }).eq('rfq_item_id', u.rfq_item_id), 'update sourced item');
   }
   if (plan.removes.length) {
-    await runDb(supabase.from('rfq_items').update({ is_deleted: true, updated_at: now }).in('rfq_item_id', plan.removes), 'remove sourced items');
+    await runDb(supabase.from('rfq_items').update({ is_deleted: true }).in('rfq_item_id', plan.removes), 'remove sourced items');
   }
   const changed = plan.counts.added + plan.counts.changed + plan.counts.removed;
   if (changed > 0) {
