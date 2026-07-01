@@ -321,7 +321,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
 
       {!readOnly && <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <button className="btn" disabled={busy} onClick={onSaveSummary}>Save costing summary</button>
-        <button className="btn primary" disabled={busy} onClick={onGenerate}>{busy ? 'Working…' : 'Generate quote →'}</button>
+        <button className="btn primary" disabled={busy} onClick={onGenerate}>{busy ? 'Working…' : (d.draftPriced ? 'Update quote →' : 'Generate quote →')}</button>
       </div>}
       {!readOnly && <div style={{ fontSize: 11.5, color: 'var(--grey-400)' }}>Tip: click a vendor's cost to choose it · the cheapest is picked automatically · 📝 = vendor note</div>}
 
@@ -338,7 +338,7 @@ export function CostingScreen({ rfqId, onBack, onNavigate }) {
               <>
                 <div style={{ fontSize: 15, fontWeight: 600, color: '#854F0B', marginBottom: 8 }}>A few things to check</div>
                 <ul style={{ fontSize: 13, color: 'var(--grey-700)', lineHeight: 1.6, paddingLeft: 18, margin: '0 0 14px' }}>{warn.soft.map((s, i) => <li key={i}>{s}</li>)}</ul>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button className="btn" onClick={() => setWarn(null)}>Back</button><button className="btn primary" disabled={busy} onClick={() => { const p = warn.proceed; setWarn(null); if (p) p(); }}>Generate anyway</button></div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button className="btn" onClick={() => setWarn(null)}>Back</button><button className="btn primary" disabled={busy} onClick={() => { const p = warn.proceed; setWarn(null); if (p) p(); }}>{d.draftPriced ? 'Update anyway' : 'Generate anyway'}</button></div>
               </>
             )}
           </div>
