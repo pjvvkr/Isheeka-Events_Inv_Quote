@@ -856,10 +856,7 @@ We've reviewed your event requirements (${ref}) and are preparing your quotation
           html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#2a2723"><p>Hi ${contactName},</p><p>We've updated your event requirements for <b>${ref}</b>. Please review and confirm.</p>${link ? `<p><a href="${link}" style="display:inline-block;background:#e8185a;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600">Review & Confirm →</a></p>${pin ? `<p style="font-size:13px">Access PIN: <b>${pin}</b></p>` : ""}<p style="color:#888;font-size:12px">${link}</p>` : ""}<p style="color:#888;font-size:12px">— Team Isheeka Events</p></div>`;
           text = `Hi ${contactName},
 
-We've updated your event requirements (${ref}). Please review and confirm${link ? ":
-" + link : "."}${pin ? "
-
-Access PIN: " + pin : ""}
+We've updated your event requirements (${ref}). Please review and confirm${link ? ":\n" + link : "."}${pin ? "\n\nAccess PIN: " + pin : ""}
 
 — Team Isheeka Events`;
         }
