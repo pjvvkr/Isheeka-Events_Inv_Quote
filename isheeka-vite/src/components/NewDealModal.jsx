@@ -68,6 +68,7 @@ export function NewDealModal({ onClose, onNavigate, seed }) {
       } });
       onClose && onClose();
       if (res.quotation_id) onNavigate && onNavigate('quotations', { quotId: res.quotation_id, label: res.quote_ref || 'Quote' });
+      else if (res.token) onNavigate && onNavigate('rfqs', { rfqId: res.rfq_id, label: res.ref_number || 'RFQ', share: { ref_number: res.ref_number, token: res.token, pin: res.pin, contact: { name: ((f.first_name + ' ' + f.last_name).trim()), phone: f.phone.trim() } } });
       else onNavigate && onNavigate('rfqs', { rfqId: res.rfq_id, label: res.ref_number || 'RFQ' });
     } catch (e) {
       notify('Could not start the deal: ' + ((e && e.message) || 'Please try again.'), 'error');

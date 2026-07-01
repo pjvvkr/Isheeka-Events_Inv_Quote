@@ -5,8 +5,10 @@ import { supabase } from '../lib/supabase';
 import { notify, runDb } from '../lib/toast.jsx';
 import { _currentUid } from '../lib/session.js';
 import { VENDOR_CATS } from '../lib/constants.js';
-import { sha256Hex } from '../lib/rfq.js';
+import { sha256Hex, genRfqPin } from '../lib/rfq.js';
 import { VENDOR_TEMPLATES, sendWhatsApp } from '../lib/messaging.js';
+import { SendMessageModal } from '../components/SendMessageModal.jsx';
+import { confirmDialog } from '../components/confirm.jsx';
 
 const GATEWAY = 'https://jlcssesetnxulnkbrmyp.supabase.co/functions/v1/rfq-gateway';
 
@@ -62,15 +64,7 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
       .then(({ data }) => { setVMsgLog(data || []); setVMsgLogLoading(false); });
   }, []);
 
-  const openVMsgModal = (v) => {
-    setVMsgTemplate(VENDOR_TEMPLATES[0].id);
-    setVMsgBody(VENDOR_TEMPLATES[0].body(v));
-    setVMsgPhone(v.phone_1 || '');
-    setVMsgEmail(v.email_1 || '');
-    setVMsgSent(false);
-    setVMsgPartyId(v.vendor_id);
-    setShowVMsgModal(true);
-  };
+  const openVMsgModal = () => setShowVMsgModal(true);
 
   const handleVTemplateChange = (id, v) => {
     setVMsgTemplate(id);
@@ -109,7 +103,7 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
     const [{ data: v }, { data: ev }, { data: e }] = await Promise.all([
       supabase.from('vendors').select('*').eq('is_deleted', false).order('name'),
       supabase.from('event_vendors').select('*').eq('is_deleted', false),
-      supabase.from('events').select('event_id,ref_number,name').eq('is_deleted', false),
+      supabase.from('events').select('event_id,ref_number,name,client_name,main_date,location').eq('is_deleted', false),
     ]);
     setVendors(v || []); setEvs(ev || []); setEvents(e || []); setLoading(false);
   }, []);
@@ -156,21 +150,22 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
   };
   const openDupVendor = () => { const d = dupWarn; setShowForm(false); setDupWarn(null); if (d) { onNavigate('vendors', { vendorId: d.vendor_id, label: d.name || 'Vendor' }); } };
   const setStatus = async (v, st) => { if (st === v.status) return; const { error } = await runDb(supabase.from('vendors').update({ status: st, updated_at: new Date().toISOString() }).eq('vendor_id', v.vendor_id), 'update vendor status'); if (!error) { notify('Vendor status updated.', 'success'); load(); } };
-  const del = async (v) => { const used = evs.filter((x) => x.vendor_id === v.vendor_id).length; if (used > 0) { notify('Cannot delete — this vendor is on ' + used + ' event' + (used > 1 ? 's' : '') + '. Set them Inactive instead.', 'error'); return; } if (!window.confirm('Delete (archive) ' + v.name + '? Recoverable in the database.')) return; const { error } = await runDb(supabase.from('vendors').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('vendor_id', v.vendor_id), 'delete vendor'); if (!error) { notify('Vendor archived.', 'success'); load(); onBack && onBack(); } };
+  const del = async (v) => { const used = evs.filter((x) => x.vendor_id === v.vendor_id).length; if (used > 0) { notify('Cannot delete — this vendor is on ' + used + ' event' + (used > 1 ? 's' : '') + '. Set them Inactive instead.', 'error'); return; } if (!await confirmDialog('Delete (archive) ' + v.name + '? Recoverable in the database.')) return; const { error } = await runDb(supabase.from('vendors').update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('vendor_id', v.vendor_id), 'delete vendor'); if (!error) { notify('Vendor archived.', 'success'); load(); onBack && onBack(); } };
 
   const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
 
   // ── Invite helpers ─────────────────────────────────────────────────────────
   const openInvite = (v = null) => { setInviteFor(v); setInvitePin(''); setInviteResult(null); setShowInvite(true); };
   const sendInvite = async () => {
-    if (invitePin && !/^\d{4,6}$/.test(invitePin)) { notify('PIN must be 4–6 digits.', 'error'); return; }
     setInviteSaving(true);
+    const pin = genRfqPin();
+    setInvitePin(pin);
     const arr = new Uint8Array(16); crypto.getRandomValues(arr);
     const token = [...arr].map((b) => b.toString(16).padStart(2, '0')).join('');
     const uid = await _currentUid();
     const payload = {
       token_hash: await sha256Hex(token),
-      pin_hash: invitePin ? await sha256Hex(invitePin) : null,
+      pin_hash: await sha256Hex(pin),
       status: 'pending',
       invited_by: uid,
       vendor_id: inviteFor ? inviteFor.vendor_id : null,
@@ -237,9 +232,7 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
         <div style={{ padding: 20 }}>
           {!inviteResult ? (
             <>
-              <div style={{ fontSize: 13, color: 'var(--grey-400)', marginBottom: 14 }}>Generate a secure link the vendor can use to submit their business details.</div>
-              <label className="field-label">Optional PIN (4–6 digits) — vendor must enter this to open the form</label>
-              <input className="field-input" type="text" inputMode="numeric" maxLength={6} placeholder="Leave blank for no PIN" value={invitePin} onChange={(e) => setInvitePin(e.target.value.replace(/\D/g, ''))} />
+              <div style={{ fontSize: 13, color: 'var(--grey-400)', marginBottom: 14 }}>Generate a secure link the vendor can use to submit their business details. A PIN is created automatically and shown with the link.</div>
             </>
           ) : (
             <>
@@ -368,7 +361,7 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
           {eng.length === 0 && <div style={{ padding: '0 16px 14px', fontSize: 13, color: 'var(--grey-400)' }}>Not engaged on any event yet.</div>}
           {eng.length > 0 && <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 100px 100px', gap: 8, padding: '8px 16px', background: 'var(--grey-50)', fontSize: 11, fontWeight: 600, color: 'var(--grey-400)', textTransform: 'uppercase', letterSpacing: '.04em' }}><div>Event</div><div style={{ textAlign: 'right' }}>Agreed</div><div style={{ textAlign: 'right' }}>Paid</div><div style={{ textAlign: 'right' }}>Balance</div></div>
-            {eng.map((x) => { const e = eMap[x.event_id]; return <div key={x.event_vendor_id} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 100px 100px', gap: 8, padding: '10px 16px', borderTop: '1px solid var(--grey-100)', fontSize: 13 }}><div>{e ? <a onClick={() => onNavigate && onNavigate('events', { eventId: e.event_id })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>{e.ref_number}</a> : '—'}{e ? (' · ' + e.name) : ''}{x.service_description ? (' · ' + x.service_description) : ''}</div><div style={{ textAlign: 'right' }}>{inr(x.agreed_amount)}</div><div style={{ textAlign: 'right' }}>{inr(x.total_paid)}</div><div style={{ textAlign: 'right', color: (parseFloat(x.outstanding) || 0) > 0 ? 'var(--red)' : 'var(--grey-800)' }}>{inr(x.outstanding)}</div></div>; })}
+            {eng.map((x) => { const e = eMap[x.event_id]; return <div key={x.event_vendor_id} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 100px 100px', gap: 8, padding: '10px 16px', borderTop: '1px solid var(--grey-100)', fontSize: 13 }}><div>{e ? <a onClick={() => onNavigate && onNavigate('events', { eventId: e.event_id })} style={{ color: 'var(--pink)', cursor: 'pointer', fontWeight: 500 }}>{e.ref_number}</a> : '—'}{e ? (' · ' + e.name) : ''}{x.service_description ? (' · ' + x.service_description) : ''}{e && (e.client_name || e.main_date || e.location) ? <div style={{ fontSize: 11.5, color: 'var(--grey-400)', marginTop: 2 }}>{[e.client_name, e.main_date ? new Date(e.main_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '', e.location].filter(Boolean).join(' · ')}</div> : null}</div><div style={{ textAlign: 'right' }}>{inr(x.agreed_amount)}</div><div style={{ textAlign: 'right' }}>{inr(x.total_paid)}</div><div style={{ textAlign: 'right', color: (parseFloat(x.outstanding) || 0) > 0 ? 'var(--red)' : 'var(--grey-800)' }}>{inr(x.outstanding)}</div></div>; })}
           </>}
         </div>
 
@@ -393,39 +386,7 @@ export function VendorsModule({ nav, onNavigate, onBack }) {
         </div>
 
         {/* Vendor compose modal */}
-        {showVMsgModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: 'white', borderRadius: 'var(--radius-lg)', padding: '24px 28px', width: 480, maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,.18)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--grey-800)' }}>💬 Send Message to {v.name}</div>
-                <button className="btn sm" onClick={() => setShowVMsgModal(false)}>✕ Close</button>
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Template</label>
-                <select className="field-input" value={vMsgTemplate} onChange={(e) => handleVTemplateChange(e.target.value, v)} style={{ width: '100%' }}>
-                  {VENDOR_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-                </select>
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Message</label>
-                <textarea className="field-input" value={vMsgBody} onChange={(e) => setVMsgBody(e.target.value)} rows={5} style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }} placeholder="Type your message…" />
-              </div>
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Phone number (for this send)</label>
-                <input className="field-input" value={vMsgPhone} onChange={(e) => setVMsgPhone(e.target.value)} style={{ width: '100%' }} placeholder="+91 98765 43210" />
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--grey-500)', display: 'block', marginBottom: 4 }}>Email (for this send)</label>
-                <input className="field-input" value={vMsgEmail} onChange={(e) => setVMsgEmail(e.target.value)} style={{ width: '100%' }} placeholder="vendor@email.com" type="email" />
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button className="btn primary" onClick={handleVSendWA} disabled={!vMsgPhone || !vMsgBody}>📲 Send on WhatsApp</button>
-                <button className="btn" onClick={handleVSendEmail} disabled={!vMsgEmail || !vMsgBody}>📧 Send by Email</button>
-                {vMsgSent && <span style={{ fontSize: 13, color: 'var(--green)', fontWeight: 500 }}>✅ Sent</span>}
-              </div>
-            </div>
-          </div>
-        )}
+        {showVMsgModal && <SendMessageModal party={{ type: 'vendor', id: v.vendor_id, name: v.name, phone: v.phone_1, email: v.email_1 }} onClose={() => setShowVMsgModal(false)} onSent={() => loadVendorMsgLog(v.vendor_id)} />}
       </div>
     );
   }

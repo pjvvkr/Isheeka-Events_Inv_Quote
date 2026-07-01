@@ -287,7 +287,9 @@ Deno.serve(async (req) => {
         let subevent_suggestions: string[] = [];
         try {
           if (r.event_type) {
-            const { data: et } = await db.from("event_types").select("event_type_id").ilike("label", String(r.event_type)).limit(1).maybeSingle();
+            let et: any = null;
+            { const { data } = await db.from("event_types").select("event_type_id").eq("value", String(r.event_type)).limit(1).maybeSingle(); et = data; }
+            if (!et) { const { data } = await db.from("event_types").select("event_type_id").ilike("label", String(r.event_type)).limit(1).maybeSingle(); et = data; }
             if (et) {
               const { data: subs } = await db.from("event_type_subevents").select("name").eq("event_type_id", et.event_type_id).eq("is_active", true).order("name");
               subevent_suggestions = (subs ?? []).map((x: any) => x.name);
@@ -320,8 +322,8 @@ Deno.serve(async (req) => {
             }
           }
         } catch { /* optional */ }
-        let event_types: string[] = [];
-        try { const { data: ets } = await db.from("event_types").select("label").eq("is_active", true).order("label"); event_types = (ets ?? []).map((x: any) => x.label).filter(Boolean); } catch { /* optional */ }
+        let event_types: { value: string; label: string }[] = [];
+        try { const { data: ets } = await db.from("event_types").select("value,label").eq("is_active", true).order("label"); event_types = (ets ?? []).map((x: any) => ({ value: x.value, label: x.label })).filter((x: any) => x.value || x.label); } catch { /* optional */ }
         // Vendor portal: surface the parent client RFQ's schedule (dates + venues) read-only,
         // so the vendor knows when/where the functions they're pricing happen.
         let schedule: any = null;

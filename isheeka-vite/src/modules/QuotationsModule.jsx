@@ -19,11 +19,14 @@ import { uploadQuotePdf, buildQuoteShareMsg, openWhatsApp, openEmail, validClien
 import { logQuoteSend } from '../lib/session.js';
 import { buildQuotationPDF } from '../pdf/quotationPdf.js';
 import { fetchAsBase64 } from '../lib/storage.js';
-import { sha256Hex } from '../lib/rfq.js';
+import { sha256Hex, genRfqPin } from '../lib/rfq.js';
 import { ClientLink } from '../components/links.jsx';
+import { ClientViewControls } from '../components/ClientViewControls.jsx';
+import { SendMessageModal } from '../components/SendMessageModal.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
 import { WelcomeMessageModal } from './LeadsModule.jsx';
 import { ensureSourcingAnchor, applySourcingSync } from '../lib/vendorRfq.js';
+import { confirmDialog } from '../components/confirm.jsx';
 
 // ── Convert Lead Modal ────────────────────────────────────────────────────────
 function ConvertLeadModal({lead, onConfirm, onCancel}) {
@@ -70,6 +73,7 @@ function ConvertLeadModal({lead, onConfirm, onCancel}) {
 
 function QuotationDetail({quotationId, onBack, onNavigate}) {
   const [quot, setQuot] = React.useState(null);
+  const [msgParty, setMsgParty] = React.useState(null);
   const [sourceRfq, setSourceRfq] = React.useState(null);
   const [items, setItems] = React.useState([]);
   const [qSettings, setQSettings] = React.useState({});
@@ -151,7 +155,9 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     else if(p==='summary') setDisplayOpts(o=>({...o,prices:false,qty:false,grouping:true,schedule:false,discount:false}));
   };
 
+  const [railTick, setRailTick] = React.useState(0);
   const loadAll = React.useCallback(async () => {
+    setRailTick((t) => t + 1);
     setLoading(true);
     const [{data:q},{data:li},{data:st},{data:qact},{data:qus},{data:srfq}] = await Promise.all([
       supabase.from('quotations').select('*').eq('quotation_id',quotationId).single(),
@@ -193,7 +199,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   },[quotationId]);
   React.useEffect(()=>{ loadAll(); },[loadAll]);
   const [docChain, setDocChain] = React.useState(null);
-  React.useEffect(()=>{ let live=true; if(quotationId) resolveDocChain('quote', quotationId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId]);
+  React.useEffect(()=>{ let live=true; if(quotationId) resolveDocChain('quote', quotationId).then(d=>{ if(live) setDocChain(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId, railTick]);
   const [drift, setDrift] = React.useState(null);
   React.useEffect(()=>{ let live=true; if(quotationId) loadSourcingDrift(quotationId).then(d=>{ if(live) setDrift(d); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId, quot && quot.updated_at]);
   React.useEffect(()=>{ let live=true; if(quotationId) loadDealHistory(quotationId).then(h=>{ if(live) setHistory(h); }).catch(()=>{}); return ()=>{ live=false; }; },[quotationId, quot && quot.updated_at]);
@@ -202,7 +208,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     if(sharing||!quot) return;
     if(channel==='whatsapp' && !validClientPhone(quot.client_phone)){ notify("This client's phone number looks invalid — please update it before sharing on WhatsApp.",'error'); return; }
     if((channel==='gmail'||channel==='email') && !quot.client_email){ notify('This client has no email address on file.','error'); return; }
-    if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. Send it to the client anyway?')) return;
+    if((parseFloat(quot.grand_total)||0)<=0 && !await confirmDialog('This quote total is ₹0 — no prices are set yet. Send it to the client anyway?')) return;
     setSharing(true);
     notify('Preparing the quotation PDF…','info',2500);
     const url = await uploadQuotePdf(await withSchedule(quot), items, displayOpts, qSettings, {showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
@@ -218,7 +224,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
   const withSchedule = (q) => (schedule.length ? { ...q, event_schedule: schedule } : q);
   const doExport = async (action) => {
     if(!quot) return;
-    if((parseFloat(quot.grand_total)||0)<=0 && !window.confirm('This quote total is ₹0 — no prices are set yet. '+(action==='download'?'Download':action==='print'?'Print':'Open')+' it anyway?')) return;
+    if((parseFloat(quot.grand_total)||0)<=0 && !await confirmDialog('This quote total is ₹0 — no prices are set yet. '+(action==='download'?'Download':action==='print'?'Print':'Open')+' it anyway?')) return;
     const q2 = await withSchedule(quot);
     const qrBase64 = (displayOpts.bankDetails && qSettings.payment_qr_path) ? await fetchAsBase64(qSettings.payment_qr_path) : null;
     buildQuotationPDF(q2, items, {action, displayOpts, settings:qSettings, qrBase64, showRevisionHistory: includeRevHistory && (quot.revision_number||0)>0, revisionHistory: revHistory});
@@ -246,7 +252,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     }
     // Client/RFQ-origin (no lead, no event): create the event directly from the quote + client.
     if(quot.client_id){
-      if(!window.confirm('Confirm this quote and create the event?\n\nThis creates the event from the quote items and a draft invoice.')) return;
+      if(!await confirmDialog('Confirm this quote and create the event?\n\nThis creates the event from the quote items and a draft invoice.')) return;
       setConfirming(true);
       try{
         const {data:c}=await supabase.from('clients').select('first_name,last_name,phone_1,phone_2,email_1,source').eq('client_id',quot.client_id).maybeSingle();
@@ -296,14 +302,13 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
     } catch (e) { return 'approval.html?t=' + token; }
   };
   const doRequestApproval = async () => {
-    if (!approvalPin || approvalPin.length < 4 || approvalPin.length > 6 || !/^\d+$/.test(approvalPin)) {
-      notify('Enter a 4–6 digit numeric PIN.', 'error'); return;
-    }
     setRequestingApproval(true);
     try {
+      const pin = genRfqPin();
+      setApprovalPin(pin);
       const arr = new Uint8Array(16); crypto.getRandomValues(arr);
       const token = [...arr].map(b => b.toString(16).padStart(2, '0')).join('');
-      const [tokenHash, pinHash] = await Promise.all([sha256Hex(token), sha256Hex(approvalPin)]);
+      const [tokenHash, pinHash] = await Promise.all([sha256Hex(token), sha256Hex(pin)]);
       const { error } = await supabase.from('quotations').update({
         approval_status: 'pending',
         approval_token_hash: tokenHash,
@@ -431,7 +436,8 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
         </div>
         {quoteUnpriced && quot.status==='draft' && <div style={{fontSize:12,color:'var(--grey-600)',marginTop:12,background:'var(--grey-50)',border:'1px solid var(--grey-100)',borderRadius:'var(--radius-sm)',padding:'8px 12px'}}>💡 <b>No prices yet.</b> Use <b>Edit quotation</b> to price in-house{(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') ? <>, or <b>Source vendors →</b> to price from vendor bids</> : ''}.</div>}
         <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:14}}>
-          {quot.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:quot.client_id,label:quot.client_name||'Client'})}>👤 View client →</button>}
+          {quot.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>setMsgParty({ type: 'client', id: quot.client_id })}>💬 Message client</button>}
+          {msgParty && <SendMessageModal party={msgParty} onClose={() => setMsgParty(null)} />}
           {(import.meta.env && import.meta.env.VITE_ENABLE_VENDOR_RFQ==='true') && !['rejected','superseded','expired'].includes(quot.status) && !eventCancelled && !(srcEvent && (srcEvent.status||'').toLowerCase()==='completed') && <button className={"btn sm"+(quoteUnpriced?' primary':'')} disabled={sourcing} title={sourced?'Review the vendor RFQs and costing for this quote':'Send vendor RFQs and price this quote via the costing screen'} onClick={openSourcing}>{sourcing?'Starting…':(sourced?'🔍 Review sourcing →':'🔧 Source vendors →')}</button>}
           {editable&&<button className="btn sm primary" onClick={launchEdit}>✏️ {quot.status==='draft'?'Edit quotation':'Revise'}</button>}
           {!editable&&invoiceIssued&&<span style={{fontSize:12,color:'var(--grey-400)',display:'inline-flex',alignItems:'center'}} title="An invoice has been issued for this event — revise the invoice instead.">🔒 Invoice issued — revise the invoice</span>}
@@ -439,7 +445,7 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           {quot.event_id&&<button className="btn sm" onClick={()=>onNavigate&&onNavigate('events',{eventId:quot.event_id,label:quot.event_name||'Event'})}>Go to event →</button>}
           {!quot.event_id&&!['rejected','converted','expired','superseded'].includes(quot.status)&&<button className="btn sm" style={{color:'var(--red)',borderColor:'rgba(163,45,45,0.3)'}} onClick={()=>{setCloseForm({outcome:'client',reason:'',notes:''});setShowClose(true);}} title="Client declined or we can't fulfil — close this quote">✕ Close — not proceeding</button>}
           {['sent','approved','draft'].includes(quot.status)&&quot.approval_status==='pending'&&<button className="btn sm" disabled style={{color:'var(--grey-400)',borderColor:'var(--grey-200)',cursor:'not-allowed'}}>🔏 Awaiting client approval</button>}
-          {['sent','approved','draft'].includes(quot.status)&&(!quot.approval_status||quot.approval_status==='declined')&&<button className="btn sm" disabled={quoteUnpriced} title={quoteUnpriced?'Add prices before requesting approval — this quote total is ₹0':''} style={quoteUnpriced?{color:'var(--grey-400)',borderColor:'var(--grey-200)',cursor:'not-allowed'}:{color:'var(--pink)',borderColor:'var(--pink)'}} onClick={()=>{setApprovalPin('');setApprovalLink('');setShowApprovalModal(true);}}>🔏 Request Approval</button>}
+          {['sent','approved','draft'].includes(quot.status)&&(!quot.approval_status||quot.approval_status==='declined')&&<button className="btn sm" disabled={quoteUnpriced} title={quoteUnpriced?'Add prices before requesting approval — this quote total is ₹0':''} style={quoteUnpriced?{color:'var(--grey-400)',borderColor:'var(--grey-200)',cursor:'not-allowed'}:{color:'var(--pink)',borderColor:'var(--pink)'}} onClick={()=>{setApprovalPin('');setApprovalLink('');setShowApprovalModal(true);doRequestApproval();}}>🔏 Request Approval</button>}
         </div>
       </div>
 
@@ -452,31 +458,31 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
       {invoiceIssued&&<div style={{padding:'8px 12px',marginBottom:16,background:'var(--orange-light)',color:'var(--orange)',borderRadius:'var(--radius-sm)',fontSize:12}}>🔒 An invoice has been issued — this quote is locked. To change scope or pricing, revise the invoice.</div>}
 
       {/* What the client sees + share/export */}
-      <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-lg)',padding:'14px 18px',marginBottom:16}}>
-        <div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:8}}>What the client sees</div>
-        <div style={{display:'flex',gap:6,marginBottom:10,flexWrap:'wrap'}}>
-          {[['full','Full detail'],['items','Items only'],['summary','Summary only']].map(([k,l])=>{
-            const active=(k==='full'&&displayOpts.prices)||(k==='items'&&!displayOpts.prices&&displayOpts.qty)||(k==='summary'&&!displayOpts.prices&&!displayOpts.qty);
-            return <button key={k} onClick={()=>applyPreset(k)} className="btn sm" style={{fontSize:11,flex:1,minWidth:90,background:active?'var(--pink)':'white',color:active?'white':'var(--grey-600)',border:'1px solid var(--grey-200)'}}>{l}</button>;
-          })}
-        </div>
-        <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:12}}>
-          {[['prices','Prices'],['qty','Quantities'],['grouping','Sub-event grouping'],['schedule','Payment schedule'],['discount','Discount'],['coverPage','Cover page'],['bankDetails','Bank details']].map(([k,l])=>(
-            <label key={k} style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}>
-              <input type="checkbox" checked={!!displayOpts[k]} onChange={e=>setDO(k,e.target.checked)} style={{accentColor:'var(--pink)'}}/>{l}
-            </label>
-          ))}
-          {(quot.revision_number||0)>0&&<label style={{display:'flex',alignItems:'center',gap:5,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}><input type="checkbox" checked={includeRevHistory} onChange={e=>setIncludeRevHistory(e.target.checked)} style={{accentColor:'var(--pink)'}}/>Revision history</label>}
-        </div>
-        <div style={{borderTop:'1px solid var(--grey-200)',paddingTop:12,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-          <span style={{fontSize:11,color:quoteUnpriced?'var(--red)':'var(--grey-400)',marginRight:'auto'}}>{histClosed?'Closed — print/download only (sending disabled):':(quoteUnpriced?'⚠ This quote has no prices yet (₹0). Add prices before sharing — client sending is disabled.':'Share / export (uses the toggles above):')}</span>
-          <button className="btn sm" disabled={sharing||histClosed||quoteUnpriced} title={quoteUnpriced?'Add prices first — this quote total is ₹0':(histClosed?'This quote is closed — sending is disabled':'')} onClick={()=>doShare('whatsapp')}>💬 WhatsApp</button>
-          <button className="btn sm" disabled={sharing||histClosed||quoteUnpriced} title={quoteUnpriced?'Add prices first — this quote total is ₹0':(histClosed?'This quote is closed — sending is disabled':'')} onClick={()=>doShare('gmail')}>Gmail</button>
-          <button className="btn sm" disabled={sharing||histClosed||quoteUnpriced} title={quoteUnpriced?'Add prices first — this quote total is ₹0':(histClosed?'This quote is closed — sending is disabled':'')} onClick={()=>doShare('email')}>Email</button>
-          <button className="btn sm" onClick={()=>doExport('print')}>Print</button>
-          <button className="btn sm primary" onClick={()=>doExport('download')}>⬇ Download PDF</button>
-        </div>
-      </div>
+      <ClientViewControls
+        title="What the client sees"
+        subtitle="Controls the shared quotation PDF"
+        modes={[{ key: 'full', label: 'Full detail' }, { key: 'items', label: 'Items only' }, { key: 'summary', label: 'Summary only' }]}
+        activeMode={displayOpts.prices ? 'full' : (displayOpts.qty ? 'items' : 'summary')}
+        onMode={(k) => applyPreset(k)}
+        toggles={[
+          { key: 'prices', label: 'Prices', checked: !!displayOpts.prices, onChange: (v) => setDO('prices', v) },
+          { key: 'qty', label: 'Quantities', checked: !!displayOpts.qty, onChange: (v) => setDO('qty', v) },
+          { key: 'grouping', label: 'Sub-event grouping', checked: !!displayOpts.grouping, onChange: (v) => setDO('grouping', v) },
+          { key: 'schedule', label: 'Payment schedule', checked: !!displayOpts.schedule, onChange: (v) => setDO('schedule', v) },
+          { key: 'discount', label: 'Discount', checked: !!displayOpts.discount, onChange: (v) => setDO('discount', v) },
+          { key: 'coverPage', label: 'Cover page', checked: !!displayOpts.coverPage, onChange: (v) => setDO('coverPage', v) },
+          { key: 'bankDetails', label: 'Bank details', checked: !!displayOpts.bankDetails, onChange: (v) => setDO('bankDetails', v) },
+          ...(((quot.revision_number || 0) > 0) ? [{ key: 'revHistory', label: 'Revision history', checked: includeRevHistory, onChange: (v) => setIncludeRevHistory(v) }] : []),
+        ]}
+        notice={{ text: histClosed ? 'Closed \u2014 print/download only (sending disabled)' : (quoteUnpriced ? '\u26a0 This quote has no prices yet (\u20b90). Add prices before sharing \u2014 sending is disabled.' : 'Share / export \u2014 uses the toggles above'), tone: quoteUnpriced ? 'warn' : 'muted' }}
+        share={[
+          { key: 'whatsapp', label: 'WhatsApp', icon: 'whatsapp', onClick: () => doShare('whatsapp'), disabled: sharing || histClosed || quoteUnpriced, title: quoteUnpriced ? 'Add prices first \u2014 this quote total is \u20b90' : (histClosed ? 'This quote is closed \u2014 sending is disabled' : '') },
+          { key: 'gmail', label: 'Gmail', icon: 'mail', onClick: () => doShare('gmail'), disabled: sharing || histClosed || quoteUnpriced, title: quoteUnpriced ? 'Add prices first \u2014 this quote total is \u20b90' : (histClosed ? 'This quote is closed \u2014 sending is disabled' : '') },
+          { key: 'email', label: 'Email', icon: 'mail', onClick: () => doShare('email'), disabled: sharing || histClosed || quoteUnpriced, title: quoteUnpriced ? 'Add prices first \u2014 this quote total is \u20b90' : (histClosed ? 'This quote is closed \u2014 sending is disabled' : '') },
+          { key: 'print', label: 'Print', icon: 'printer', onClick: () => doExport('print') },
+          { key: 'download', label: 'Download PDF', icon: 'download', onClick: () => doExport('download'), primary: true },
+        ]}
+      />
 
       {/* Event schedule (functions · dates · venues) */}
       {schedule.length>0&&(
@@ -594,15 +600,9 @@ function QuotationDetail({quotationId, onBack, onNavigate}) {
           <div style={{background:'white',borderRadius:'var(--radius-xl)',width:'100%',maxWidth:460}}>
             <div style={{padding:'14px 20px',borderBottom:'1px solid var(--grey-100)',fontSize:15,fontWeight:600,color:'var(--grey-800)'}}>🔏 Request client approval <span style={{fontSize:12,fontWeight:400,color:'var(--grey-400)'}}>· {quot.ref_number}</span></div>
             <div style={{padding:20}}>
-              {!approvalLink&&(<>
-                <div style={{fontSize:13,color:'var(--grey-500)',marginBottom:14}}>Set a PIN the client will use to access and sign the approval page. Share the link via WhatsApp after generating.</div>
-                <label style={{fontSize:12,fontWeight:600,color:'var(--grey-700)',display:'block',marginBottom:6}}>PIN (4–6 digits) <span style={{color:'var(--pink)'}}>*</span></label>
-                <input type="text" inputMode="numeric" maxLength={6} placeholder="e.g. 1234" value={approvalPin} onChange={e=>setApprovalPin(e.target.value.replace(/\D/g,''))} style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--grey-200)',borderRadius:'var(--radius-md)',fontSize:15,fontFamily:'inherit',letterSpacing:4,textAlign:'center',marginBottom:16}}/>
-                <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
-                  <button className="btn sm" onClick={()=>setShowApprovalModal(false)}>Cancel</button>
-                  <button className="btn sm primary" disabled={requestingApproval||approvalPin.length<4} onClick={doRequestApproval}>{requestingApproval?'Generating…':'Generate approval link'}</button>
-                </div>
-              </>)}
+              {!approvalLink&&(
+                <div style={{fontSize:13,color:'var(--grey-500)',padding:'14px 0',textAlign:'center'}}>{requestingApproval?'Generating approval link…':'Preparing…'}</div>
+              )}
               {approvalLink&&(<>
                 <div style={{fontSize:13,color:'var(--green)',fontWeight:600,marginBottom:8}}>✅ Approval link ready</div>
                 <div style={{fontSize:12,color:'var(--grey-500)',marginBottom:8}}>Share this link and PIN <b>{approvalPin}</b> with the client:</div>

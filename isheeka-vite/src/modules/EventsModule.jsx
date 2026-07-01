@@ -20,12 +20,14 @@ import { addEventVendor, recordVendorPayment, recordVendorRefund, recordClientRe
 import { loadCostingVendorSuggestion } from '../lib/costing.js';
 import { InputField, SelectField, AutocompleteInput, fetchSuggestions } from '../components/fields.jsx';
 import { ClientLink, VendorLink } from '../components/links.jsx';
+import { SendMessageModal } from '../components/SendMessageModal.jsx';
 import { FastEntryTable, SubEventTplBtn } from '../components/ItemEntry.jsx';
 import { QuoteGenerationWizard } from '../components/QuoteWizard.jsx';
 import { readWorkbook } from '../lib/xlsxIO.js';
 import { ClientForm } from './ClientsModule.jsx';
 import { NewDealModal } from '../components/NewDealModal.jsx';
 import { ENFORCE_CANONICAL_PATH } from '../lib/deal.js';
+import { confirmDialog } from '../components/confirm.jsx';
 
 function ReadOnlyItems({ items }) {
   const list = Array.isArray(items) ? items.filter((it) => it && String(it.description || '').trim()) : [];
@@ -218,6 +220,7 @@ function EventFunnelBadge({funnel, compact}){
 function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const eventTypes = useEventTypes();
   const [event, setEvent] = React.useState(null);
+  const [msgParty, setMsgParty] = React.useState(null);
   const [subEvents, setSubEvents] = React.useState([]);
   const [checklist, setChecklist] = React.useState([]);
   const [quotations, setQuotations] = React.useState([]);
@@ -245,7 +248,9 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [instFor, setInstFor] = React.useState(null);
   const [instForm, setInstForm] = React.useState({id:null,label:'',amount:'',due_date:''});
   const [voidedPays, setVoidedPays] = React.useState([]);
+  const [railTick, setRailTick] = React.useState(0);
   const loadEventVendors = React.useCallback(async()=>{
+    setRailTick((t) => t + 1);
     const {data}=await supabase.from('event_vendors').select('*').eq('event_id',eventId).eq('is_deleted',false).order('created_at');
     const evs=data||[]; setEventVendors(evs);
     const ids=evs.map(v=>v.event_vendor_id);
@@ -330,7 +335,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   };
   const deleteInstallment=async(inst)=>{
     if((parseFloat(inst.amount_paid)||0)>0){ notify('This installment has payments against it — clear them before deleting.','error'); return; }
-    if(!window.confirm('Remove this installment from the schedule?')) return;
+    if(!await confirmDialog('Remove this installment from the schedule?')) return;
     const {error}=await runDb(supabase.from('vendor_installments').delete().eq('installment_id',inst.installment_id),'delete installment');
     if(!error){ notify('Installment removed.','success'); await loadEventVendors(); }
   };
@@ -358,7 +363,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [removeReason, setRemoveReason] = React.useState('');
   const removeEngage=async v=>{
     if((parseFloat(v.total_paid)||0)>0){ setRemoveReason(''); setRemoveReasonFor(v); return; }
-    if(!window.confirm('Remove '+(v.vendor_name||'this vendor')+' from this event?')) return;
+    if(!await confirmDialog('Remove '+(v.vendor_name||'this vendor')+' from this event?')) return;
     setVSaving(true);
     try{
       const insts=eventInstallments[v.event_vendor_id]||[];
@@ -409,12 +414,12 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   };
   const loadTemplateIntoEditSub = async (si, tpl) => {
     const se=editSubEvents[si];
-    if(se && (se.items||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace this sub-event’s items with the template?')) return;
+    if(se && (se.items||[]).some(i=>i.description&&i.description.trim()) && !await confirmDialog('Replace this sub-event’s items with the template?')) return;
     const items=await loadTplItems(tpl, (se&&se.name)||'');
     setEditSubEvents(s=>s.map((x,i)=>i===si?{...x,items}:x));
   };
   const loadTemplateIntoEditMain = async (tpl) => {
-    if((editMainItems||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace the main event items with the template?')) return;
+    if((editMainItems||[]).some(i=>i.description&&i.description.trim()) && !await confirmDialog('Replace the main event items with the template?')) return;
     const items=await loadTplItems(tpl, 'main');
     setEditMainItems(items);
   };
@@ -423,10 +428,11 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
   const [docChain, setDocChain] = React.useState(null);
   const [history, setHistory] = React.useState(null);
   const [histOpen, setHistOpen] = React.useState(false);
-  React.useEffect(()=>{ let live = true; if (eventId) resolveDocChain('event', eventId).then(d => { if (live) setDocChain(d); }).catch(()=>{}); return () => { live = false; }; }, [eventId]);
+  React.useEffect(()=>{ let live = true; if (eventId) resolveDocChain('event', eventId).then(d => { if (live) setDocChain(d); }).catch(()=>{}); return () => { live = false; }; }, [eventId, railTick]);
   React.useEffect(()=>{ let live=true; const q=(quotations||[]).find(x=>x.status!=='superseded')||(quotations||[])[0]; if(q&&q.quotation_id) loadDealHistory(q.quotation_id).then(h=>{ if(live) setHistory(h); }).catch(()=>{}); else if(live) setHistory([]); return ()=>{ live=false; }; }, [quotations]);
 
   const loadAll = async () => {
+    setRailTick((t) => t + 1);
     setLoading(true);
     setMode('view');
     const [
@@ -591,7 +597,7 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     if(!funnel.canComplete){ notify('Can’t complete yet — '+(funnel.blocker||'the client invoice isn’t fully paid.'),'error'); return; }
     const leadNote = linkedLead ? ('\n\nThis will also close the source lead '+(linkedLead.ref_number||'')+'.') : '';
     const vNote = funnel.vendorBalance>0 ? ('\n\nNote: ₹'+Math.round(funnel.vendorBalance).toLocaleString('en-IN')+' is still owed to vendors for this event. That won’t be blocked — settle it from the vendor section when ready.') : '';
-    if(!window.confirm('Mark this event as completed?'+leadNote+vNote+'\n\nUse this once the event has been delivered.')) return;
+    if(!await confirmDialog('Mark this event as completed?'+leadNote+vNote+'\n\nUse this once the event has been delivered.')) return;
     const {error:ese}=await runDb(supabase.from('events').update({status:'completed',updated_at:new Date().toISOString()}).eq('event_id',eventId),'mark event completed');
     if(ese) return;
     setEvent(ev=>({...ev,status:'completed'}));
@@ -669,14 +675,14 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
     }catch(err){ setCancelling(false); notify('Could not cancel the event: '+(err&&err.message?err.message:'try again'),'error'); }
   };
   const doReopenEvent = async () => {
-    if(!window.confirm('Reopen this event to Planning?\n\nVoided invoices and cleared vendor schedules are NOT auto-restored — you can regenerate them from the banner after reopening.')) return;
+    if(!await confirmDialog('Reopen this event to Planning?\n\nVoided invoices and cleared vendor schedules are NOT auto-restored — you can regenerate them from the banner after reopening.')) return;
     const {error}=await runDb(supabase.from('events').update({status:'planning',updated_at:new Date().toISOString()}).eq('event_id',eventId),'reopen event'); if(error) return;
     setEvent(ev=>({...ev,status:'planning'})); setRebuildDismissed(false);
     notify('Event reopened to Planning. Use the banner to regenerate what you need.','success');
   };
   // Undo an accidental/early completion → return the event to an active state (and reopen the source lead).
   const doReopenCompleted = async () => {
-    if(!window.confirm('Reopen this completed event?\n\nIt returns to an active state so you can edit it again.'+(linkedLead&&linkedLead.stage==='completed'?(' The source lead '+(linkedLead.ref_number||'')+' is reopened too.'):''))) return;
+    if(!await confirmDialog('Reopen this completed event?\n\nIt returns to an active state so you can edit it again.'+(linkedLead&&linkedLead.stage==='completed'?(' The source lead '+(linkedLead.ref_number||'')+' is reopened too.'):''))) return;
     const target = (event.main_date && event.main_date<=todayLocalStr()) ? 'in_progress' : 'confirmed';
     const {error:ese}=await runDb(supabase.from('events').update({status:target,updated_at:new Date().toISOString()}).eq('event_id',eventId),'reopen completed event'); if(ese) return;
     setEvent(ev=>({...ev,status:target}));
@@ -803,7 +809,8 @@ function EventDetail({eventId, onBack, onUseAsReference, onNavigate}) {
           {mode==='view' && <>
             <StatusBadge kind="event" status={event.status?.toLowerCase()} size="md" />
             {!['cancelled'].includes(event.status?.toLowerCase())&&<EventFunnelBadge funnel={event.status?.toLowerCase()==='completed'?{...funnel,label:null}:funnel}/>}
-            {event.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>onNavigate&&onNavigate('clients',{clientId:event.client_id,label:event.client_name||'Client'})}>👤 View client →</button>}
+            {event.client_id&&<button className="btn sm" title="Open this client's 360" onClick={()=>setMsgParty({ type: 'client', id: event.client_id })}>💬 Message client</button>}
+            {msgParty && <SendMessageModal party={msgParty} onClose={() => setMsgParty(null)} />}
             {!['completed','cancelled'].includes(event.status?.toLowerCase())&&(
               funnel.canComplete
                 ? <button className="btn sm" onClick={markEventCompleted} title="Client invoice fully paid — marks the event delivered and closes the source lead">✅ Mark completed</button>
@@ -1492,7 +1499,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
 
   const loadTemplate = async (tpl) => {
     if(subEvents.some(se=>se.items.length>0)||mainItems.length>0){
-      if(!window.confirm('Loading a template will replace current sub-events and items. Continue?')) return;
+      if(!await confirmDialog('Loading a template will replace current sub-events and items. Continue?')) return;
     }
     setShowTplMenu(false);
     const {data} = await supabase.from('event_template_items').select('*').eq('template_id',tpl.template_id).order('sub_event_name').order('sort_order');
@@ -1512,7 +1519,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
   // Load a template's items into ONE sub-event block (matched by sub-event name, else all template items).
   const loadTemplateIntoSubEvent = async (seId, tpl) => {
     const se = subEvents.find(s=>s.id===seId);
-    if(se && (se.items||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace this sub-event’s items with the template?')) return;
+    if(se && (se.items||[]).some(i=>i.description&&i.description.trim()) && !await confirmDialog('Replace this sub-event’s items with the template?')) return;
     const {data} = await supabase.from('event_template_items').select('*').eq('template_id',tpl.template_id).order('sort_order');
     if(!data) return;
     const seName=((se&&se.name)||'').trim().toLowerCase();
@@ -1525,7 +1532,7 @@ function NewEventWizard({onSave, onCancel, referenceEvent=null}) {
   };
   // Load a template's items into the Main event items block (Main Event group, else all template items).
   const loadTemplateIntoMain = async (tpl) => {
-    if((mainItems||[]).some(i=>i.description&&i.description.trim()) && !window.confirm('Replace the main event items with the template?')) return;
+    if((mainItems||[]).some(i=>i.description&&i.description.trim()) && !await confirmDialog('Replace the main event items with the template?')) return;
     const {data} = await supabase.from('event_template_items').select('*').eq('template_id',tpl.template_id).order('sort_order');
     if(!data) return;
     let src = data.filter(i=>(i.sub_event_name||'')==='Main Event');

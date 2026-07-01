@@ -8,6 +8,7 @@ import { fmtDate, todayLocalStr, EXPENSE_CAT_LABEL } from '../lib/format.js';
 import { waLink } from '../lib/share.js';
 import { openStoredFile } from '../lib/storage.js';
 import { loadOwnerData, reconcile, expenseReimbursements, addLedgerEntry, updateLedgerEntry, deleteLedgerEntry, uploadOwnerProof, buildStatementCsv } from '../lib/ownerAccount.js';
+import { confirmDialog } from '../components/confirm.jsx';
 
 const inr = (n) => '₹' + Math.round(n || 0).toLocaleString('en-IN');
 const MODES = [['', '—'], ['upi', 'UPI'], ['neft', 'Bank / NEFT'], ['cash', 'Cash'], ['cheque', 'Cheque'], ['card', 'Card'], ['other', 'Other']];
@@ -53,8 +54,8 @@ export function OwnerAccountModule({ onNavigate }) {
   const reimburseExpense = (e, st) => openType('reimbursement', { to_user: e.paid_by, amount: String(Math.round((st && st.remaining) || (parseFloat(e.amount) || 0))), expense_id: e.expense_id, _forExpenseNo: e.expense_no, _forExpenseDesc: e.description, _forRemaining: (st && st.remaining != null) ? st.remaining : (parseFloat(e.amount) || 0), notes: 'Reimbursement for ' + (e.expense_no || 'expense') });
 
   const openType = (type, preset) => setForm({ entry_type: type, entry_date: todayLocalStr(), amount: '', from_user: '', to_user: '', expense_id: '', attachment_url: '', _proofFile: null, _proofName: '', notify_wa: true, payment_mode: '', reference_number: '', notes: '', ...(preset || {}) });
-  const openEdit = (l) => {
-    if (l.entry_type === 'reimbursement' && l.expense_id) { const st = reimb[l.expense_id]; if (st && st.applicable && st.status === 'reimbursed' && !window.confirm('This reimbursement fully settled ' + (expNoMap[l.expense_id] || 'the expense') + '. Editing it will change the reconciliation. Edit anyway?')) return; }
+  const openEdit = async (l) => {
+    if (l.entry_type === 'reimbursement' && l.expense_id) { const st = reimb[l.expense_id]; if (st && st.applicable && st.status === 'reimbursed' && !await confirmDialog('This reimbursement fully settled ' + (expNoMap[l.expense_id] || 'the expense') + '. Editing it will change the reconciliation. Edit anyway?')) return; }
     setForm({ ledger_id: l.ledger_id, entry_no: l.entry_no || '', entry_type: l.entry_type, entry_date: l.entry_date, amount: String(l.amount || ''), from_user: l.from_user || '', to_user: l.to_user || '', expense_id: l.expense_id || '', attachment_url: l.attachment_url || '', _proofFile: null, _proofName: '', notify_wa: false, payment_mode: l.payment_mode || '', reference_number: l.reference_number || '', notes: l.notes || '' });
   };
   const setFf = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -98,7 +99,7 @@ export function OwnerAccountModule({ onNavigate }) {
     }
     notify(form.ledger_id ? 'Entry updated.' : 'Entry recorded.', 'success'); setForm(null); load();
   };
-  const removeEntry = async (l) => { if (!window.confirm('Delete this ' + (TYPE_META[l.entry_type] || {}).l + ' entry?')) return; const { error } = await deleteLedgerEntry(l.ledger_id); if (!error) { notify('Deleted.', 'success'); load(); } };
+  const removeEntry = async (l) => { if (!await confirmDialog('Delete this ' + (TYPE_META[l.entry_type] || {}).l + ' entry?')) return; const { error } = await deleteLedgerEntry(l.ledger_id); if (!error) { notify('Deleted.', 'success'); load(); } };
 
   const downloadStatement = () => {
     const csv = buildStatementCsv(owners, expenses, ledger);

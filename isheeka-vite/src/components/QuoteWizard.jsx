@@ -3,6 +3,7 @@
 // continue), and Events (EventDetail). 4-step flow: client → line items →
 // quote details → share. Item entry reuses the shared FastEntryTable.
 import React from 'react';
+import { ClientViewControls } from '../components/ClientViewControls.jsx';
 import { supabase } from '../lib/supabase';
 import { notify, runDb } from '../lib/toast.jsx';
 import { defaultEventName, eventTypeLabel } from '../lib/format.js';
@@ -13,6 +14,7 @@ import { buildQuotationPDF } from '../pdf/quotationPdf.js';
 import { fetchAsBase64 } from '../lib/storage.js';
 import { createInvoiceFromQuote } from '../lib/money.js';
 import { FastEntryTable } from './ItemEntry.jsx';
+import { confirmDialog } from './confirm.jsx';
 // Stable per-line lineage id (Phase 2c v2). Carried across revisions; minted for new lines.
 const newSrcId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : null;
 import { filesToPayloads, extractItems, extractErrMsg } from '../lib/staffExtract.js';
@@ -511,7 +513,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
           const {data:exInv}=await supabase.from('invoices').select('invoice_id,ref_number,status,total_received').eq('event_id',originEvent.eventId).eq('is_deleted',false).neq('status','cancelled').limit(1);
           const di=exInv&&exInv[0];
           if(di && (di.status||'').toLowerCase()==='draft' && (parseFloat(di.total_received)||0)<=0){
-            if(window.confirm('Update draft invoice '+di.ref_number+' to match this revision (₹'+Math.round(grandTotal).toLocaleString('en-IN')+')?\n\nThis refreshes its items, totals and schedule. The invoice is still a draft — nothing has been sent to the client.')){
+            if(await confirmDialog('Update draft invoice '+di.ref_number+' to match this revision (₹'+Math.round(grandTotal).toLocaleString('en-IN')+')?\n\nThis refreshes its items, totals and schedule. The invoice is still a draft — nothing has been sent to the client.')){
               await supabase.from('quotations').update({status:'approved',updated_at:new Date().toISOString()}).eq('quotation_id',newQ.quotation_id);
               newQ.status='approved';
               await createInvoiceFromQuote(newQ.quotation_id,{eventId:originEvent.eventId});
@@ -729,8 +731,8 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
                   <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10,paddingBottom:8,borderBottom:'1px solid var(--grey-200)'}}>
                     <div style={{width:8,height:8,borderRadius:'50%',background:'#e8185a',flexShrink:0}}/>
                     <QWSubEventNameInput value={block.name} onChange={v=>setSubEventBlocks(bs=>bs.map(b=>b.id===block.id?{...b,name:v}:b))}/>
-                    <QWTemplateSelect options={getTemplateOptions(block.name)} eventType={lead.event_type} onSelect={(tId,seName)=>{
-                      if(block.items&&block.items.length>0&&!window.confirm('Replace existing items with template?')) return;
+                    <QWTemplateSelect options={getTemplateOptions(block.name)} eventType={lead.event_type} onSelect={async (tId,seName)=>{
+                      if(block.items&&block.items.length>0&&!await confirmDialog('Replace existing items with template?')) return;
                       loadTemplateForBlock(block.id,tId,seName||block.name);
                     }}/>
                     {subEventBlocks.length>1&&<button style={{background:'none',border:'none',cursor:'pointer',color:'var(--red)',fontSize:14,flexShrink:0}} onClick={()=>setSubEventBlocks(bs=>bs.filter(b=>b.id!==block.id))}>X</button>}
@@ -820,7 +822,7 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
                 <label className="field-label">Or set final total <span style={{fontWeight:400,color:'var(--grey-400)'}}>(override — replaces discount; GST added on top for invoices)</span></label>
                 <input type="number" className="field-input" value={quotDetails.total_override}
                   onChange={e=>setQD('total_override',e.target.value)}
-                  onBlur={e=>{ const v=e.target.value; if(v!==''&&!isNaN(parseFloat(v))){ const tgt=parseFloat(v); if(Math.abs(tgt-subtotal)>0.5){ const adj=subtotal-tgt; if(!window.confirm('Set the total to ₹'+Math.round(tgt).toLocaleString('en-IN')+'?\n\nLine items add up to ₹'+Math.round(subtotal).toLocaleString('en-IN')+'. This applies a '+(adj>0?'−':'+')+'₹'+Math.round(Math.abs(adj)).toLocaleString('en-IN')+' adjustment.')){ setQD('total_override',''); } } } }}
+                  onBlur={async e=>{ const v=e.target.value; if(v!==''&&!isNaN(parseFloat(v))){ const tgt=parseFloat(v); if(Math.abs(tgt-subtotal)>0.5){ const adj=subtotal-tgt; if(!await confirmDialog('Set the total to ₹'+Math.round(tgt).toLocaleString('en-IN')+'?\n\nLine items add up to ₹'+Math.round(subtotal).toLocaleString('en-IN')+'. This applies a '+(adj>0?'−':'+')+'₹'+Math.round(Math.abs(adj)).toLocaleString('en-IN')+' adjustment.')){ setQD('total_override',''); } } } }}
                   placeholder={'Default ₹'+Math.round(subtotal).toLocaleString('en-IN')+' (line-items sum)'}/>
                 {overrideOn&&<div style={{marginTop:6,display:'flex',gap:8,alignItems:'center'}}>
                   <span style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:500,background:'var(--orange-light)',color:'var(--orange)'}}>Manual total · {discountAmt>=0?'−':'+'}₹{Math.round(Math.abs(discountAmt)).toLocaleString('en-IN')} adjustment</span>
@@ -887,29 +889,21 @@ export function QuoteGenerationWizard({lead, leadSubEvents, isRevision, isContin
               <div style={{fontSize:16,fontWeight:600,color:'var(--grey-800)',marginBottom:4}}>{isRevision?'Revised quotation created!':'Quotation created!'}</div>
               <div style={{fontSize:14,color:'var(--grey-400)',marginBottom:6}}>{createdQuot.ref_number} — Rs.{parseFloat(createdQuot.grand_total||0).toLocaleString('en-IN')}</div>
               <div style={{fontSize:13,color:'var(--grey-400)',marginBottom:24}}>Share with {lead.first_name}, then mark it as sent.{(!originEvent && lead && lead.lead_id)?' This updates the lead stage.':''}</div>
-              <div style={{background:'var(--grey-50)',borderRadius:'var(--radius-md)',padding:'14px 16px',marginBottom:16,textAlign:'left'}}>
-                <div style={{fontSize:12,fontWeight:600,color:'var(--grey-800)',marginBottom:10}}>What the client sees</div>
-                <div style={{display:'flex',gap:6,marginBottom:12}}>
-                  {[['full','Full detail'],['items','Items only (recommended)'],['summary','Summary only']].map(([k,l])=>(
-                    <button key={k} onClick={()=>applyPreset(k)} className="btn sm"
-                      style={{fontSize:11,flex:1,background:
-                        (k==='full'&&displayOpts.prices&&displayOpts.qty&&displayOpts.schedule)?'var(--pink)':
-                        (k==='items'&&!displayOpts.prices&&displayOpts.qty)?'var(--pink)':
-                        (k==='summary'&&!displayOpts.prices&&!displayOpts.qty&&!displayOpts.schedule)?'var(--pink)':'white',
-                        color:(k==='full'&&displayOpts.prices&&displayOpts.qty&&displayOpts.schedule)||
-                              (k==='items'&&!displayOpts.prices&&displayOpts.qty)||
-                              (k==='summary'&&!displayOpts.prices&&!displayOpts.qty&&!displayOpts.schedule)?'white':'var(--grey-600)',
-                        border:'1px solid var(--grey-200)'}}>{l}</button>
-                  ))}
-                </div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
-                  {[['prices','Show item prices'],['qty','Show quantities'],['grouping','Show sub-event grouping'],['schedule','Show payment schedule'],['discount','Show discount'],['coverPage','Include cover page'],['bankDetails','Show bank details']].map(([k,l])=>(
-                    <label key={k} style={{display:'flex',alignItems:'center',gap:6,fontSize:12,color:'var(--grey-700)',cursor:'pointer'}}>
-                      <input type="checkbox" checked={!!displayOpts[k]} onChange={e=>setDO(k,e.target.checked)} style={{accentColor:'var(--pink)'}}/>{l}
-                    </label>
-                  ))}
-                </div>
-              </div>
+              <ClientViewControls
+                title="What the client sees"
+                modes={[{ key: 'full', label: 'Full detail' }, { key: 'items', label: 'Items only (recommended)' }, { key: 'summary', label: 'Summary only' }]}
+                activeMode={(displayOpts.prices && displayOpts.qty && displayOpts.schedule) ? 'full' : ((!displayOpts.prices && displayOpts.qty) ? 'items' : ((!displayOpts.prices && !displayOpts.qty && !displayOpts.schedule) ? 'summary' : null))}
+                onMode={(k) => applyPreset(k)}
+                toggles={[
+                  { key: 'prices', label: 'Show item prices', checked: !!displayOpts.prices, onChange: (v) => setDO('prices', v) },
+                  { key: 'qty', label: 'Show quantities', checked: !!displayOpts.qty, onChange: (v) => setDO('qty', v) },
+                  { key: 'grouping', label: 'Show sub-event grouping', checked: !!displayOpts.grouping, onChange: (v) => setDO('grouping', v) },
+                  { key: 'schedule', label: 'Show payment schedule', checked: !!displayOpts.schedule, onChange: (v) => setDO('schedule', v) },
+                  { key: 'discount', label: 'Show discount', checked: !!displayOpts.discount, onChange: (v) => setDO('discount', v) },
+                  { key: 'coverPage', label: 'Include cover page', checked: !!displayOpts.coverPage, onChange: (v) => setDO('coverPage', v) },
+                  { key: 'bankDetails', label: 'Show bank details', checked: !!displayOpts.bankDetails, onChange: (v) => setDO('bankDetails', v) },
+                ]}
+              />
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,maxWidth:420,margin:'0 auto 10px'}}>
                 <button className="btn" style={{padding:'12px 16px'}} onClick={handleWhatsApp}>
                   <div style={{fontSize:13,fontWeight:500}}>Share via WhatsApp</div>

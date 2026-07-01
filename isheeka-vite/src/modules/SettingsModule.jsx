@@ -10,6 +10,7 @@ import { eventTypeLabel } from '../lib/format.js';
 import { slugify, normalizeName, bestNameMatch, SIMILAR_THRESHOLD } from '../lib/fuzzy.js';
 import { MODULE_SECTIONS, GRANTABLE, defaultAccessForRole } from '../lib/access.js';
 import { NOTIF_EVENTS, NOTIF_CHANNELS, resolvedPrefs } from '../lib/notifyPrefs.js';
+import { confirmDialog } from '../components/confirm.jsx';
 
 // Stable inputs for template editor
 function TplNameInput({ value, onChange }) {
@@ -318,7 +319,7 @@ function TemplatesTab() {
   };
 
   const handleArchive = async (tpl) => {
-    if (!window.confirm(`Archive "${tpl.name}"? It will no longer appear in the Events wizard but can be restored.`)) return;
+    if (!await confirmDialog(`Archive "${tpl.name}"? It will no longer appear in the Events wizard but can be restored.`)) return;
     const { error: tae } = await runDb(supabase.from('event_templates').update({ is_active: false, updated_at: new Date().toISOString() }).eq('template_id', tpl.template_id), 'archive template');
     if (tae) return;
     loadTemplates();
@@ -545,7 +546,7 @@ function LeadSourcesTab() {
   };
 
   const handleDelete = async (src) => {
-    if (!window.confirm('Delete "' + src.label + '"? It will be removed from the dropdown. Existing leads keep their recorded source. (Use "Inactive" instead if you only want to hide it.)')) return;
+    if (!await confirmDialog('Delete "' + src.label + '"? It will be removed from the dropdown. Existing leads keep their recorded source. (Use "Inactive" instead if you only want to hide it.)')) return;
     const { error } = await runDb(supabase.from('lead_sources').delete().eq('source_id', src.source_id), 'delete lead source');
     if (error) return;
     await loadSources(); clearLeadSourcesCache();
@@ -611,7 +612,7 @@ function SubEventEditor({ eventTypeId }) {
   const load = async () => { setLoading(true); const { data } = await supabase.from('event_type_subevents').select('*').eq('event_type_id', eventTypeId).order('name'); setSubs(data || []); setLoading(false); };
   React.useEffect(() => { load(); }, [eventTypeId]);
   const add = async () => { const n = val.trim(); if (!n) return; if (subs.some((s) => (s.name || '').toLowerCase() === n.toLowerCase())) { notify('That function already exists.', 'error'); return; } const { error } = await runDb(supabase.from('event_type_subevents').insert({ event_type_id: eventTypeId, name: n, sort_order: subs.length, is_active: true }), 'add function'); if (error) return; setVal(''); load(); };
-  const remove = async (s) => { if (!window.confirm('Remove "' + s.name + '"?')) return; const { error } = await runDb(supabase.from('event_type_subevents').delete().eq('subevent_id', s.subevent_id), 'remove function'); if (error) return; load(); };
+  const remove = async (s) => { if (!await confirmDialog('Remove "' + s.name + '"?')) return; const { error } = await runDb(supabase.from('event_type_subevents').delete().eq('subevent_id', s.subevent_id), 'remove function'); if (error) return; load(); };
   const toggle = async (s) => { const { error } = await runDb(supabase.from('event_type_subevents').update({ is_active: !s.is_active }).eq('subevent_id', s.subevent_id), 'update function'); if (error) return; load(); };
   const moveUp = async (i) => { if (i === 0) return; const a = subs[i], b = subs[i - 1]; await runDb(supabase.from('event_type_subevents').update({ sort_order: b.sort_order }).eq('subevent_id', a.subevent_id), 'reorder'); await runDb(supabase.from('event_type_subevents').update({ sort_order: a.sort_order }).eq('subevent_id', b.subevent_id), 'reorder'); load(); };
   return (
@@ -668,7 +669,7 @@ function EventTypesTab() {
   };
 
   const handleDelete = async (t) => {
-    if (!window.confirm('Delete "' + t.label + '" and its functions (sub-events)? Existing leads/events keep their recorded type. (Use "Inactive" instead if you only want to hide it.)')) return;
+    if (!await confirmDialog('Delete "' + t.label + '" and its functions (sub-events)? Existing leads/events keep their recorded type. (Use "Inactive" instead if you only want to hide it.)')) return;
     try { await supabase.from('event_type_subevents').delete().eq('event_type_id', t.event_type_id); } catch (e) { /* table optional */ }
     const { error } = await runDb(supabase.from('event_types').delete().eq('event_type_id', t.event_type_id), 'delete event type');
     if (error) return;
